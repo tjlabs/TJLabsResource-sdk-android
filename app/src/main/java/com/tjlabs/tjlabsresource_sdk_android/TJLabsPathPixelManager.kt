@@ -173,12 +173,12 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
             if (file.exists()) {
                 fivalext = file.readText()
             }
-            return parseRoad(fivalext)
+            return parsePathPixelData(fivalext)
         }
         return PathPixelData()
     }
 
-    private fun parseRoad(data: String): PathPixelData {
+    private fun parsePathPixelData(data: String): PathPixelData {
         val roadType = mutableListOf<Int>()
         val nodeNumber = mutableListOf<Int>()
         val roadScale = mutableListOf<Float>()
