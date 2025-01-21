@@ -3,7 +3,7 @@ package com.tjlabs.tjlabsresource_sdk_android
 import retrofit2.Call
 import retrofit2.http.*
 
-interface PostInput {
+internal interface PostInput {
     @Headers(
         "accept: application/json",
         "content-type: application/json"
