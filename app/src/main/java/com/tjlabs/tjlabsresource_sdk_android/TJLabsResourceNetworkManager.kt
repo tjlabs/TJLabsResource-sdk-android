@@ -4,7 +4,7 @@ import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 
- object TJLabsResourceNetworkManager {
+internal object TJLabsResourceNetworkManager {
     fun postPathPixel(url : String, input : InputSector, pathPixelServerVersion: String, completion: (Int, OutputPathPixel) -> Unit) {
         val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
         val postGeofence = retrofit.create(PostInput::class.java)

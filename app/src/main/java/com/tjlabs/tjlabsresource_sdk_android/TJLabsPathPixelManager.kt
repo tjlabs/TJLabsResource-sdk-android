@@ -21,7 +21,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
+internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
     private val ppDataMap : MutableMap<String, PathPixelData> = mutableMapOf()
 
     fun returnPathPixelData() : MutableMap<String, PathPixelData> {

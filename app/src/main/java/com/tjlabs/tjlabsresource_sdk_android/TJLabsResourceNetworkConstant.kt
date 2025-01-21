@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 
 const val TIMEOUT_VALUE_PUT = 5L
 
-object TJLabsResourceNetworkConstant {
+internal object TJLabsResourceNetworkConstant {
     fun genRetrofit(url : String) : Retrofit {
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)

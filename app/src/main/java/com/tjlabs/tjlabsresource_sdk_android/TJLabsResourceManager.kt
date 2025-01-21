@@ -41,9 +41,8 @@ class TJLabsResourceManager(private val application: Application) {
 
     fun updateResources(region: String, sectorId: Int, completion : (Boolean, String) -> Unit) {
         // 1. 서버에 해당 섹터가 어떤 서비스를 가지고 있는지 요청하기
-        // 1-1 섹터의 빌딩 - 레벨 정보 가져오기
         // 2. SharedPref에 저징된 리소스별 버젼을 통해 업데이트 필요한 리소스 확인하기
-        // 4, 서버 요청 및 버젼 업데이트 및 저장
+        // 3. 서버 요청 및 버젼 업데이트 및 저장
         TJLabsResourceNetworkConstant.setServerURL(region)
         val sectorServiceList = getSectorServiceFromServer(region, sectorId) // 됐다고 가정
         for (service in sectorServiceList) {
