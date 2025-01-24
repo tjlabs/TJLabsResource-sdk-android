@@ -19,15 +19,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         val tjLabsResourceManager = TJLabsResourceManager(application)
-        tjLabsResourceManager.updateResources(TJLabsResourceManager.REGION_KOREA, 6) {
+        tjLabsResourceManager.updateResources(JupiterRegion.KOREA, 6) {
             isSucess, msg ->
             if (isSucess) {
-                val temp = tjLabsResourceManager.returnPathPixelData()
+                val temp = TJLabsResourceManager.ppDataMap
                 Log.d("PathPixelDataCheck", temp.keys.toString())
                 Log.d("PathPixelDataCheck", temp.toString())
             }
         }
-
-
     }
 }
