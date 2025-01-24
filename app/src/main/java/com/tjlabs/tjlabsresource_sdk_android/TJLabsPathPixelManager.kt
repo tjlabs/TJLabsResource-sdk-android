@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.PATH_PIXEL_KEY_NAME
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceDirInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceVersionFromPrefs
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.ppDataMap
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.saveResourceDirInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.saveResourceVersionInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getPathPixelServerVersion
@@ -21,13 +22,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
-    private val ppDataMap : MutableMap<String, PathPixelData> = mutableMapOf()
-
-    fun returnPathPixelData() : MutableMap<String, PathPixelData> {
-        return ppDataMap
-    }
-
+class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
     fun updatePathPixel(region: String, sectorId: Int, completion: (Boolean, String) -> Unit) {
         //1. path pixel의 버젼을 확인
         //2. 저장되어 있는 버젼과 일치하면 업데이트 x
@@ -127,7 +122,7 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
                     for (element in pathInfo) {
                         val buildingName = element.building_name
                         val levelName = element.level_name
-                        val key = "${region}_${input.sector_id}_${buildingName}_${levelName}_${PATH_PIXEL_KEY_NAME}"
+                        val key = "${region}_${input.sector_id}_${buildingName}_${levelName}"
                         val ppUrl = element.url
                         sectorPathPixelInfo[key] = ppUrl
                     }
