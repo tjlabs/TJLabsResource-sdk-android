@@ -23,3 +23,15 @@ internal data class PathPixel(
 internal data class OutputPathPixel(
     val path_pixel_list : List<PathPixel> = listOf()
 )
+
+data class JupiterRegion(
+    val KOREA : String,
+    val US : String ,
+    val CANADA : String
+) {
+    companion object {
+        val KOREA : String = "Korea"
+        val US : String = "US"
+        val CANADA : String = "Canada"
+    }
+}
