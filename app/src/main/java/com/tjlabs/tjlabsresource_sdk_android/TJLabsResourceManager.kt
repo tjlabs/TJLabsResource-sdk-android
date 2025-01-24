@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 
+
+const val PATH_PIXEL_KEY_NAME = "path-pixel"
+
 class TJLabsResourceManager(private val application: Application) {
     //TODO() 네트워크 상황 고려하여 진행 및 다운로드 요청
     private val sharedPrefs: SharedPreferences = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
@@ -12,29 +15,28 @@ class TJLabsResourceManager(private val application: Application) {
     private var sectorId = 0
 
     companion object {
-        const val SERVICE_NAVI = "navigation"
-        const val SERVICE_MAP = "map"
-        const val PATH_PIXEL_KEY_NAME = "path-pixel"
+        private const val SERVICE_NAVI = "navigation"
+        private const val SERVICE_MAP = "map"
         val ppDataMap : MutableMap<String, PathPixelData> = mutableMapOf()
 
-        fun getResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String) : String? {
-            val prefKey = "${key}_dir"
+        internal fun getResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String, resourceName : String) : String? {
+            val prefKey = "${key}_${resourceName}_dir"
             return sharedPrefs.getString(prefKey, null)
         }
 
-        fun getResourceVersionFromPrefs(sharedPrefs: SharedPreferences, key : String) : String? {
-            val prefKey = "${key}_version"
+        internal fun getResourceVersionFromPrefs(sharedPrefs: SharedPreferences, key : String, resourceName : String) : String? {
+            val prefKey = "${key}_${resourceName}_version"
             return sharedPrefs.getString(prefKey, null)
         }
 
-        fun saveResourceVersionInPrefs(sharedPrefs: SharedPreferences, key : String, resourceVersion: String
+        internal fun saveResourceVersionInPrefs(sharedPrefs: SharedPreferences, key : String, resourceName : String, resourceVersion: String
         ) {
-            val prefKey = "${key}_version"
+            val prefKey = "${key}_${resourceName}_version"
             sharedPrefs.edit().putString(prefKey, resourceVersion).apply()
         }
 
-        fun saveResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String, fileDir : String) {
-            val prefKey = "${key}_dir"
+        internal fun saveResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String, fileDir : String, resourceName : String) {
+            val prefKey = "${key}_${resourceName}_dir"
             sharedPrefs.edit().putString(prefKey, fileDir).apply()
         }
     }

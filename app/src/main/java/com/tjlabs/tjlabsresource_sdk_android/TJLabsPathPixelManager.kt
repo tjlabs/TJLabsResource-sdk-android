@@ -2,7 +2,6 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import android.app.Application
 import android.content.SharedPreferences
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.PATH_PIXEL_KEY_NAME
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceDirInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceVersionFromPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.ppDataMap
@@ -22,7 +21,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
+internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
     fun updatePathPixel(region: String, sectorId: Int, completion: (Boolean, String) -> Unit) {
         //1. path pixel의 버젼을 확인
         //2. 저장되어 있는 버젼과 일치하면 업데이트 x
@@ -33,11 +32,11 @@ class TJLabsPathPixelManager(private val application: Application, private val s
                 var successCount = 0
                 var failKeys = ""
                 for ((key, url) in sectorPathPixelInfo) {
-                    val pathPixelUrlInPrefs = getResourceVersionFromPrefs(sharedPrefs, key)
+                    val pathPixelUrlInPrefs = getResourceVersionFromPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
                     if (pathPixelUrlInPrefs != url) {
                         saveSectorPathPixelFromUrl(region, sectorId, key, url) { isSuccessSave, msgSave ->
                             if (isSuccessSave) {
-                                saveResourceVersionInPrefs(sharedPrefs, key, url)
+                                saveResourceVersionInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME, url)
                                 ppDataMap[key] = loaSectorPathPixelFromCache(key)
                                 successCount++
 
@@ -146,7 +145,7 @@ class TJLabsPathPixelManager(private val application: Application, private val s
             try {
                 val (file, dir, exception) = downloadCSVFile(URL(ppUrl), region,sectorId, "$key.csv")
                 if (file != null) {
-                    saveResourceDirInPrefs(sharedPrefs, key, dir)
+                    saveResourceDirInPrefs(sharedPrefs, key, dir, PATH_PIXEL_KEY_NAME)
                     completion(true, "")
                 } else {
                     if (exception != null) {
@@ -161,7 +160,7 @@ class TJLabsPathPixelManager(private val application: Application, private val s
     }
 
     private fun loaSectorPathPixelFromCache(key : String) : PathPixelData{
-        val loadedPpLocalUrl = getResourceDirInPrefs(sharedPrefs, key)
+        val loadedPpLocalUrl = getResourceDirInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
         if (!loadedPpLocalUrl.isNullOrEmpty()) {
             var fivalext = ""
             val file = File(loadedPpLocalUrl)
