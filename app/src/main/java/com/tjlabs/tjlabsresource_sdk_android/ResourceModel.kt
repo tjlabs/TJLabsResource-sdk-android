@@ -26,12 +26,12 @@ internal data class OutputPathPixel(
 
 data class JupiterRegion(
     val KOREA : String,
-    val US : String ,
+    val US_EAST : String,
     val CANADA : String
 ) {
     companion object {
         val KOREA : String = "Korea"
-        val US : String = "US"
+        val US_EAST : String = "US_EAST"
         val CANADA : String = "Canada"
     }
 }

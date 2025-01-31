@@ -44,15 +44,15 @@ internal object TJLabsResourceNetworkConstant {
 
     fun setServerURL(region: String) {
         when (region) {
-            "Korea" -> {
+            JupiterRegion.KOREA -> {
                 REGION_PREFIX = "ap-northeast-2."
                 REGION_NAME = "Korea"
             }
-            "Canada" -> {
+            JupiterRegion.CANADA -> {
                 REGION_PREFIX = "ca-central-1."
                 REGION_NAME = "Canada"
             }
-            "US" -> {
+            JupiterRegion.US_EAST -> {
                 REGION_PREFIX = "us-east-1."
                 REGION_NAME = "US"
             }
