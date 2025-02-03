@@ -2,6 +2,7 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import android.app.Application
 import android.content.SharedPreferences
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceDirInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceVersionFromPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.ppDataMap
@@ -22,7 +23,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
-    fun updatePathPixel(region: String, sectorId: Int, completion: (Boolean, String) -> Unit) {
+    fun loadPathPixel(region: String, sectorId: Int, completion: (Boolean, String) -> Unit) {
         //1. path pixel의 버젼을 확인
         //2. 저장되어 있는 버젼과 일치하면 업데이트 x
         //3. 저장되어 있는 버젼과 일치하지 않으면 서버로 부터 csv 파일을 읽어 저장
@@ -34,10 +35,10 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
                 for ((key, url) in sectorPathPixelInfo) {
                     val pathPixelUrlInPrefs = getResourceVersionFromPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
                     if (pathPixelUrlInPrefs != url) {
-                        saveSectorPathPixelFromUrl(region, sectorId, key, url) { isSuccessSave, msgSave ->
+                        saveSectorPathPixelFromUrl(application, region, sectorId, key, url) { isSuccessSave, msgSave ->
                             if (isSuccessSave) {
                                 saveResourceVersionInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME, url)
-                                ppDataMap[key] = loaSectorPathPixelFromCache(key)
+                                ppDataMap[key] = loadSectorPathPixelFromCache(key)
                                 successCount++
 
                                 if (successCount == sectorPathPixelInfo.size) {
@@ -52,7 +53,7 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
                             }
                         }
                     } else {
-                        ppDataMap[key] = loaSectorPathPixelFromCache(key)
+                        ppDataMap[key] = loadSectorPathPixelFromCache(key)
                         successCount++
                         if (successCount == sectorPathPixelInfo.size) {
                             completion(true, "")
@@ -67,44 +68,7 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
         }
     }
 
-    private suspend fun downloadCSVFile(url: URL, region : String, sectorId: Int, fileName: String): Triple<File?, String, Exception?> =
-        withContext(
-            Dispatchers.IO
-        ) {
-            lateinit var outputFile: File
-            lateinit var output: OutputStream
-            val exception: Exception?
 
-            try {
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "GET"
-                val input: InputStream = connection.inputStream
-
-                val subFolder = File(application.cacheDir, "${region}_$sectorId")
-                if (!subFolder.exists()) {
-                    subFolder.mkdirs() // 하위 폴더 생성
-                }
-
-                outputFile = File(subFolder, fileName) // 캐시에 파일 생성
-                output = FileOutputStream(outputFile)
-
-                input.use {
-                    output.use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                Triple(outputFile, "${application.cacheDir}/${region}_$sectorId/$fileName", null)
-            } catch (e: IOException) {
-                exception = e
-                Triple(null, "", exception)
-            } finally {
-                try {
-                    output.close()
-                } catch (e: IOException) {
-                    // ignore
-                }
-            }
-        }
 
     private fun getSectorPathPixelInfo(region: String, sectorId: Int, completion: (Boolean, String, Map<String, String>) -> Unit) {
         val sectorPathPixelInfo = mutableMapOf<String, String>()
@@ -138,12 +102,12 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
         }
     }
 
-    private fun saveSectorPathPixelFromUrl(region : String, sectorId: Int, key: String, ppUrl : String,
+    private fun saveSectorPathPixelFromUrl(application: Application, region : String, sectorId: Int, key: String, ppUrl : String,
         completion: (Boolean, String) -> Unit
     ) {
         GlobalScope.launch(Dispatchers.Main) {
             try {
-                val (file, dir, exception) = downloadCSVFile(URL(ppUrl), region,sectorId, "$key.csv")
+                val (file, dir, exception) = downloadCSVFile(application, URL(ppUrl), region,sectorId, "$key.csv")
                 if (file != null) {
                     saveResourceDirInPrefs(sharedPrefs, key, dir, PATH_PIXEL_KEY_NAME)
                     completion(true, "")
@@ -159,7 +123,7 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
         }
     }
 
-    private fun loaSectorPathPixelFromCache(key : String) : PathPixelData{
+    private fun loadSectorPathPixelFromCache(key : String) : PathPixelData{
         val loadedPpLocalUrl = getResourceDirInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
         if (!loadedPpLocalUrl.isNullOrEmpty()) {
             var fivalext = ""
