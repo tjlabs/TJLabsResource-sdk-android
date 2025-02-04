@@ -17,15 +17,5 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
-
-        val tjLabsResourceManager = TJLabsResourceManager(application)
-        tjLabsResourceManager.updateResources(JupiterRegion.KOREA, 6) {
-            isSucess, msg ->
-            if (isSucess) {
-                val temp = TJLabsResourceManager.ppDataMap
-                Log.d("PathPixelDataCheck", temp.keys.toString())
-                Log.d("PathPixelDataCheck", temp.toString())
-            }
-        }
     }
 }
