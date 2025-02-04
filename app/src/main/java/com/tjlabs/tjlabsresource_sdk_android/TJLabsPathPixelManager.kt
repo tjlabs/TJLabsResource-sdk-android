@@ -3,72 +3,45 @@ package com.tjlabs.tjlabsresource_sdk_android
 import android.app.Application
 import android.content.SharedPreferences
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceDirInPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.getResourceVersionFromPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.ppDataMap
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.saveResourceDirInPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.Companion.saveResourceVersionInPrefs
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.getResourceDirInPrefs
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.getResourceVersionFromPrefs
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.ppDataLoaded
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.ppDataMap
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.saveResourceDirInPrefs
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.saveResourceVersionInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getPathPixelServerVersion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.net.HttpURLConnection
 import java.net.URL
 
 internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
-    fun loadPathPixel(region: String, sectorId: Int, completion: (Boolean, String) -> Unit) {
+    fun loadPathPixel(region: String, sectorId: Int) {
         //1. path pixel의 버젼을 확인
         //2. 저장되어 있는 버젼과 일치하면 업데이트 x
         //3. 저장되어 있는 버젼과 일치하지 않으면 서버로 부터 csv 파일을 읽어 저장
         getSectorPathPixelInfo(region, sectorId)
         { isSuccess, msg, sectorPathPixelInfo ->
             if (isSuccess) {
-                var successCount = 0
-                var failKeys = ""
                 for ((key, url) in sectorPathPixelInfo) {
                     val pathPixelUrlInPrefs = getResourceVersionFromPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
                     if (pathPixelUrlInPrefs != url) {
                         saveSectorPathPixelFromUrl(application, region, sectorId, key, url) { isSuccessSave, msgSave ->
                             if (isSuccessSave) {
                                 saveResourceVersionInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME, url)
-                                ppDataMap[key] = loadSectorPathPixelFromCache(key)
-                                successCount++
-
-                                if (successCount == sectorPathPixelInfo.size) {
-                                    completion(true, "")
-                                } else {
-                                    completion(false, failKeys)
-                                }
-
-                            } else {
-                                failKeys += "$key/"
-                                completion(false, msgSave)
                             }
+                            ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                            ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
                         }
                     } else {
                         ppDataMap[key] = loadSectorPathPixelFromCache(key)
-                        successCount++
-                        if (successCount == sectorPathPixelInfo.size) {
-                            completion(true, "")
-                        } else {
-                            completion(false, failKeys)
-                        }
                     }
                 }
-            } else {
-                completion(false, msg)
             }
         }
     }
-
-
 
     private fun getSectorPathPixelInfo(region: String, sectorId: Int, completion: (Boolean, String, Map<String, String>) -> Unit) {
         val sectorPathPixelInfo = mutableMapOf<String, String>()
