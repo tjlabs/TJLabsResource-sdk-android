@@ -8,6 +8,11 @@ data class PathPixelData(
     val roadHeading: List<String> = listOf()
 )
 
+data class PathPixelDataIsLoaded(
+    var isLoaded : Boolean = false,
+    val url : String = ""
+)
+
 internal data class InputSector(
     var sector_id: Int = 0,
     var operating_system: String = "Android"
@@ -23,6 +28,7 @@ internal data class PathPixel(
 internal data class OutputPathPixel(
     val path_pixel_list : List<PathPixel> = listOf()
 )
+
 
 data class JupiterRegion(
     val KOREA : String,
