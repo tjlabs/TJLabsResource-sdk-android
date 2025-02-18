@@ -45,4 +45,24 @@ internal object TJLabsResourceNetworkManager {
         })
     }
 
+    fun postBuildingLevel(url : String, input : SectorIdInput, levelVersion : String, completion: (Int, LevelOutputList) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postLevel = retrofit.create(PostInput::class.java)
+        postLevel.postLevel(input, levelVersion).enqueue(object :
+            Callback<LevelOutputList> {
+            override fun onFailure(call: Call<LevelOutputList>, t: Throwable) {
+                completion(500, LevelOutputList())
+            }
+            override fun onResponse(call: Call<LevelOutputList>, response: Response<LevelOutputList>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: LevelOutputList()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  LevelOutputList())
+                }
+            }
+        })
+    }
+
 }

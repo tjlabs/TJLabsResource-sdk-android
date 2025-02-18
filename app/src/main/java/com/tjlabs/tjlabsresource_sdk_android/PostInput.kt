@@ -14,5 +14,7 @@ internal interface PostInput {
     @POST("/{scale_version}/scale")
     fun postSectorScale(@Body param: SectorInput, @Path("scale_version") scaleVersion : String) : Call<ScaleOutputList>
 
+    @POST("/{level_version}/level")
+    fun postLevel(@Body param: SectorIdInput, @Path("level_version") levelVersion : String) : Call<LevelOutputList>
 
 }

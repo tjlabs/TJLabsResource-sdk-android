@@ -33,10 +33,15 @@ internal data class OutputPathPixel(
     val path_pixel_list : List<PathPixel> = listOf()
 )
 
-
 internal data class LevelOutput(
-    val level_list : List<String> = listOf()
+    val building_name: String = "",
+    val level_name: String = ""
 )
+
+internal data class LevelOutputList(
+    val level_list : List<LevelOutput> = listOf()
+)
+
 
 internal data class ScaleOutputList(
     val scale_list : List<ScaleOutput> = listOf()
