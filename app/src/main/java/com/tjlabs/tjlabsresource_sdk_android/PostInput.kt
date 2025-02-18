@@ -9,6 +9,6 @@ internal interface PostInput {
         "content-type: application/json"
     )
     @POST("/{path_pixel_version}/path")
-    fun postPathPixel(@Body param: InputSector, @Path("path_pixel_version") pathPixelVersion : String) : Call<OutputPathPixel>
+    fun postPathPixel(@Body param: SectorInput, @Path("path_pixel_version") pathPixelVersion : String) : Call<OutputPathPixel>
 
 }

@@ -13,7 +13,11 @@ data class PathPixelDataIsLoaded(
     val url : String = ""
 )
 
-internal data class InputSector(
+internal data class SectorIdInput(
+    var sector_id: Int = 0
+)
+
+internal data class SectorInput(
     var sector_id: Int = 0,
     var operating_system: String = "Android"
 )
@@ -29,6 +33,20 @@ internal data class OutputPathPixel(
     val path_pixel_list : List<PathPixel> = listOf()
 )
 
+
+internal data class LevelOutput(
+    val level_list : List<String> = listOf()
+)
+
+internal data class ScaleOutputList(
+    val scale_list : List<ScaleOutput> = listOf()
+)
+
+internal data class ScaleOutput(
+    val building_name : String = "",
+    val level_name : String = "",
+    val image_scale : List<Float> = listOf()
+)
 
 data class JupiterRegion(
     val KOREA : String,

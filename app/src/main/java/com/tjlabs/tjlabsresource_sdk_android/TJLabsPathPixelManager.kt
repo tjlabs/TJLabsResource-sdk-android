@@ -45,7 +45,7 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
 
     private fun getSectorPathPixelInfo(region: String, sectorId: Int, completion: (Boolean, String, Map<String, String>) -> Unit) {
         val sectorPathPixelInfo = mutableMapOf<String, String>()
-        val input = InputSector(sectorId, operating_system = "Android")
+        val input = SectorInput(sectorId, operating_system = "Android")
         TJLabsResourceNetworkManager.postPathPixel(
             getUserBaseURL(),
             input,
