@@ -22,7 +22,12 @@ internal object TJLabsResourceNetworkConstant {
             .build()
     }
 
-    private const val PATHPIXEL_SERVER_VERSION = "2024-11-14"
+    val USER_LEVEL_SERVER_VERSION = "2024-11-13"
+    val USER_PATHPIXEL_SERVER_VERSION = "2024-11-14"
+    val USER_SCALE_SERVER_VERSION = "2024-11-14"
+    val USER_PARAM_SERVER_VERSION = "2024-11-13"
+    val USER_GEO_SERVER_VERSION = "2024-11-15"
+    val USER_ENTERANCE_SERVER_VERSION = "2024-11-14"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
@@ -38,9 +43,30 @@ internal object TJLabsResourceNetworkConstant {
         return USER_URL
     }
 
-    fun getPathPixelServerVersion() : String {
-        return PATHPIXEL_SERVER_VERSION
+    fun getLevelServerVersion() : String {
+        return USER_LEVEL_SERVER_VERSION
     }
+
+    fun getPathPixelServerVersion() : String {
+        return USER_PATHPIXEL_SERVER_VERSION
+    }
+
+    fun getScaleServerVersion() : String {
+        return USER_SCALE_SERVER_VERSION
+    }
+
+    fun getParamServerVersion() : String {
+        return USER_PARAM_SERVER_VERSION
+    }
+    fun getGeoServerVersion() : String {
+        return USER_GEO_SERVER_VERSION
+    }
+
+    fun getEntranceServerVersion() : String {
+        return USER_ENTERANCE_SERVER_VERSION
+    }
+
+
 
     fun setServerURL(region: String) {
         when (region) {
