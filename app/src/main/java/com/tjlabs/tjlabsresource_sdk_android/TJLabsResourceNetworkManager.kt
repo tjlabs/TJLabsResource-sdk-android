@@ -24,4 +24,25 @@ internal object TJLabsResourceNetworkManager {
             }
         })
     }
+
+    fun postScaleOffset(url : String, input : SectorInput, scaleServerVersion : String, completion: (Int, ScaleOutputList) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postScaleInput = retrofit.create(PostInput::class.java)
+        postScaleInput.postSectorScale(input, scaleServerVersion).enqueue(object :
+            Callback<ScaleOutputList> {
+            override fun onFailure(call: Call<ScaleOutputList>, t: Throwable) {
+                completion(500, ScaleOutputList())
+            }
+            override fun onResponse(call: Call<ScaleOutputList>, response: Response<ScaleOutputList>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: ScaleOutputList()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  ScaleOutputList())
+                }
+            }
+        })
+    }
+
 }

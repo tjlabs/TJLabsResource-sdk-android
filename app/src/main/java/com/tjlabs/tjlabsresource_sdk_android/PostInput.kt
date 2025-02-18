@@ -11,4 +11,8 @@ internal interface PostInput {
     @POST("/{path_pixel_version}/path")
     fun postPathPixel(@Body param: SectorInput, @Path("path_pixel_version") pathPixelVersion : String) : Call<OutputPathPixel>
 
+    @POST("/{scale_version}/scale")
+    fun postSectorScale(@Body param: SectorInput, @Path("scale_version") scaleVersion : String) : Call<ScaleOutputList>
+
+
 }

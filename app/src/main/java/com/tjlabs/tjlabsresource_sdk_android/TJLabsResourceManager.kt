@@ -49,6 +49,10 @@ object TJLabsResourceManager  {
         loadPathPixel(application)
     }
 
+//    fun getScaleOffSet() : Map<String, List<Float>> {
+//        return TJLabsScaleOffsetManager.
+//    }
+
     private fun init(application: Application, region: String, sectorId: Int) {
         this.region = region
         this.sectorId = sectorId
