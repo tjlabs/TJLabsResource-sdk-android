@@ -105,6 +105,31 @@ class TJLabsResourceManager :
         return TJLabsScaleOffsetManager.scaleOffsetDataMap
     }
 
+    fun getEntranceNumbers() : Int {
+        return TJLabsEntranceManager.entranceNumbers
+    }
+
+    fun getEntranceData() : Map<String, EntranceData>
+    {
+        return TJLabsEntranceManager.entranceDataMap
+    }
+
+    fun getEntranceRouteData() : Map<String, EntranceRouteData>
+    {
+        return TJLabsEntranceManager.entranceRouteDataMap
+    }
+
+    fun getEntranceRouteDataIsLoaded() : Map<String, EntranceRouteDataIsLoaded>
+    {
+        return TJLabsEntranceManager.entranceRouteDataLoaded
+    }
+
+    fun getEntranceOuterWards() : List<String>
+    {
+        return TJLabsEntranceManager.entranceOuterWards
+    }
+    
+
     fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
         TJLabsPathPixelManager.isPerformed = true
         pathPixelManager.updatePathPixel(region, sectorId, key, url) { _,_ ->}
