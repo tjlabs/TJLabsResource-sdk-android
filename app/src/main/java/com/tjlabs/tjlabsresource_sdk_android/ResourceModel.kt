@@ -66,3 +66,22 @@ data class ResourceRegion(
 }
 
 interface TJLabsResourceManagerDelegate
+
+data class EntranceData(
+    var number: Int = 0,
+    var networkStatus: Boolean = false,
+    var velocityScale: Float = 0f,
+    var innerWardId: String = "",
+    var innerWardRssi: Float = 0f,
+    var innerWardCoord: List<Float> = emptyList()
+)
+
+data class EntranceRouteData(
+    var routeLevel: List<String> = emptyList(),
+    var route: List<List<Float>> = listOf(emptyList())
+)
+
+data class EntranceRouteDataIsLoaded(
+    var isLoaded: Boolean = false,
+    var url: String = ""
+)
