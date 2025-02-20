@@ -33,7 +33,7 @@ class TJLabsEntranceManager {
         val entranceOuterWards: MutableList<String> = mutableListOf()
     }
 
-    private var delegate: EntranceDelegate? = null
+    var delegate: EntranceDelegate? = null
     var region = ResourceRegion.KOREA
 
     fun init(application: Application, sharedPreferences: SharedPreferences) {

@@ -29,7 +29,7 @@ class TJLabsPathPixelManager {
 
     }
 
-    private var delegate: PathPixelDelegate? = null
+    var delegate: PathPixelDelegate? = null
     var region = ResourceRegion.KOREA
 
     fun init(application: Application, sharedPreferences: SharedPreferences) {

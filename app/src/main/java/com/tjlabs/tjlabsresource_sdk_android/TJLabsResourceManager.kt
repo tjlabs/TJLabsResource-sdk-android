@@ -15,15 +15,22 @@ class TJLabsResourceManager :
     EntranceDelegate
 {
 
-    private var delegate: TJLabsResourceManagerDelegate? = null
+    var delegate: TJLabsResourceManagerDelegate? = null
 
     private var pathPixelManager = TJLabsPathPixelManager()
     private var buildingLevelManager = TJLabsBuildingLevelManager()
     private var imageManager = TJLabsImageManager()
     private var scaleOffsetManager = TJLabsScaleOffsetManager()
     private var entranceManager = TJLabsEntranceManager()
-
     private lateinit var sharedPrefs: SharedPreferences
+
+    init {
+        pathPixelManager.delegate = this
+        buildingLevelManager.delegate = this
+        imageManager.delegate = this
+        scaleOffsetManager.delegate = this
+        entranceManager.delegate = this
+    }
 
     override fun onBuildingLevelData(manager: TJLabsBuildingLevelManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
         delegate?.onBuildingLevelData(this, isOn, buildingLevelData)
@@ -68,7 +75,6 @@ class TJLabsResourceManager :
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
-        Log.d(TAG, "load map resources...")
         init(application, region)
         loadPathPixel(application, region, sectorId)
         loadImage(region, sectorId)
@@ -81,10 +87,8 @@ class TJLabsResourceManager :
         this.sharedPrefs = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
         setRegion(region)
         TJLabsResourceNetworkConstant.setServerURL(region)
-        Log.d(TAG, "init sharedPreference")
     }
 
-    // MARK: - Public Get Methods
     fun getBuildingLevelData() : Map<Int, Map<String, List<String>>> {
         return TJLabsBuildingLevelManager.buildingLevelDataMap
     }

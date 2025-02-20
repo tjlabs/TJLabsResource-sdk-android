@@ -20,7 +20,7 @@ class TJLabsImageManager {
         val buildingLevelImageDataMap = mutableMapOf<String, Bitmap>()
     }
 
-    private var delegate: BuildingLevelImageDelegate? = null
+    var delegate: BuildingLevelImageDelegate? = null
     private var baseURL = getImageBaseURL()
     var region = ResourceRegion.KOREA
 
