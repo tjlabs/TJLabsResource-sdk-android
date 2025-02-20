@@ -39,8 +39,38 @@ internal object TJLabsResourceNetworkConstant {
     private var CSV_URL =  HTTP_PREFIX + REGION_PREFIX + "csv" + OLYMPUS_SUFFIX
     private var CLIENT_URL =  HTTP_PREFIX + REGION_PREFIX + "client" + OLYMPUS_SUFFIX
 
+    fun setServerURL(region: String) {
+        when (region) {
+            ResourceRegion.KOREA -> {
+                REGION_PREFIX = "ap-northeast-2."
+                REGION_NAME = "Korea"
+            }
+            ResourceRegion.CANADA -> {
+                REGION_PREFIX = "ca-central-1."
+                REGION_NAME = "Canada"
+            }
+            ResourceRegion.US_EAST -> {
+                REGION_PREFIX = "us-east-1."
+                REGION_NAME = "US"
+            }
+            else -> {
+                REGION_PREFIX = "ap-northeast-2."
+                REGION_NAME = "Korea"
+            }
+        }
+
+        USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
+        IMAGE_URL = HTTP_PREFIX + REGION_PREFIX + "img" + OLYMPUS_SUFFIX
+        CSV_URL = HTTP_PREFIX + REGION_PREFIX + "csv" + OLYMPUS_SUFFIX
+        CLIENT_URL =  HTTP_PREFIX + REGION_PREFIX + "client" + OLYMPUS_SUFFIX
+    }
+
     fun getUserBaseURL() : String{
         return USER_URL
+    }
+
+    fun getImageBaseURL() : String{
+        return IMAGE_URL
     }
 
     fun getLevelServerVersion() : String {
@@ -65,34 +95,4 @@ internal object TJLabsResourceNetworkConstant {
     fun getEntranceServerVersion() : String {
         return USER_ENTERANCE_SERVER_VERSION
     }
-
-
-
-    fun setServerURL(region: String) {
-        when (region) {
-            JupiterRegion.KOREA -> {
-                REGION_PREFIX = "ap-northeast-2."
-                REGION_NAME = "Korea"
-            }
-            JupiterRegion.CANADA -> {
-                REGION_PREFIX = "ca-central-1."
-                REGION_NAME = "Canada"
-            }
-            JupiterRegion.US_EAST -> {
-                REGION_PREFIX = "us-east-1."
-                REGION_NAME = "US"
-            }
-            else -> {
-                REGION_PREFIX = "ap-northeast-2."
-                REGION_NAME = "Korea"
-            }
-        }
-
-        USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
-        IMAGE_URL = HTTP_PREFIX + REGION_PREFIX + "img" + OLYMPUS_SUFFIX
-        CSV_URL = HTTP_PREFIX + REGION_PREFIX + "csv" + OLYMPUS_SUFFIX
-        CLIENT_URL =  HTTP_PREFIX + REGION_PREFIX + "client" + OLYMPUS_SUFFIX
-    }
-
-
 }

@@ -53,7 +53,7 @@ internal data class ScaleOutput(
     val image_scale : List<Float> = listOf()
 )
 
-data class JupiterRegion(
+data class ResourceRegion(
     val KOREA : String,
     val US_EAST : String,
     val CANADA : String
@@ -64,3 +64,5 @@ data class JupiterRegion(
         val CANADA : String = "Canada"
     }
 }
+
+interface TJLabsResourceManagerDelegate

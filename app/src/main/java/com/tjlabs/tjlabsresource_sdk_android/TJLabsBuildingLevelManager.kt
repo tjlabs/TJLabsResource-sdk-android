@@ -9,6 +9,8 @@ class TJLabsBuildingLevelManager {
         var buildingLevelDataMap: MutableMap<Int, MutableMap<String, MutableList<String>>> = mutableMapOf()
     }
 
+    var region = ResourceRegion.KOREA
+
     fun loadBuildingLevel(region: String, sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
         val result = mutableMapOf<String, MutableList<String>>()
 

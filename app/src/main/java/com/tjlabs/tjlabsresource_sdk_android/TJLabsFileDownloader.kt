@@ -12,7 +12,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 internal object TJLabsFileDownloader {
-    suspend fun downloadCSVFile(application: Application, url: URL, region : String, sectorId: Int, fileName: String): Triple<File?, String, Exception?> =
+    var region : String = ResourceRegion.KOREA
+
+    suspend fun downloadCSVFile(application: Application, url: URL, sectorId: Int, fileName: String): Triple<File?, String, Exception?> =
         withContext(
             Dispatchers.IO
         ) {

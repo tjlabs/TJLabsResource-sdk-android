@@ -2,13 +2,8 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.getResourceDirInPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.getResourceVersionFromPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.ppDataLoaded
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.ppDataMap
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.saveResourceDirInPrefs
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManager.saveResourceVersionInPrefs
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getPathPixelServerVersion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 import kotlinx.coroutines.Dispatchers
@@ -17,29 +12,53 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
-internal class TJLabsPathPixelManager(private val application: Application, private val sharedPrefs : SharedPreferences) {
-    fun loadPathPixel(region: String, sectorId: Int) {
+internal class TJLabsPathPixelManager {
+    private lateinit var application: Application
+    private lateinit var sharedPrefs : SharedPreferences
+
+    companion object {
+        var isPerformed = false
+        val ppDataMap : MutableMap<String, PathPixelData> = mutableMapOf()
+        val ppDataLoaded : MutableMap<String, PathPixelDataIsLoaded> = mutableMapOf()
+
+    }
+
+    var region = ResourceRegion.KOREA
+
+    fun init(application: Application, sharedPreferences: SharedPreferences) {
+        this.application = application
+        this.sharedPrefs = sharedPreferences
+    }
+
+    fun loadPathPixel(sectorId: Int) {
         //1. path pixel의 버젼을 확인
         //2. 저장되어 있는 버젼과 일치하면 업데이트 x
         //3. 저장되어 있는 버젼과 일치하지 않으면 서버로 부터 csv 파일을 읽어 저장
         getSectorPathPixelInfo(region, sectorId)
         { isSuccess, msg, sectorPathPixelInfo ->
+            Log.d(TAG, msg)
+
             if (isSuccess) {
                 for ((key, url) in sectorPathPixelInfo) {
-                    val pathPixelUrlInPrefs = getResourceVersionFromPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
+                    val pathPixelUrlInPrefs = loadPathPixelUrlFromCache(key)
                     if (pathPixelUrlInPrefs != url) {
-                        saveSectorPathPixelFromUrl(application, region, sectorId, key, url) { isSuccessSave, msgSave ->
+                        updatePathPixel(region, sectorId, key, url) { isSuccessSave, _ ->
                             if (isSuccessSave) {
-                                saveResourceVersionInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME, url)
+                                savePathPixelUrlToCache(key, url)
                             }
                             ppDataMap[key] = loadSectorPathPixelFromCache(key)
                             ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
                         }
                     } else {
+                        Log.d(TAG, "already exist pp data // data key : $key")
+
                         ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                        ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
                     }
                 }
             }
+            Log.d(TAG, "ppDataMap : ${ppDataMap.keys}")
+            Log.d(TAG, "ppDataLoaded : ${ppDataLoaded}")
         }
     }
 
@@ -75,29 +94,50 @@ internal class TJLabsPathPixelManager(private val application: Application, priv
         }
     }
 
-    private fun saveSectorPathPixelFromUrl(application: Application, region : String, sectorId: Int, key: String, ppUrl : String,
-        completion: (Boolean, String) -> Unit
+
+    fun updatePathPixel(region : String, sectorId: Int, key: String, ppUrl : String,
+                                completion: (Boolean, String) -> Unit
     ) {
         GlobalScope.launch(Dispatchers.Main) {
             try {
-                val (file, dir, exception) = downloadCSVFile(application, URL(ppUrl), region,sectorId, "$key.csv")
+                val (file, dir, exception) = downloadCSVFile(application, URL(ppUrl),sectorId, "$key.csv")
                 if (file != null) {
-                    saveResourceDirInPrefs(sharedPrefs, key, dir, PATH_PIXEL_KEY_NAME)
+                    ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                    ppDataLoaded[key] = PathPixelDataIsLoaded(true, ppUrl)
+                    savePathPixelUrlToCache(key, dir)
                     completion(true, "")
+                    Log.d(TAG, "success update pp // key :$key")
+
                 } else {
                     if (exception != null) {
                         completion(false, exception.message.toString())
                     }
+                    ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
 
                 }
             } catch (e: Exception) {
                 completion(false, "")
+                ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
+
             }
         }
+
     }
 
+    private fun loadPathPixelUrlFromCache(key: String): String? {
+        val keyPpURL = "TJLabsPathPixelURL_$key"
+        return sharedPrefs.getString(keyPpURL, null)
+    }
+
+    private fun savePathPixelUrlToCache(key: String, pathPixelUrlFromServer: String) {
+        val keyPpURL = "TJLabsPathPixelURL_$key"
+        sharedPrefs.edit().putString(keyPpURL, pathPixelUrlFromServer).apply()
+        Log.d("TJLabsResource", "Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
+    }
+
+
     private fun loadSectorPathPixelFromCache(key : String) : PathPixelData{
-        val loadedPpLocalUrl = getResourceDirInPrefs(sharedPrefs, key, PATH_PIXEL_KEY_NAME)
+        val loadedPpLocalUrl = loadPathPixelUrlFromCache(key)
         if (!loadedPpLocalUrl.isNullOrEmpty()) {
             var fivalext = ""
             val file = File(loadedPpLocalUrl)
