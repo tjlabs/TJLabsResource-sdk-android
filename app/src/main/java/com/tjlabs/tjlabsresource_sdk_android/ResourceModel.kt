@@ -73,7 +73,7 @@ data class EntranceData(
     var velocityScale: Float = 0f,
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
-    var innerWardCoord: List<Float> = emptyList()
+    var innerWardCoord: List<Int> = emptyList()
 )
 
 data class EntranceRouteData(
@@ -84,4 +84,31 @@ data class EntranceRouteData(
 data class EntranceRouteDataIsLoaded(
     var isLoaded: Boolean = false,
     var url: String = ""
+)
+
+data class EntranceRf(
+    val id : String = "",
+    val rss : Float = 0f,
+    val pos : List<Int> = listOf(),
+    val direction : Int = 0
+)
+
+data class Entrance(
+    val spot_number: Int = 0,
+    val outermost_ward_id: String = "",
+    val scale : Float = 0f,
+    val url : String = "",
+    val network_status : Boolean = false,
+    val innermost_ward : EntranceRf = EntranceRf()
+)
+
+data class EntranceList(
+    val building_name: String = "",
+    val level_name: String = "",
+    val entrances : List<Entrance> = listOf()
+)
+
+
+data class EntranceOutputList(
+    val entrance_list: List<EntranceList> = listOf()
 )

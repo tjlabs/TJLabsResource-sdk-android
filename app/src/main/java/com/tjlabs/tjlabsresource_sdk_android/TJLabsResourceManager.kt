@@ -26,6 +26,7 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
     private var buildingLevelManager = TJLabsBuildingLevelManager()
     private var imageManager = TJLabsImageManager()
     private var scaleOffsetManager = TJLabsScaleOffsetManager()
+    private var entranceManager = TJLabsEntranceManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -33,7 +34,7 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
         loadPathPixel(application, region, sectorId)
-        loadRouteTrack(region, sectorId)
+        loadEntrance(application, region, sectorId)
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
@@ -48,9 +49,9 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
 
     private fun init(application: Application, region: String) {
         this.sharedPrefs = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
+        setRegion(region)
         TJLabsResourceNetworkConstant.setServerURL(region)
         Log.d(TAG, "init sharedPreference")
-
     }
 
     // MARK: - Public Get Methods
@@ -116,8 +117,9 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
 
     }
 
-    private fun loadRouteTrack(region : String, sectorId: Int) {
-
+    private fun loadEntrance(application: Application, region : String, sectorId: Int) {
+        entranceManager.init(application, sharedPrefs)
+        entranceManager.loadEntrance(sectorId)
     }
 
     private fun setRegion(region : String) {
@@ -127,6 +129,7 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
         imageManager.region = region
         pathPixelManager.region = region
         scaleOffsetManager.region = region
+        entranceManager.region = region
     }
 
 

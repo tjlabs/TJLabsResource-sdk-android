@@ -17,4 +17,7 @@ internal interface PostInput {
     @POST("/{level_version}/level")
     fun postLevel(@Body param: SectorIdInput, @Path("level_version") levelVersion : String) : Call<LevelOutputList>
 
+    @POST("/{entrance_version}/entrance")
+    fun postEntrance(@Body param: SectorInput, @Path("entrance_version") entranceVersion : String) : Call<EntranceOutputList>
+
 }
