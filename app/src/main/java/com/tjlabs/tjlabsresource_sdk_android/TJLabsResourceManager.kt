@@ -5,22 +5,17 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 
-
 const val TAG = "TJLabsResourceManager"
-class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLabsImageManager.BuildingLevelImageDelegate{
-    override fun onBuildingLevelImageData(
-        manager: TJLabsImageManager,
-        isOn: Boolean,
-        imageKey: String
-    ) {
-        //TODO("Not yet implemented")
-    }
 
-    override fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean) {
-        //TODO("Not yet implemented")
-    }
+class TJLabsResourceManager :
+    BuildingLevelDelegate,
+    PathPixelDelegate,
+    BuildingLevelImageDelegate,
+    ScaleOffsetDelegate,
+    EntranceDelegate
+{
 
-    var delegate: TJLabsResourceManagerDelegate? = null
+    private var delegate: TJLabsResourceManagerDelegate? = null
 
     private var pathPixelManager = TJLabsPathPixelManager()
     private var buildingLevelManager = TJLabsBuildingLevelManager()
@@ -30,6 +25,41 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
 
     private lateinit var sharedPrefs: SharedPreferences
 
+    override fun onBuildingLevelData(manager: TJLabsBuildingLevelManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
+        delegate?.onBuildingLevelData(this, isOn, buildingLevelData)
+    }
+
+    override fun onBuildingLevelError(manager: TJLabsBuildingLevelManager) {
+        delegate?.onError(this, ResourceError.BuildingLevel)
+    }
+
+    override fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String) {
+        delegate?.onPathPixelData(this, isOn, pathPixelKey)
+    }
+
+    override fun onPathPixelError(manager: TJLabsPathPixelManager) {
+        delegate?.onError(this, ResourceError.PathPixel)
+    }
+
+    override fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String) {
+        delegate?.onBuildingLevelImageData(this, isOn, imageKey)
+    }
+
+    override fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String) {
+        delegate?.onBuildingLevelImageData(this, isOn, scaleKey)
+    }
+
+    override fun onScaleError(manager: TJLabsScaleOffsetManager) {
+        delegate?.onError(this, ResourceError.Scale)
+    }
+
+    override fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String) {
+        delegate?.onEntranceData(this, isOn, entranceKey)
+    }
+
+    override fun onEntranceError(manager: TJLabsEntranceManager) {
+        delegate?.onError(this, ResourceError.Entrance)
+    }
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
@@ -131,7 +161,6 @@ class TJLabsResourceManager : TJLabsScaleOffsetManager.ScaleOffsetDelegate, TJLa
         scaleOffsetManager.region = region
         entranceManager.region = region
     }
-
 
 
 

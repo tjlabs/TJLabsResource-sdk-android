@@ -14,9 +14,16 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
+interface EntranceDelegate {
+    fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String)
+    fun onEntranceError(manager: TJLabsEntranceManager)
+}
+
 class TJLabsEntranceManager {
     private lateinit var application: Application
     private lateinit var sharedPrefs : SharedPreferences
+
+
 
     companion object {
         var entranceNumbers: Int = 0
@@ -26,6 +33,7 @@ class TJLabsEntranceManager {
         val entranceOuterWards: MutableList<String> = mutableListOf()
     }
 
+    private var delegate: EntranceDelegate? = null
     var region = ResourceRegion.KOREA
 
     fun init(application: Application, sharedPreferences: SharedPreferences) {
@@ -54,11 +62,12 @@ class TJLabsEntranceManager {
 
                         entranceRouteDataMap[key] = loadEntranceRouteFileUrlFromCache(key)
                         entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(true, url)
+                        delegate?.onEntranceData(this, true, key)
                     }
                 }
+            } else {
+                delegate?.onEntranceError(this)
             }
-            Log.d(TAG, "ppDataMap : ${entranceRouteDataMap.keys}")
-            Log.d(TAG, "ppDataLoaded : ${entranceRouteDataLoaded}")
         }
     }
 
@@ -104,8 +113,8 @@ class TJLabsEntranceManager {
         }
     }
 
-    fun updateEntranceRoute(region : String, sectorId: Int, key: String, entranceUrl : String,
-                            completion: (Boolean, String) -> Unit
+    private fun updateEntranceRoute(region : String, sectorId: Int, key: String, entranceUrl : String,
+                                    completion: (Boolean, String) -> Unit
     ) {
         GlobalScope.launch(Dispatchers.Main) {
             try {

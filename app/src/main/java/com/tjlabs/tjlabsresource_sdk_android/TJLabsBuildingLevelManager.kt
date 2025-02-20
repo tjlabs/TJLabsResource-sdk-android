@@ -1,14 +1,19 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getLevelServerVersion
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getScaleServerVersion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
+
+
+interface BuildingLevelDelegate {
+    fun onBuildingLevelData(manager: TJLabsBuildingLevelManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>)
+    fun onBuildingLevelError(manager: TJLabsBuildingLevelManager)
+}
 
 class TJLabsBuildingLevelManager {
     companion object {
         var buildingLevelDataMap: MutableMap<Int, MutableMap<String, MutableList<String>>> = mutableMapOf()
     }
-
+    private var delegate: BuildingLevelDelegate? = null
     var region = ResourceRegion.KOREA
 
     fun loadBuildingLevel(region: String, sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
@@ -24,10 +29,10 @@ class TJLabsBuildingLevelManager {
                 if (statusCode == 200) {
                     val buildingLevelInfo = makeBuildingLevelInfo(sectorId, buildingLevelList)
                     setBuildingLevelDataMap(sectorId, buildingLevelInfo)
-                    println("(TJLabsResource) Success : loadBuildingLevel")
+                    delegate?.onBuildingLevelData(this, true, buildingLevelInfo)
                     completion(true, buildingLevelInfo)
                 } else {
-                    println("(TJLabsResource) Fail : loadBuildingLevel")
+                    delegate?.onBuildingLevelError(this)
                     completion(false, result)
                 }
             }

@@ -11,11 +11,11 @@ import java.net.HttpURLConnection
 import java.net.MalformedURLException
 import java.net.URL
 
-class TJLabsImageManager {
-    interface BuildingLevelImageDelegate {
-        fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String)
-    }
 
+interface BuildingLevelImageDelegate {
+    fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String)
+}
+class TJLabsImageManager {
     companion object {
         val buildingLevelImageDataMap = mutableMapOf<String, Bitmap>()
     }

@@ -12,7 +12,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
-internal class TJLabsPathPixelManager {
+interface PathPixelDelegate {
+    fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String)
+    fun onPathPixelError(manager: TJLabsPathPixelManager)
+}
+
+
+class TJLabsPathPixelManager {
     private lateinit var application: Application
     private lateinit var sharedPrefs : SharedPreferences
 
@@ -23,6 +29,7 @@ internal class TJLabsPathPixelManager {
 
     }
 
+    private var delegate: PathPixelDelegate? = null
     var region = ResourceRegion.KOREA
 
     fun init(application: Application, sharedPreferences: SharedPreferences) {
@@ -54,9 +61,14 @@ internal class TJLabsPathPixelManager {
 
                         ppDataMap[key] = loadSectorPathPixelFromCache(key)
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
+                        delegate?.onPathPixelData(this, true, key)
+
                     }
                 }
+            }else {
+                delegate?.onPathPixelError(this)
             }
+
             Log.d(TAG, "ppDataMap : ${ppDataMap.keys}")
             Log.d(TAG, "ppDataLoaded : ${ppDataLoaded}")
         }

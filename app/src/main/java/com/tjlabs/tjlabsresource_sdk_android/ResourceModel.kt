@@ -65,7 +65,23 @@ data class ResourceRegion(
     }
 }
 
-interface TJLabsResourceManagerDelegate
+enum class ResourceError {
+    PathPixel,
+    BuildingLevel,
+    Image,
+    Scale,
+    Entrance
+}
+
+
+interface TJLabsResourceManagerDelegate {
+    fun onBuildingLevelData(manager: TJLabsResourceManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>)
+    fun onPathPixelData(manager: TJLabsResourceManager, isOn: Boolean, pathPixelKey: String)
+    fun onBuildingLevelImageData(manager: TJLabsResourceManager, isOn: Boolean, imageKey: String)
+    fun onScaleOffsetData(manager: TJLabsResourceManager, isOn: Boolean, scaleKey: String)
+    fun onEntranceData(manager: TJLabsResourceManager, isOn: Boolean, entranceKey: String)
+    fun onError(manager: TJLabsResourceManager, error: ResourceError)
+}
 
 data class EntranceData(
     var number: Int = 0,
