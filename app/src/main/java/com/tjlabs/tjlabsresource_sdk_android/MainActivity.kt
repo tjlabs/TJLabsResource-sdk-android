@@ -1,5 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.enableEdgeToEdge
@@ -7,7 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -17,5 +18,65 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+
+        val tjlabsResourceManager = TJLabsResourceManager()
+        tjlabsResourceManager.delegate = this
+        tjlabsResourceManager.loadMapResources(application, ResourceRegion.KOREA, 6)
     }
+
+    override fun onBuildingLevelData(
+        manager: TJLabsResourceManager,
+        isOn: Boolean,
+        buildingLevelData: Map<String, List<String>>
+    ) {
+
+        Log.d(TAG, "isOn : $isOn // buildingLevelData : $buildingLevelData")
+
+    }
+
+    override fun onPathPixelData(
+        manager: TJLabsResourceManager,
+        isOn: Boolean,
+        pathPixelKey: String,
+        data: PathPixelData?
+    ) {
+        Log.d(TAG, "isOn : $isOn // pathPixelKey : $pathPixelKey")
+
+    }
+
+    override fun onBuildingLevelImageData(
+        manager: TJLabsResourceManager,
+        isOn: Boolean,
+        imageKey: String,
+        data: Bitmap?
+    ) {
+        Log.d(TAG, "isOn : $isOn // imageKey : $imageKey")
+
+    }
+
+    override fun onScaleOffsetData(
+        manager: TJLabsResourceManager,
+        isOn: Boolean,
+        scaleKey: String,
+        data: List<Float>
+    ) {
+        Log.d(TAG, "isOn : $isOn // scaleKey : $scaleKey")
+
+    }
+
+    override fun onEntranceData(
+        manager: TJLabsResourceManager,
+        isOn: Boolean,
+        entranceKey: String,
+        data: EntranceRouteData?
+    ) {
+        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey")
+
+    }
+
+    override fun onError(manager: TJLabsResourceManager, error: ResourceError) {
+        Log.d(TAG, "error // error : $error")
+
+    }
+
 }
