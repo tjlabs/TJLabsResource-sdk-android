@@ -13,7 +13,7 @@ import java.net.URL
 
 
 interface BuildingLevelImageDelegate {
-    fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String)
+    fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String, data : Bitmap?)
 }
 class TJLabsImageManager {
     companion object {
@@ -24,15 +24,17 @@ class TJLabsImageManager {
     private var baseURL = getImageBaseURL()
     var region = ResourceRegion.KOREA
 
-    fun loadImage(region: String, sectorId: Int, buildingLevelData : Map<String, List<String>>){
+    fun loadImage(sectorId: Int, buildingLevelData : Map<String, List<String>>){
         for ((buildingName, levelNameList) in buildingLevelData) {
             for (levelName in levelNameList) {
                 val imageKey = "image_${sectorId}_${buildingName}_$levelName"
                 loadBuildingLevelImage(sectorId, buildingName, levelName) { bitmap, _ ->
                     if (bitmap != null) {
                         buildingLevelImageDataMap[imageKey] = bitmap
+                        delegate?.onBuildingLevelImageData(this, true, imageKey, bitmap)
+
                     } else {
-                        delegate?.onBuildingLevelImageData(this, false, imageKey)
+                        delegate?.onBuildingLevelImageData(this, false, imageKey, null)
                     }
                 }
             }

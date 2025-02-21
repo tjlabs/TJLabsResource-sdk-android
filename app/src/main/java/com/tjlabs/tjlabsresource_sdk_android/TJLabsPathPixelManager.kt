@@ -13,7 +13,7 @@ import java.io.File
 import java.net.URL
 
 interface PathPixelDelegate {
-    fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String)
+    fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
     fun onPathPixelError(manager: TJLabsPathPixelManager)
 }
 
@@ -58,10 +58,10 @@ class TJLabsPathPixelManager {
                         }
                     } else {
                         Log.d(TAG, "already exist pp data // data key : $key")
-
-                        ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                        val pathPixelData = loadSectorPathPixelFromCache(key)
+                        ppDataMap[key] = pathPixelData
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
-                        delegate?.onPathPixelData(this, true, key)
+                        delegate?.onPathPixelData(this, true, key, pathPixelData)
 
                     }
                 }
@@ -125,11 +125,13 @@ class TJLabsPathPixelManager {
                         completion(false, exception.message.toString())
                     }
                     ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
+                    delegate?.onPathPixelData(this@TJLabsPathPixelManager, false, key, null)
 
                 }
             } catch (e: Exception) {
                 completion(false, "")
                 ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
+                delegate?.onPathPixelData(this@TJLabsPathPixelManager, false, key, null)
 
             }
         }

@@ -41,7 +41,12 @@ class TJLabsResourceManager :
         delegate?.onError(this, ResourceError.BuildingLevel)
     }
 
-    override fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String) {
+    override fun onPathPixelData(
+        manager: TJLabsPathPixelManager,
+        isOn: Boolean,
+        pathPixelKey: String,
+        data: PathPixelData?
+    ) {
         delegate?.onPathPixelData(this, isOn, pathPixelKey)
     }
 
@@ -49,11 +54,21 @@ class TJLabsResourceManager :
         delegate?.onError(this, ResourceError.PathPixel)
     }
 
-    override fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String) {
+    override fun onBuildingLevelImageData(
+        manager: TJLabsImageManager,
+        isOn: Boolean,
+        imageKey: String,
+        data: Bitmap?
+    ) {
         delegate?.onBuildingLevelImageData(this, isOn, imageKey)
     }
 
-    override fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String) {
+    override fun onScaleOffsetData(
+        manager: TJLabsScaleOffsetManager,
+        isOn: Boolean,
+        scaleKey: String,
+        data: List<Float>
+    ) {
         delegate?.onScaleOffsetData(this, isOn, scaleKey)
     }
 
@@ -61,7 +76,12 @@ class TJLabsResourceManager :
         delegate?.onError(this, ResourceError.Scale)
     }
 
-    override fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String) {
+    override fun onEntranceData(
+        manager: TJLabsEntranceManager,
+        isOn: Boolean,
+        entranceKey: String,
+        data: EntranceRouteData?
+    ) {
         delegate?.onEntranceData(this, isOn, entranceKey)
     }
 
@@ -71,16 +91,16 @@ class TJLabsResourceManager :
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
-        loadPathPixel(application, region, sectorId)
-        loadEntrance(application, region, sectorId)
+        loadPathPixel(application, sectorId)
+        loadEntrance(application, sectorId)
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
         init(application, region)
-        loadPathPixel(application, region, sectorId)
-        loadImage(region, sectorId)
-        loadScaleOffset(region, sectorId)
-        loadUnit(region,sectorId)
+        loadPathPixel(application, sectorId)
+        loadImage(sectorId)
+        loadScaleOffset(sectorId)
+        loadUnit()
     }
 
 
@@ -139,7 +159,7 @@ class TJLabsResourceManager :
         pathPixelManager.updatePathPixel(region, sectorId, key, url) { _,_ ->}
     }
 
-    private fun loadPathPixel(application: Application, region: String, sectorId: Int) {
+    private fun loadPathPixel(application: Application, sectorId: Int) {
         pathPixelManager.init(application, sharedPrefs)
 
         if (!TJLabsPathPixelManager.isPerformed) {
@@ -151,7 +171,7 @@ class TJLabsResourceManager :
         }
     }
 
-    private fun loadBuildingLevel(region: String, sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
+    private fun loadBuildingLevel(sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
         val buildingLevelData = TJLabsBuildingLevelManager.buildingLevelDataMap[sectorId]
 
         if (!buildingLevelData.isNullOrEmpty()) {
@@ -159,28 +179,28 @@ class TJLabsResourceManager :
             return
         }
 
-        buildingLevelManager.loadBuildingLevel(region, sectorId, completion)
+        buildingLevelManager.loadBuildingLevel(sectorId, completion)
     }
 
-    private fun loadImage(region : String, sectorId: Int) {
-        loadBuildingLevel(region, sectorId) {
+    private fun loadImage(sectorId: Int) {
+        loadBuildingLevel(sectorId) {
             isSuccess, buildingLevelData ->
-            if (isSuccess) imageManager.loadImage(region, sectorId, buildingLevelData)
+            if (isSuccess) imageManager.loadImage(sectorId, buildingLevelData)
             else {
                 //Fail
             }
         }
     }
 
-    private fun loadScaleOffset(region : String, sectorId: Int) {
-        scaleOffsetManager.loadScaleOffset(region, sectorId)
+    private fun loadScaleOffset(sectorId: Int) {
+        scaleOffsetManager.loadScaleOffset(sectorId)
     }
 
-    private fun loadUnit(region : String, sectorId: Int) {
+    private fun loadUnit() {
 
     }
 
-    private fun loadEntrance(application: Application, region : String, sectorId: Int) {
+    private fun loadEntrance(application: Application, sectorId: Int) {
         entranceManager.init(application, sharedPrefs)
         entranceManager.loadEntrance(sectorId)
     }

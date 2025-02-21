@@ -5,7 +5,7 @@ import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getSc
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 
 interface ScaleOffsetDelegate {
-    fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String)
+    fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String, data : List<Float>)
     fun onScaleError(manager: TJLabsScaleOffsetManager)
 }
 
@@ -17,7 +17,7 @@ class TJLabsScaleOffsetManager {
     var delegate: ScaleOffsetDelegate? = null
     var region = ResourceRegion.KOREA
 
-    fun loadScaleOffset(region: String, sectorId: Int) {
+    fun loadScaleOffset(sectorId: Int) {
         val input = SectorInput(sectorId, "Android")
         TJLabsResourceNetworkManager.postScaleOffset(getUserBaseURL(), input, getScaleServerVersion()) {
           statusCode, scaleOutputList ->
@@ -36,7 +36,7 @@ class TJLabsScaleOffsetManager {
             val scaleKey = "scale_${sectorId}_${buildingName}_${levelName}"
             scaleOffsetDataMap[scaleKey] = element.image_scale
             Log.d(TAG, "success update offset // scaleKey :$scaleKey // scale : ${element.image_scale}")
-            delegate?.onScaleOffsetData(this, true, scaleKey)
+            delegate?.onScaleOffsetData(this, true, scaleKey, element.image_scale)
         }
     }
 }

@@ -17,7 +17,7 @@ class TJLabsBuildingLevelManager {
     var delegate: BuildingLevelDelegate? = null
     var region = ResourceRegion.KOREA
 
-    fun loadBuildingLevel(region: String, sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
+    fun loadBuildingLevel(sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
         val result = mutableMapOf<String, MutableList<String>>()
 
         buildingLevelDataMap[sectorId]?.let {
@@ -28,7 +28,7 @@ class TJLabsBuildingLevelManager {
                 getUserBaseURL(), input, getLevelServerVersion()
             ) { statusCode, buildingLevelList ->
                 if (statusCode == 200) {
-                    val buildingLevelInfo = makeBuildingLevelInfo(sectorId, buildingLevelList)
+                    val buildingLevelInfo = makeBuildingLevelInfo(buildingLevelList)
                     setBuildingLevelDataMap(sectorId, buildingLevelInfo)
                     Log.d("DeligateCheck", "true // buildingLevelData : $buildingLevelInfo // del")
                     delegate?.onBuildingLevelData(this, true, buildingLevelInfo)
@@ -45,7 +45,7 @@ class TJLabsBuildingLevelManager {
         buildingLevelDataMap[sectorId] = buildingLevelInfo.mapValues { it.value.toMutableList() }.toMutableMap()
     }
 
-    private fun makeBuildingLevelInfo(sectorId: Int, outputLevel: LevelOutputList): Map<String, List<String>> {
+    private fun makeBuildingLevelInfo(outputLevel: LevelOutputList): Map<String, List<String>> {
         val infoBuildingLevel = mutableMapOf<String, MutableList<String>>()
         for (element in outputLevel.level_list) {
             val buildingName = element.building_name

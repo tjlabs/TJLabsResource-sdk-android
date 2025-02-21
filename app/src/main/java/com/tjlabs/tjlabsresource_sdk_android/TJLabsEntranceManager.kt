@@ -4,8 +4,6 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsPathPixelManager.Companion.ppDataLoaded
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsPathPixelManager.Companion.ppDataMap
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getEntranceServerVersion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 import kotlinx.coroutines.Dispatchers
@@ -15,7 +13,7 @@ import java.io.File
 import java.net.URL
 
 interface EntranceDelegate {
-    fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String)
+    fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
     fun onEntranceError(manager: TJLabsEntranceManager)
 }
 
@@ -50,7 +48,7 @@ class TJLabsEntranceManager {
                 for ((key, url) in sectorPathPixelInfo) {
                     val pathPixelUrlInPrefs = loadEntranceRouteUrlFromCache(key)
                     if (pathPixelUrlInPrefs != url) {
-                        updateEntranceRoute(region, sectorId, key, url) { isSuccessSave, _ ->
+                        updateEntranceRoute(sectorId, key, url) { isSuccessSave, _ ->
                             if (isSuccessSave) {
                                 saveEntranceRouteUrlToCache(key, url)
                             }
@@ -59,10 +57,10 @@ class TJLabsEntranceManager {
                         }
                     } else {
                         Log.d(TAG, "already exist entrance data // data key : $key")
-
-                        entranceRouteDataMap[key] = loadEntranceRouteFileUrlFromCache(key)
+                        val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
+                        entranceRouteDataMap[key] = entranceRouteData
                         entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(true, url)
-                        delegate?.onEntranceData(this, true, key)
+                        delegate?.onEntranceData(this, true, key, entranceRouteData)
                     }
                 }
             } else {
@@ -113,7 +111,7 @@ class TJLabsEntranceManager {
         }
     }
 
-    private fun updateEntranceRoute(region : String, sectorId: Int, key: String, entranceUrl : String,
+    private fun updateEntranceRoute(sectorId: Int, key: String, entranceUrl : String,
                                     completion: (Boolean, String) -> Unit
     ) {
         GlobalScope.launch(Dispatchers.Main) {
@@ -130,13 +128,13 @@ class TJLabsEntranceManager {
                     if (exception != null) {
                         completion(false, exception.message.toString())
                     }
-                    ppDataLoaded[key] = PathPixelDataIsLoaded(false, entranceUrl)
-
+                    entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
+                    delegate?.onEntranceData(this@TJLabsEntranceManager, false, key, null)
                 }
             } catch (e: Exception) {
                 completion(false, "")
-                ppDataLoaded[key] = PathPixelDataIsLoaded(false, entranceUrl)
-
+                entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
+                delegate?.onEntranceData(this@TJLabsEntranceManager, false, key, null)
             }
         }
     }
