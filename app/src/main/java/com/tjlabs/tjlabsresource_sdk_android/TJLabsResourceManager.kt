@@ -47,7 +47,7 @@ class TJLabsResourceManager :
         pathPixelKey: String,
         data: PathPixelData?
     ) {
-        delegate?.onPathPixelData(this, isOn, pathPixelKey)
+        delegate?.onPathPixelData(this, isOn, pathPixelKey, data)
     }
 
     override fun onPathPixelError(manager: TJLabsPathPixelManager) {
@@ -60,7 +60,7 @@ class TJLabsResourceManager :
         imageKey: String,
         data: Bitmap?
     ) {
-        delegate?.onBuildingLevelImageData(this, isOn, imageKey)
+        delegate?.onBuildingLevelImageData(this, isOn, imageKey, data)
     }
 
     override fun onScaleOffsetData(
@@ -69,7 +69,7 @@ class TJLabsResourceManager :
         scaleKey: String,
         data: List<Float>
     ) {
-        delegate?.onScaleOffsetData(this, isOn, scaleKey)
+        delegate?.onScaleOffsetData(this, isOn, scaleKey, data)
     }
 
     override fun onScaleError(manager: TJLabsScaleOffsetManager) {
@@ -82,7 +82,7 @@ class TJLabsResourceManager :
         entranceKey: String,
         data: EntranceRouteData?
     ) {
-        delegate?.onEntranceData(this, isOn, entranceKey)
+        delegate?.onEntranceData(this, isOn, entranceKey, data)
     }
 
     override fun onEntranceError(manager: TJLabsEntranceManager) {
