@@ -4,12 +4,12 @@ import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getScaleServerVersion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 
-interface ScaleOffsetDelegate {
-    fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String, data : List<Float>)
-    fun onScaleError(manager: TJLabsScaleOffsetManager)
+internal interface ScaleOffsetDelegate {
+    fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
+    fun onScaleError()
 }
 
-class TJLabsScaleOffsetManager {
+internal class TJLabsScaleOffsetManager {
     companion object {
         var scaleOffsetDataMap: MutableMap<String, List<Float>> = mutableMapOf()
     }
@@ -24,7 +24,7 @@ class TJLabsScaleOffsetManager {
             if (statusCode == 200) {
                 updateScaleOffset(sectorId, scaleOutputList)
             } else {
-                delegate?.onScaleError(this)
+                delegate?.onScaleError()
             }
         }
     }
@@ -36,7 +36,7 @@ class TJLabsScaleOffsetManager {
             val scaleKey = "scale_${sectorId}_${buildingName}_${levelName}"
             scaleOffsetDataMap[scaleKey] = element.image_scale
             Log.d(TAG, "success update offset // scaleKey :$scaleKey // scale : ${element.image_scale}")
-            delegate?.onScaleOffsetData(this, true, scaleKey, element.image_scale)
+            delegate?.onScaleOffsetData( true, scaleKey, element.image_scale)
         }
     }
 }

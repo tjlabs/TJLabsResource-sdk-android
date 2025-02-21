@@ -12,13 +12,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
-interface PathPixelDelegate {
-    fun onPathPixelData(manager: TJLabsPathPixelManager, isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
-    fun onPathPixelError(manager: TJLabsPathPixelManager)
+internal interface PathPixelDelegate {
+    fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
+    fun onPathPixelError()
 }
 
 
-class TJLabsPathPixelManager {
+internal class TJLabsPathPixelManager {
     private lateinit var application: Application
     private lateinit var sharedPrefs : SharedPreferences
 
@@ -61,12 +61,12 @@ class TJLabsPathPixelManager {
                         val pathPixelData = loadSectorPathPixelFromCache(key)
                         ppDataMap[key] = pathPixelData
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
-                        delegate?.onPathPixelData(this, true, key, pathPixelData)
+                        delegate?.onPathPixelData( true, key, pathPixelData)
 
                     }
                 }
             }else {
-                delegate?.onPathPixelError(this)
+                delegate?.onPathPixelError()
             }
 
             Log.d(TAG, "ppDataMap : ${ppDataMap.keys}")
@@ -125,13 +125,13 @@ class TJLabsPathPixelManager {
                         completion(false, exception.message.toString())
                     }
                     ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
-                    delegate?.onPathPixelData(this@TJLabsPathPixelManager, false, key, null)
+                    delegate?.onPathPixelData(false, key, null)
 
                 }
             } catch (e: Exception) {
                 completion(false, "")
                 ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
-                delegate?.onPathPixelData(this@TJLabsPathPixelManager, false, key, null)
+                delegate?.onPathPixelData(false, key, null)
 
             }
         }

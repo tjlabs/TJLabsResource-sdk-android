@@ -77,12 +77,12 @@ enum class ResourceError {
 
 
 interface TJLabsResourceManagerDelegate {
-    fun onBuildingLevelData(manager: TJLabsResourceManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>)
-    fun onPathPixelData(manager: TJLabsResourceManager, isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
-    fun onBuildingLevelImageData(manager: TJLabsResourceManager, isOn: Boolean, imageKey: String, data : Bitmap?)
-    fun onScaleOffsetData(manager: TJLabsResourceManager, isOn: Boolean, scaleKey: String, data : List<Float>)
-    fun onEntranceData(manager: TJLabsResourceManager, isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
-    fun onError(manager: TJLabsResourceManager, error: ResourceError)
+    fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>)
+    fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
+    fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
+    fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
+    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onError(error: ResourceError)
 }
 
 data class EntranceData(

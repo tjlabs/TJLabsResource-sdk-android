@@ -25,7 +25,6 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onBuildingLevelData(
-        manager: TJLabsResourceManager,
         isOn: Boolean,
         buildingLevelData: Map<String, List<String>>
     ) {
@@ -35,7 +34,6 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onPathPixelData(
-        manager: TJLabsResourceManager,
         isOn: Boolean,
         pathPixelKey: String,
         data: PathPixelData?
@@ -45,17 +43,15 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onBuildingLevelImageData(
-        manager: TJLabsResourceManager,
         isOn: Boolean,
         imageKey: String,
         data: Bitmap?
     ) {
-        Log.d(TAG, "isOn : $isOn // imageKey : $imageKey")
+        Log.d(TAG, "isOn : $isOn // imageKey : $imageKey // data : $data")
 
     }
 
     override fun onScaleOffsetData(
-        manager: TJLabsResourceManager,
         isOn: Boolean,
         scaleKey: String,
         data: List<Float>
@@ -65,7 +61,6 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onEntranceData(
-        manager: TJLabsResourceManager,
         isOn: Boolean,
         entranceKey: String,
         data: EntranceRouteData?
@@ -74,7 +69,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     }
 
-    override fun onError(manager: TJLabsResourceManager, error: ResourceError) {
+    override fun onError(error: ResourceError) {
         Log.d(TAG, "error // error : $error")
 
     }

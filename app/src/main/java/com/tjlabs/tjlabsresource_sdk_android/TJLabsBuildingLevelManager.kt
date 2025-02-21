@@ -5,12 +5,12 @@ import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getLe
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUserBaseURL
 
 
-interface BuildingLevelDelegate {
-    fun onBuildingLevelData(manager: TJLabsBuildingLevelManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>)
-    fun onBuildingLevelError(manager: TJLabsBuildingLevelManager)
+internal interface BuildingLevelDelegate {
+    fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>)
+    fun onBuildingLevelError()
 }
 
-class TJLabsBuildingLevelManager {
+internal class TJLabsBuildingLevelManager {
     companion object {
         var buildingLevelDataMap: MutableMap<Int, MutableMap<String, MutableList<String>>> = mutableMapOf()
     }
@@ -31,10 +31,10 @@ class TJLabsBuildingLevelManager {
                     val buildingLevelInfo = makeBuildingLevelInfo(buildingLevelList)
                     setBuildingLevelDataMap(sectorId, buildingLevelInfo)
                     Log.d("DeligateCheck", "true // buildingLevelData : $buildingLevelInfo // del")
-                    delegate?.onBuildingLevelData(this, true, buildingLevelInfo)
+                    delegate?.onBuildingLevelData(true, buildingLevelInfo)
                     completion(true, buildingLevelInfo)
                 } else {
-                    delegate?.onBuildingLevelError(this)
+                    delegate?.onBuildingLevelError()
                     completion(false, result)
                 }
             }

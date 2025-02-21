@@ -33,60 +33,56 @@ class TJLabsResourceManager :
         entranceManager.delegate = this
     }
 
-    override fun onBuildingLevelData(manager: TJLabsBuildingLevelManager, isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
-        delegate?.onBuildingLevelData(this, isOn, buildingLevelData)
+    override fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
+        delegate?.onBuildingLevelData(isOn, buildingLevelData)
     }
 
-    override fun onBuildingLevelError(manager: TJLabsBuildingLevelManager) {
-        delegate?.onError(this, ResourceError.BuildingLevel)
+    override fun onBuildingLevelError() {
+        delegate?.onError(ResourceError.BuildingLevel)
     }
 
     override fun onPathPixelData(
-        manager: TJLabsPathPixelManager,
         isOn: Boolean,
         pathPixelKey: String,
         data: PathPixelData?
     ) {
-        delegate?.onPathPixelData(this, isOn, pathPixelKey, data)
+        delegate?.onPathPixelData(isOn, pathPixelKey, data)
     }
 
-    override fun onPathPixelError(manager: TJLabsPathPixelManager) {
-        delegate?.onError(this, ResourceError.PathPixel)
+    override fun onPathPixelError() {
+        delegate?.onError(ResourceError.PathPixel)
     }
 
     override fun onBuildingLevelImageData(
-        manager: TJLabsImageManager,
         isOn: Boolean,
         imageKey: String,
         data: Bitmap?
     ) {
-        delegate?.onBuildingLevelImageData(this, isOn, imageKey, data)
+        delegate?.onBuildingLevelImageData(isOn, imageKey, data)
     }
 
     override fun onScaleOffsetData(
-        manager: TJLabsScaleOffsetManager,
         isOn: Boolean,
         scaleKey: String,
         data: List<Float>
     ) {
-        delegate?.onScaleOffsetData(this, isOn, scaleKey, data)
+        delegate?.onScaleOffsetData(isOn, scaleKey, data)
     }
 
-    override fun onScaleError(manager: TJLabsScaleOffsetManager) {
-        delegate?.onError(this, ResourceError.Scale)
+    override fun onScaleError() {
+        delegate?.onError(ResourceError.Scale)
     }
 
     override fun onEntranceData(
-        manager: TJLabsEntranceManager,
         isOn: Boolean,
         entranceKey: String,
         data: EntranceRouteData?
     ) {
-        delegate?.onEntranceData(this, isOn, entranceKey, data)
+        delegate?.onEntranceData(isOn, entranceKey, data)
     }
 
-    override fun onEntranceError(manager: TJLabsEntranceManager) {
-        delegate?.onError(this, ResourceError.Entrance)
+    override fun onEntranceError() {
+        delegate?.onError(ResourceError.Entrance)
     }
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {

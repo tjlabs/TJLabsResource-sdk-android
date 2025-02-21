@@ -12,10 +12,10 @@ import java.net.MalformedURLException
 import java.net.URL
 
 
-interface BuildingLevelImageDelegate {
-    fun onBuildingLevelImageData(manager: TJLabsImageManager, isOn: Boolean, imageKey: String, data : Bitmap?)
+internal interface BuildingLevelImageDelegate {
+    fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
 }
-class TJLabsImageManager {
+internal class TJLabsImageManager {
     companion object {
         val buildingLevelImageDataMap = mutableMapOf<String, Bitmap>()
     }
@@ -31,10 +31,10 @@ class TJLabsImageManager {
                 loadBuildingLevelImage(sectorId, buildingName, levelName) { bitmap, _ ->
                     if (bitmap != null) {
                         buildingLevelImageDataMap[imageKey] = bitmap
-                        delegate?.onBuildingLevelImageData(this, true, imageKey, bitmap)
+                        delegate?.onBuildingLevelImageData( true, imageKey, bitmap)
 
                     } else {
-                        delegate?.onBuildingLevelImageData(this, false, imageKey, null)
+                        delegate?.onBuildingLevelImageData( false, imageKey, null)
                     }
                 }
             }

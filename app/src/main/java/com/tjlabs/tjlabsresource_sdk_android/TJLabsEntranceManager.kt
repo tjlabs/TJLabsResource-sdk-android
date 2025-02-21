@@ -12,12 +12,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
-interface EntranceDelegate {
-    fun onEntranceData(manager: TJLabsEntranceManager, isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
-    fun onEntranceError(manager: TJLabsEntranceManager)
+internal interface EntranceDelegate {
+    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onEntranceError()
 }
 
-class TJLabsEntranceManager {
+internal class TJLabsEntranceManager {
     private lateinit var application: Application
     private lateinit var sharedPrefs : SharedPreferences
 
@@ -60,11 +60,11 @@ class TJLabsEntranceManager {
                         val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
                         entranceRouteDataMap[key] = entranceRouteData
                         entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(true, url)
-                        delegate?.onEntranceData(this, true, key, entranceRouteData)
+                        delegate?.onEntranceData( true, key, entranceRouteData)
                     }
                 }
             } else {
-                delegate?.onEntranceError(this)
+                delegate?.onEntranceError()
             }
         }
     }
@@ -129,12 +129,12 @@ class TJLabsEntranceManager {
                         completion(false, exception.message.toString())
                     }
                     entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
-                    delegate?.onEntranceData(this@TJLabsEntranceManager, false, key, null)
+                    delegate?.onEntranceData(false, key, null)
                 }
             } catch (e: Exception) {
                 completion(false, "")
                 entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
-                delegate?.onEntranceData(this@TJLabsEntranceManager, false, key, null)
+                delegate?.onEntranceData(false, key, null)
             }
         }
     }
