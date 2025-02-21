@@ -3,6 +3,7 @@ package com.tjlabs.tjlabsresource_sdk_android
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.util.Log
 
 const val TAG = "TJLabsResourceManager"
@@ -53,7 +54,7 @@ class TJLabsResourceManager :
     }
 
     override fun onScaleOffsetData(manager: TJLabsScaleOffsetManager, isOn: Boolean, scaleKey: String) {
-        delegate?.onBuildingLevelImageData(this, isOn, scaleKey)
+        delegate?.onScaleOffsetData(this, isOn, scaleKey)
     }
 
     override fun onScaleError(manager: TJLabsScaleOffsetManager) {
@@ -128,7 +129,10 @@ class TJLabsResourceManager :
     {
         return TJLabsEntranceManager.entranceOuterWards
     }
-    
+
+    fun getBuildingLevelImageData() : Map<String, Bitmap>{
+        return TJLabsImageManager.buildingLevelImageDataMap
+    }
 
     fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
         TJLabsPathPixelManager.isPerformed = true
