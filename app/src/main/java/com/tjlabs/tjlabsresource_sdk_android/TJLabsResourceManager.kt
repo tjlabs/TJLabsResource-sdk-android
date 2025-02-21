@@ -3,82 +3,214 @@ package com.tjlabs.tjlabsresource_sdk_android
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.util.Log
 
+const val TAG = "TJLabsResourceManager"
 
-const val PATH_PIXEL_KEY_NAME = "path-pixel"
+class TJLabsResourceManager :
+    BuildingLevelDelegate,
+    PathPixelDelegate,
+    BuildingLevelImageDelegate,
+    ScaleOffsetDelegate,
+    EntranceDelegate
+{
 
-object TJLabsResourceManager  {
-    //TODO() 네트워크 상황 고려하여 진행 및 다운로드 요청
-    private lateinit var pathPixelManager : TJLabsPathPixelManager
-    private var region = JupiterRegion.KOREA
-    private var sectorId = 0
+    var delegate: TJLabsResourceManagerDelegate? = null
+
+    private var pathPixelManager = TJLabsPathPixelManager()
+    private var buildingLevelManager = TJLabsBuildingLevelManager()
+    private var imageManager = TJLabsImageManager()
+    private var scaleOffsetManager = TJLabsScaleOffsetManager()
+    private var entranceManager = TJLabsEntranceManager()
     private lateinit var sharedPrefs: SharedPreferences
 
-    val ppDataMap : MutableMap<String, PathPixelData> = mutableMapOf()
-    val ppDataLoaded : MutableMap<String, PathPixelDataIsLoaded> = mutableMapOf()
-
-    internal fun getResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String, resourceName : String) : String? {
-        val prefKey = "${key}_${resourceName}_dir"
-        return sharedPrefs.getString(prefKey, null)
+    init {
+        pathPixelManager.delegate = this
+        buildingLevelManager.delegate = this
+        imageManager.delegate = this
+        scaleOffsetManager.delegate = this
+        entranceManager.delegate = this
     }
 
-    internal fun getResourceVersionFromPrefs(sharedPrefs: SharedPreferences, key : String, resourceName : String) : String? {
-        val prefKey = "${key}_${resourceName}_version"
-        return sharedPrefs.getString(prefKey, null)
+    override fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
+        delegate?.onBuildingLevelData(isOn, buildingLevelData)
     }
 
-    internal fun saveResourceVersionInPrefs(sharedPrefs: SharedPreferences, key : String, resourceName : String, resourceVersion: String
+    override fun onBuildingLevelError() {
+        delegate?.onError(ResourceError.BuildingLevel)
+    }
+
+    override fun onPathPixelData(
+        isOn: Boolean,
+        pathPixelKey: String,
+        data: PathPixelData?
     ) {
-        val prefKey = "${key}_${resourceName}_version"
-        sharedPrefs.edit().putString(prefKey, resourceVersion).apply()
+        delegate?.onPathPixelData(isOn, pathPixelKey, data)
     }
 
-    internal fun saveResourceDirInPrefs(sharedPrefs: SharedPreferences, key: String, fileDir : String, resourceName : String) {
-        val prefKey = "${key}_${resourceName}_dir"
-        sharedPrefs.edit().putString(prefKey, fileDir).apply()
+    override fun onPathPixelError() {
+        delegate?.onError(ResourceError.PathPixel)
+    }
+
+    override fun onBuildingLevelImageData(
+        isOn: Boolean,
+        imageKey: String,
+        data: Bitmap?
+    ) {
+        delegate?.onBuildingLevelImageData(isOn, imageKey, data)
+    }
+
+    override fun onScaleOffsetData(
+        isOn: Boolean,
+        scaleKey: String,
+        data: List<Float>
+    ) {
+        delegate?.onScaleOffsetData(isOn, scaleKey, data)
+    }
+
+    override fun onScaleError() {
+        delegate?.onError(ResourceError.Scale)
+    }
+
+    override fun onEntranceData(
+        isOn: Boolean,
+        entranceKey: String,
+        data: EntranceRouteData?
+    ) {
+        delegate?.onEntranceData(isOn, entranceKey, data)
+    }
+
+    override fun onEntranceError() {
+        delegate?.onError(ResourceError.Entrance)
     }
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
-        init(application, region, sectorId)
-        loadPathPixel(application)
+        init(application, region)
+        loadPathPixel(application, sectorId)
+        loadEntrance(application, sectorId)
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
-        init(application, region, sectorId)
-        loadPathPixel(application)
+        init(application, region)
+        loadPathPixel(application, sectorId)
+        loadImage(sectorId)
+        loadScaleOffset(sectorId)
+        loadUnit()
     }
 
-//    fun getScaleOffSet() : Map<String, List<Float>> {
-//        return TJLabsScaleOffsetManager.
-//    }
 
-    private fun init(application: Application, region: String, sectorId: Int) {
-        this.region = region
-        this.sectorId = sectorId
+    private fun init(application: Application, region: String) {
         this.sharedPrefs = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
+        setRegion(region)
         TJLabsResourceNetworkConstant.setServerURL(region)
     }
 
-    private fun loadPathPixel(application: Application) {
-        if (!::pathPixelManager.isInitialized) {
-            pathPixelManager = TJLabsPathPixelManager(application, sharedPrefs)
-            pathPixelManager.loadPathPixel(region, sectorId)
+    fun getBuildingLevelData() : Map<Int, Map<String, List<String>>> {
+        return TJLabsBuildingLevelManager.buildingLevelDataMap
+    }
+
+    fun getPathPixelData() : Map<String, PathPixelData> {
+        return TJLabsPathPixelManager.ppDataMap
+    }
+
+    fun getPathPixelDataIsLoaded() : Map<String, PathPixelDataIsLoaded> {
+        return TJLabsPathPixelManager.ppDataLoaded
+    }
+
+    fun getScaleOffset() : Map<String, List<Float>> {
+        return TJLabsScaleOffsetManager.scaleOffsetDataMap
+    }
+
+    fun getEntranceNumbers() : Int {
+        return TJLabsEntranceManager.entranceNumbers
+    }
+
+    fun getEntranceData() : Map<String, EntranceData>
+    {
+        return TJLabsEntranceManager.entranceDataMap
+    }
+
+    fun getEntranceRouteData() : Map<String, EntranceRouteData>
+    {
+        return TJLabsEntranceManager.entranceRouteDataMap
+    }
+
+    fun getEntranceRouteDataIsLoaded() : Map<String, EntranceRouteDataIsLoaded>
+    {
+        return TJLabsEntranceManager.entranceRouteDataLoaded
+    }
+
+    fun getEntranceOuterWards() : List<String>
+    {
+        return TJLabsEntranceManager.entranceOuterWards
+    }
+
+    fun getBuildingLevelImageData() : Map<String, Bitmap>{
+        return TJLabsImageManager.buildingLevelImageDataMap
+    }
+
+    fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
+        TJLabsPathPixelManager.isPerformed = true
+        pathPixelManager.updatePathPixel(region, sectorId, key, url) { _,_ ->}
+    }
+
+    private fun loadPathPixel(application: Application, sectorId: Int) {
+        pathPixelManager.init(application, sharedPrefs)
+
+        if (!TJLabsPathPixelManager.isPerformed) {
+            TJLabsPathPixelManager.isPerformed = true
+            pathPixelManager.loadPathPixel(sectorId)
+            Log.d(TAG, "Load Path Pixel ... sector id : $sectorId ")
         } else {
-            Log.d("TJLabsResourceLog", "pp is already loaded")
+            Log.d(TAG, "loadPathPixel already performed")
         }
     }
 
-    private fun loadScaleOffset(application: Application) {
+    private fun loadBuildingLevel(sectorId: Int, completion: (Boolean, Map<String, List<String>>) -> Unit) {
+        val buildingLevelData = TJLabsBuildingLevelManager.buildingLevelDataMap[sectorId]
+
+        if (!buildingLevelData.isNullOrEmpty()) {
+            completion(true, buildingLevelData)
+            return
+        }
+
+        buildingLevelManager.loadBuildingLevel(sectorId, completion)
+    }
+
+    private fun loadImage(sectorId: Int) {
+        loadBuildingLevel(sectorId) {
+            isSuccess, buildingLevelData ->
+            if (isSuccess) imageManager.loadImage(sectorId, buildingLevelData)
+            else {
+                //Fail
+            }
+        }
+    }
+
+    private fun loadScaleOffset(sectorId: Int) {
+        scaleOffsetManager.loadScaleOffset(sectorId)
+    }
+
+    private fun loadUnit() {
 
     }
 
-    private fun loadUnit(application: Application) {
-
+    private fun loadEntrance(application: Application, sectorId: Int) {
+        entranceManager.init(application, sharedPrefs)
+        entranceManager.loadEntrance(sectorId)
     }
 
-    private fun loadRouteTrack(application: Application) {
-
+    private fun setRegion(region : String) {
+        TJLabsResourceNetworkConstant.setServerURL(region)
+        TJLabsFileDownloader.region = region
+        buildingLevelManager.region = region
+        imageManager.region = region
+        pathPixelManager.region = region
+        scaleOffsetManager.region = region
+        entranceManager.region = region
     }
+
+
 
 }

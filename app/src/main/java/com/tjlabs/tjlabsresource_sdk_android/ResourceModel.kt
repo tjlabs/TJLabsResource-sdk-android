@@ -1,5 +1,7 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
+import android.graphics.Bitmap
+
 data class PathPixelData(
     val roadType: List<Int> = listOf(),
     val nodeNumber: List<Int> = listOf(),
@@ -53,7 +55,7 @@ internal data class ScaleOutput(
     val image_scale : List<Float> = listOf()
 )
 
-data class JupiterRegion(
+data class ResourceRegion(
     val KOREA : String,
     val US_EAST : String,
     val CANADA : String
@@ -64,3 +66,67 @@ data class JupiterRegion(
         val CANADA : String = "Canada"
     }
 }
+
+enum class ResourceError {
+    PathPixel,
+    BuildingLevel,
+    Image,
+    Scale,
+    Entrance
+}
+
+
+interface TJLabsResourceManagerDelegate {
+    fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>)
+    fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
+    fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
+    fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
+    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onError(error: ResourceError)
+}
+
+data class EntranceData(
+    var number: Int = 0,
+    var networkStatus: Boolean = false,
+    var velocityScale: Float = 0f,
+    var innerWardId: String = "",
+    var innerWardRssi: Float = 0f,
+    var innerWardCoord: List<Int> = emptyList()
+)
+
+data class EntranceRouteData(
+    var routeLevel: List<String> = emptyList(),
+    var route: List<List<Float>> = listOf(emptyList())
+)
+
+data class EntranceRouteDataIsLoaded(
+    var isLoaded: Boolean = false,
+    var url: String = ""
+)
+
+data class EntranceRf(
+    val id : String = "",
+    val rss : Float = 0f,
+    val pos : List<Int> = listOf(),
+    val direction : Int = 0
+)
+
+data class Entrance(
+    val spot_number: Int = 0,
+    val outermost_ward_id: String = "",
+    val scale : Float = 0f,
+    val url : String = "",
+    val network_status : Boolean = false,
+    val innermost_ward : EntranceRf = EntranceRf()
+)
+
+data class EntranceList(
+    val building_name: String = "",
+    val level_name: String = "",
+    val entrances : List<Entrance> = listOf()
+)
+
+
+data class EntranceOutputList(
+    val entrance_list: List<EntranceList> = listOf()
+)

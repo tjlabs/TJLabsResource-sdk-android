@@ -65,4 +65,23 @@ internal object TJLabsResourceNetworkManager {
         })
     }
 
+    fun postEntrance(url : String, input : SectorInput, entranceServerVersion: String, completion: (Int, EntranceOutputList) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postGeofence = retrofit.create(PostInput::class.java)
+        postGeofence.postEntrance(input, entranceServerVersion).enqueue(object :
+            Callback<EntranceOutputList> {
+            override fun onFailure(call: Call<EntranceOutputList>, t: Throwable) {
+                completion(500, EntranceOutputList())
+            }
+            override fun onResponse(call: Call<EntranceOutputList>, response: Response<EntranceOutputList>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: EntranceOutputList()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  EntranceOutputList())
+                }
+            }
+        })
+    }
 }
