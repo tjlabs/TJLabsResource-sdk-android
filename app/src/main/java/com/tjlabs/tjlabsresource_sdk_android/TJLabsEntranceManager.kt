@@ -46,8 +46,8 @@ internal class TJLabsEntranceManager {
 
             if (isSuccess) {
                 for ((key, url) in sectorPathPixelInfo) {
-                    val pathPixelUrlInPrefs = loadEntranceRouteUrlFromCache(key)
-                    if (pathPixelUrlInPrefs != url) {
+                    val entranceUrlInPrefs = loadEntranceRouteUrlFromCache(key)
+                    if (entranceUrlInPrefs != url) {
                         updateEntranceRoute(sectorId, key, url) { isSuccessSave, _ ->
                             if (isSuccessSave) {
                                 saveEntranceRouteUrlToCache(key, url)
