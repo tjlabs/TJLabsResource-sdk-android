@@ -72,7 +72,8 @@ enum class ResourceError {
     BuildingLevel,
     Image,
     Scale,
-    Entrance
+    Entrance,
+    Unit
 }
 
 
@@ -82,6 +83,7 @@ interface TJLabsResourceManagerDelegate {
     fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
     fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
     fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
     fun onError(error: ResourceError)
 }
 
@@ -129,4 +131,25 @@ data class EntranceList(
 
 data class EntranceOutputList(
     val entrance_list: List<EntranceList> = listOf()
+)
+
+data class UnitData(
+    val category: Int = 0,
+    val number: Int = 0,
+    val name: String = "",
+    val accessibility: String = "",
+    val restriction: Boolean = false,
+    val visibility: Boolean = false,
+    val x: Float = 0f,
+    val y: Float = 0f
+)
+
+data class UnitOutput (
+    val building_name: String = "",
+    val level_name: String = "",
+    val units : List<UnitData> = listOf()
+)
+
+data class UnitOutputList (
+    val unit_list : List<UnitOutput> = listOf()
 )
