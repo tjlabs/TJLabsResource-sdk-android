@@ -13,7 +13,8 @@ class TJLabsResourceManager :
     PathPixelDelegate,
     BuildingLevelImageDelegate,
     ScaleOffsetDelegate,
-    EntranceDelegate
+    EntranceDelegate,
+    UnitDelegate
 {
 
     var delegate: TJLabsResourceManagerDelegate? = null
@@ -23,6 +24,8 @@ class TJLabsResourceManager :
     private var imageManager = TJLabsImageManager()
     private var scaleOffsetManager = TJLabsScaleOffsetManager()
     private var entranceManager = TJLabsEntranceManager()
+    private var unitManager = TJLabsUnitManager()
+
     private lateinit var sharedPrefs: SharedPreferences
 
     init {
@@ -31,6 +34,7 @@ class TJLabsResourceManager :
         imageManager.delegate = this
         scaleOffsetManager.delegate = this
         entranceManager.delegate = this
+        unitManager.delegate = this
     }
 
     override fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
@@ -85,6 +89,16 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Entrance)
     }
 
+    override fun onUnitData(isOn: Boolean, unitKey: String, data: List<UnitData>?) {
+        delegate?.onUnitData(isOn, unitKey, data)
+    }
+
+    override fun onUnitDataError() {
+        delegate?.onError(ResourceError.Unit)
+    }
+
+
+
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
         loadPathPixel(application, sectorId)
@@ -96,8 +110,9 @@ class TJLabsResourceManager :
         loadPathPixel(application, sectorId)
         loadImage(sectorId)
         loadScaleOffset(sectorId)
-        loadUnit()
+        loadUnit(sectorId)
     }
+
 
 
     private fun init(application: Application, region: String) {
@@ -150,6 +165,10 @@ class TJLabsResourceManager :
         return TJLabsImageManager.buildingLevelImageDataMap
     }
 
+    fun getUnitData() : Map<String, List<UnitData>> {
+        return TJLabsUnitManager.unitDataMap
+    }
+
     fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
         TJLabsPathPixelManager.isPerformed = true
         pathPixelManager.updatePathPixel(region, sectorId, key, url) { _,_ ->}
@@ -192,8 +211,8 @@ class TJLabsResourceManager :
         scaleOffsetManager.loadScaleOffset(sectorId)
     }
 
-    private fun loadUnit() {
-
+    private fun loadUnit(sectorId: Int) {
+        unitManager.loadUnits(sectorId)
     }
 
     private fun loadEntrance(application: Application, sectorId: Int) {
@@ -209,6 +228,7 @@ class TJLabsResourceManager :
         pathPixelManager.region = region
         scaleOffsetManager.region = region
         entranceManager.region = region
+        unitManager.region = region
     }
 
 

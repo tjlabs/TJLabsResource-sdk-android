@@ -7,8 +7,8 @@ import retrofit2.Response
 internal object TJLabsResourceNetworkManager {
     fun postPathPixel(url : String, input : SectorInput, pathPixelServerVersion: String, completion: (Int, OutputPathPixel) -> Unit) {
         val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
-        val postGeofence = retrofit.create(PostInput::class.java)
-        postGeofence.postPathPixel(input, pathPixelServerVersion).enqueue(object :
+        val postPathPixel = retrofit.create(PostInput::class.java)
+        postPathPixel.postPathPixel(input, pathPixelServerVersion).enqueue(object :
             Callback<OutputPathPixel> {
             override fun onFailure(call: Call<OutputPathPixel>, t: Throwable) {
                 completion(500, OutputPathPixel())
@@ -67,8 +67,8 @@ internal object TJLabsResourceNetworkManager {
 
     fun postEntrance(url : String, input : SectorInput, entranceServerVersion: String, completion: (Int, EntranceOutputList) -> Unit) {
         val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
-        val postGeofence = retrofit.create(PostInput::class.java)
-        postGeofence.postEntrance(input, entranceServerVersion).enqueue(object :
+        val postEntrance = retrofit.create(PostInput::class.java)
+        postEntrance.postEntrance(input, entranceServerVersion).enqueue(object :
             Callback<EntranceOutputList> {
             override fun onFailure(call: Call<EntranceOutputList>, t: Throwable) {
                 completion(500, EntranceOutputList())
@@ -80,6 +80,26 @@ internal object TJLabsResourceNetworkManager {
                     completion(statusCode, resultData)
                 } else {
                     completion(500,  EntranceOutputList())
+                }
+            }
+        })
+    }
+
+    fun postUnit(url : String, input : SectorIdInput, unitServerVersion: String, completion: (Int, UnitOutputList) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postUnit = retrofit.create(PostInput::class.java)
+        postUnit.postUnit(input, unitServerVersion).enqueue(object :
+            Callback<UnitOutputList> {
+            override fun onFailure(call: Call<UnitOutputList>, t: Throwable) {
+                completion(500, UnitOutputList())
+            }
+            override fun onResponse(call: Call<UnitOutputList>, response: Response<UnitOutputList>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: UnitOutputList()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  UnitOutputList())
                 }
             }
         })

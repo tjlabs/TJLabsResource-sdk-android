@@ -20,4 +20,7 @@ internal interface PostInput {
     @POST("/{entrance_version}/entrance")
     fun postEntrance(@Body param: SectorInput, @Path("entrance_version") entranceVersion : String) : Call<EntranceOutputList>
 
+    @POST("/{unit_version}/unit")
+    fun postUnit(@Body param: SectorIdInput, @Path("unit_version") unitVersion : String) : Call<UnitOutputList>
+
 }

@@ -69,6 +69,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     }
 
+    override fun onUnitData(isOn: Boolean, unitKey: String, data: List<UnitData>?) {
+        Log.d(TAG, "isOn : $isOn // unit : $data")
+    }
+
     override fun onError(error: ResourceError) {
         Log.d(TAG, "error // error : $error")
 
