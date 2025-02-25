@@ -28,6 +28,7 @@ internal object TJLabsResourceNetworkConstant {
     val USER_PARAM_SERVER_VERSION = "2024-11-13"
     val USER_GEO_SERVER_VERSION = "2024-11-15"
     val USER_ENTERANCE_SERVER_VERSION = "2024-11-14"
+    val USER_UNIT_SERVER_VERSION = "2024-11-13"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
@@ -94,5 +95,9 @@ internal object TJLabsResourceNetworkConstant {
 
     fun getEntranceServerVersion() : String {
         return USER_ENTERANCE_SERVER_VERSION
+    }
+
+    fun getUnitServerVersion() : String {
+        return USER_UNIT_SERVER_VERSION
     }
 }
