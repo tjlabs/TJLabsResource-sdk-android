@@ -1,6 +1,6 @@
 plugins {
-    id("com.android.application")
-//    id("com.android.library")
+//    id("com.android.application")
+    id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
 }
@@ -10,12 +10,11 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
+//        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
+//        versionCode = 1
+//        versionName = "1.0"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
