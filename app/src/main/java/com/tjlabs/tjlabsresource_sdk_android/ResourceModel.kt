@@ -73,7 +73,8 @@ enum class ResourceError {
     Image,
     Scale,
     Entrance,
-    Unit
+    Unit,
+    Param
 }
 
 
@@ -84,6 +85,7 @@ interface TJLabsResourceManagerDelegate {
     fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
     fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
     fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
+    fun onParamData(isOn: Boolean, data : ParameterData?)
     fun onError(error: ResourceError)
 }
 
@@ -152,4 +154,11 @@ data class UnitOutput (
 
 data class UnitOutputList (
     val unit_list : List<UnitOutput> = listOf()
+)
+
+data class ParameterData(
+    val trajectory_length: Int = 0,
+    val trajectory_diagonal: Int = 0,
+    val debug :Boolean = false,
+    val standard_rss : List<Int> = listOf()
 )

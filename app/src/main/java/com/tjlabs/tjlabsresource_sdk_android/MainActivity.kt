@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         val tjlabsResourceManager = TJLabsResourceManager()
         tjlabsResourceManager.delegate = this
-        tjlabsResourceManager.loadMapResources(application, ResourceRegion.KOREA, 6)
+        tjlabsResourceManager.loadJupiterResources(application, ResourceRegion.KOREA, 6)
     }
 
     override fun onBuildingLevelData(
@@ -71,6 +71,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     override fun onUnitData(isOn: Boolean, unitKey: String, data: List<UnitData>?) {
         Log.d(TAG, "isOn : $isOn // unit : $data")
+    }
+
+    override fun onParamData(isOn: Boolean, data: ParameterData?) {
+        Log.d(TAG, "isOn : $isOn // param : $data")
     }
 
     override fun onError(error: ResourceError) {

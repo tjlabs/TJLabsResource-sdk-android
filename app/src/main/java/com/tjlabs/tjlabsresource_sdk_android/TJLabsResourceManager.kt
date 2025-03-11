@@ -14,8 +14,7 @@ class TJLabsResourceManager :
     BuildingLevelImageDelegate,
     ScaleOffsetDelegate,
     EntranceDelegate,
-    UnitDelegate
-{
+    UnitDelegate, ParamDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
@@ -25,6 +24,7 @@ class TJLabsResourceManager :
     private var scaleOffsetManager = TJLabsScaleOffsetManager()
     private var entranceManager = TJLabsEntranceManager()
     private var unitManager = TJLabsUnitManager()
+    private var paramManager = TJLabsParamManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -35,6 +35,8 @@ class TJLabsResourceManager :
         scaleOffsetManager.delegate = this
         entranceManager.delegate = this
         unitManager.delegate = this
+        paramManager.delegate = this
+
     }
 
     override fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
@@ -98,11 +100,20 @@ class TJLabsResourceManager :
     }
 
 
+    override fun onParamData(isOn: Boolean, data: ParameterData?) {
+        delegate?.onParamData(isOn, data)
+    }
+
+    override fun onParamError() {
+        delegate?.onError(ResourceError.Param)
+    }
+
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
         loadPathPixel(application, sectorId)
         loadEntrance(application, sectorId)
+        loadParam(sectorId)
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
@@ -220,6 +231,10 @@ class TJLabsResourceManager :
         entranceManager.loadEntrance(sectorId)
     }
 
+    private fun loadParam(sectorId: Int) {
+        paramManager.loadParam(sectorId)
+    }
+
     private fun setRegion(region : String) {
         TJLabsResourceNetworkConstant.setServerURL(region)
         TJLabsFileDownloader.region = region
@@ -230,7 +245,6 @@ class TJLabsResourceManager :
         entranceManager.region = region
         unitManager.region = region
     }
-
 
 
 }
