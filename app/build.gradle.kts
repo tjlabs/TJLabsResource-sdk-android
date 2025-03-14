@@ -1,3 +1,5 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
 //    id("com.android.application")
     id("com.android.library")
@@ -16,6 +18,12 @@ android {
         minSdk = 29
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    libraryVariants.all {
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "app-release-resource.aar"
+        }
     }
 
     buildTypes {
