@@ -104,4 +104,24 @@ internal object TJLabsResourceNetworkManager {
             }
         })
     }
+
+    fun postParameter(url : String, input : SectorInput, parameterServerVersion : String, completion: (Int, ParameterData) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postParameter = retrofit.create(PostInput::class.java)
+        postParameter.postParameter(input, parameterServerVersion).enqueue(object :
+            Callback<ParameterData> {
+            override fun onFailure(call: Call<ParameterData>, t: Throwable) {
+                completion(500, ParameterData())
+            }
+            override fun onResponse(call: Call<ParameterData>, response: Response<ParameterData>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: ParameterData()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  ParameterData())
+                }
+            }
+        })
+    }
 }
