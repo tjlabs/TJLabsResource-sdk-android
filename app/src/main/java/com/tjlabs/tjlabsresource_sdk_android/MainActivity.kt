@@ -77,6 +77,34 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         Log.d(TAG, "isOn : $isOn // param : $data")
     }
 
+    override fun onEntranceAreaData(
+        isOn: Boolean,
+        key: String,
+        data: List<List<Float>>?
+    ) {
+        Log.d(TAG, "isOn : $isOn // entrance : $data // key : $key")
+    }
+
+    override fun onEntranceMatchingAreaData(
+        isOn: Boolean,
+        key: String,
+        data: List<List<Float>>?
+    ) {
+        Log.d(TAG, "isOn : $isOn // entrance matching : $data // key : $key")
+    }
+
+    override fun onLevelChangeArea(
+        isOn: Boolean,
+        key: String,
+        data: List<List<Float>>?
+    ) {
+        Log.d(TAG, "isOn : $isOn // level change : $data // key :$key")
+    }
+
+    override fun onDrModeArea(isOn: Boolean, key: String, data: DrModeArea?) {
+        Log.d(TAG, "isOn : $isOn // dr mode: $data // key : $key")
+    }
+
     override fun onError(error: ResourceError) {
         Log.d(TAG, "error // error : $error")
 
