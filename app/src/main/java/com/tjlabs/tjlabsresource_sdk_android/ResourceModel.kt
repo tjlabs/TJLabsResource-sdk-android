@@ -74,7 +74,8 @@ enum class ResourceError {
     Scale,
     Entrance,
     Unit,
-    Param
+    Param,
+    Geo
 }
 
 
@@ -86,6 +87,10 @@ interface TJLabsResourceManagerDelegate {
     fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
     fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
     fun onParamData(isOn: Boolean, data : ParameterData?)
+    fun onEntranceAreaData(isOn : Boolean, key : String, data : List<List<Float>> ?)
+    fun onEntranceMatchingAreaData(isOn : Boolean, key : String, data : List<List<Float>> ?)
+    fun onLevelChangeArea(isOn : Boolean, key : String, data : List<List<Float>>?)
+    fun onDrModeArea(isOn : Boolean, key : String, data : DrModeArea?)
     fun onError(error: ResourceError)
 }
 
