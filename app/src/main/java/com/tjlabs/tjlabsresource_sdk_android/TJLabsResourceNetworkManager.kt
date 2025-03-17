@@ -124,4 +124,24 @@ internal object TJLabsResourceNetworkManager {
             }
         })
     }
+
+    fun postGeofence(url : String, input : SectorInput, geofenceServerVersion : String, completion: (Int, OutputGeofence) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstant.genRetrofit(url)
+        val postGeofence = retrofit.create(PostInput::class.java)
+        postGeofence.postGeoFence(input, geofenceServerVersion).enqueue(object :
+            Callback<OutputGeofence> {
+            override fun onFailure(call: Call<OutputGeofence>, t: Throwable) {
+                completion(500, OutputGeofence())
+            }
+            override fun onResponse(call: Call<OutputGeofence>, response: Response<OutputGeofence>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()?: OutputGeofence()
+                    completion(statusCode, resultData)
+                } else {
+                    completion(500,  OutputGeofence())
+                }
+            }
+        })
+    }
 }
