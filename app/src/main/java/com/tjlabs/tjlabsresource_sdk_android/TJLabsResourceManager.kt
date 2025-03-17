@@ -109,32 +109,8 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Param)
     }
 
-    override fun onEntranceAreaData(
-        isOn: Boolean,
-        key: String,
-        data: List<List<Float>>?
-    ) {
-        delegate?.onEntranceAreaData(isOn, key, data)
-    }
-
-    override fun onEntranceMatchingAreaData(
-        isOn: Boolean,
-        key: String,
-        data: List<List<Float>>?
-    ) {
-        delegate?.onEntranceMatchingAreaData(isOn, key, data)
-    }
-
-    override fun onLevelChangeArea(
-        isOn: Boolean,
-        key: String,
-        data: List<List<Float>>?
-    ) {
-        delegate?.onLevelChangeArea(isOn, key, data)
-    }
-
-    override fun onDrModeArea(isOn: Boolean, key: String, data: DrModeArea?) {
-        delegate?.onDrModeArea(isOn, key, data)
+    override fun onGeofenceData(isOn: Boolean, key: String, geofenceData: Map<String, Areas>) {
+        delegate?.onGeofenceData(isOn, key, geofenceData)
     }
 
     override fun onGeofenceError() {
@@ -157,7 +133,6 @@ class TJLabsResourceManager :
         loadScaleOffset(sectorId)
         loadUnit(sectorId)
     }
-
 
 
     private fun init(application: Application, region: String) {
@@ -214,22 +189,9 @@ class TJLabsResourceManager :
         return TJLabsUnitManager.unitDataMap
     }
 
-    fun getEntranceArea() : Map<String, List<List<Float>>>{
-        return TJLabsGeofenceManager.entranceArea
+    fun getGeofenceData() : Map<String, Areas> {
+        return TJLabsGeofenceManager.geofenceDataMap
     }
-
-    fun getEntranceMatchingArea() : Map<String, List<List<Float>>>{
-        return TJLabsGeofenceManager.entranceMatchingArea
-    }
-
-    fun getLevelChangeArea() : Map<String, List<List<Float>>>{
-        return TJLabsGeofenceManager.levelChangeArea
-    }
-
-    fun getDrModeArea() : Map<String, DrModeArea>{
-        return TJLabsGeofenceManager.sectorDRModeArea
-    }
-
 
     fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
         TJLabsPathPixelManager.isPerformed = true

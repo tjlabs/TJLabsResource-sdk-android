@@ -5,20 +5,15 @@ import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getUs
 
 
 internal interface GeofenceDelegate{
-    fun onEntranceAreaData(isOn : Boolean, key : String, data : List<List<Float>>?)
-    fun onEntranceMatchingAreaData(isOn : Boolean, key : String, data : List<List<Float>> ?)
-    fun onLevelChangeArea(isOn : Boolean, key : String, data : List<List<Float>>?)
-    fun onDrModeArea(isOn : Boolean, key : String, data : DrModeArea?)
+    fun onGeofenceData(isOn : Boolean, key : String, geofenceData : Map<String, Areas> )
     fun onGeofenceError()
 }
 
 
 internal class TJLabsGeofenceManager {
     companion object {
-        var entranceArea: MutableMap<String, List<List<Float>>> = mutableMapOf()
-        var entranceMatchingArea: MutableMap<String, List<List<Float>>> = mutableMapOf()
-        var levelChangeArea: MutableMap<String, List<List<Float>>> = mutableMapOf()
-        var sectorDRModeArea : MutableMap<String, DrModeArea> = mutableMapOf()
+        var geofenceDataMap : MutableMap<String, Areas> = mutableMapOf()
+
     }
 
     var delegate: GeofenceDelegate? = null
@@ -38,38 +33,14 @@ internal class TJLabsGeofenceManager {
                     for (element in geoInfo) {
                         val buildingName = element.building_name
                         val levelName = element.level_name
-                        val key = "${input.sector_id}_${buildingName}_${levelName}"
+                        val key = "${region}_${input.sector_id}_${buildingName}_${levelName}"
 
                         val entranceAreaResult = element.entrance_area
                         val entranceMatchingAreaResult = element.entrance_matching_area
                         val levelChangeAreaResult = element.level_change_area
                         val drModeAreasResult = element.dr_mode_areas
-
-                        if (entranceAreaResult.isNotEmpty()) {
-                            entranceArea[key] = entranceAreaResult.map { innerList ->
-                                innerList.map { it.toFloat() }
-                            }
-                            delegate?.onEntranceAreaData(true, key, entranceArea[key])
-                        }
-                        if (entranceMatchingAreaResult.isNotEmpty()) {
-                            entranceMatchingArea[key] = entranceMatchingAreaResult.map { innerList ->
-                                innerList.map { it.toFloat() }
-                            }
-                            delegate?.onEntranceMatchingAreaData(true, key, entranceMatchingArea[key])
-                        }
-                        if (levelChangeAreaResult.isNotEmpty()) {
-                            levelChangeArea[key] = levelChangeAreaResult.map { innerList ->
-                                innerList.map { it.toFloat() }
-                            }
-                            delegate?.onLevelChangeArea(true, key, levelChangeArea[key])
-                        }
-                        if (drModeAreasResult.isNotEmpty()) {
-                            for (info in drModeAreasResult) {
-                                val drModeKey = "${sectorId}_${buildingName}_${levelName}_${info.number}"
-                                sectorDRModeArea[drModeKey] = DrModeArea(info.number, info.range, info.direction, info.nodes)
-                                delegate?.onDrModeArea(true, drModeKey, DrModeArea(info.number, info.range, info.direction, info.nodes))
-                            }
-                        }
+                        geofenceDataMap[key] = Areas(entranceAreaResult, entranceMatchingAreaResult, levelChangeAreaResult, drModeAreasResult)
+                        delegate?.onGeofenceData(true, key, mapOf(key to Areas(entranceAreaResult, entranceMatchingAreaResult, levelChangeAreaResult, drModeAreasResult)))
                     }
                 }else {
                     delegate?.onGeofenceError()
