@@ -47,18 +47,21 @@ internal class TJLabsPathPixelManager {
 
             if (isSuccess) {
                 for ((key, url) in sectorPathPixelInfo) {
-                    val pathPixelUrlInPrefs = loadPathPixelUrlFromCache(key)
+                    val pathPixelUrlInPrefs = loadPathPixelServerUrlFromCache(key)
                     if (pathPixelUrlInPrefs != url) {
                         updatePathPixel(region, sectorId, key, url) { isSuccessSave, _ ->
                             if (isSuccessSave) {
                                 savePathPixelUrlToCache(key, url)
                             }
-                            ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                            val pathPixelData = loadPathPixelFileFromCache(key)
+                            ppDataMap[key] = loadPathPixelFileFromCache(key)
                             ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
+                            delegate?.onPathPixelData( true, key, pathPixelData)
+
                         }
                     } else {
                         Log.d(TAG, "already exist pp data // data key : $key")
-                        val pathPixelData = loadSectorPathPixelFromCache(key)
+                        val pathPixelData = loadPathPixelFileFromCache(key)
                         ppDataMap[key] = pathPixelData
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
                         delegate?.onPathPixelData( true, key, pathPixelData)
@@ -114,9 +117,9 @@ internal class TJLabsPathPixelManager {
             try {
                 val (file, dir, exception) = downloadCSVFile(application, URL(ppUrl),sectorId, "$key.csv")
                 if (file != null) {
-                    ppDataMap[key] = loadSectorPathPixelFromCache(key)
+                    ppDataMap[key] = loadPathPixelFileFromCache(key)
                     ppDataLoaded[key] = PathPixelDataIsLoaded(true, ppUrl)
-                    savePathPixelUrlToCache(key, dir)
+                    savePathPixelCacheDirToCache(key, dir)
                     completion(true, "")
                     Log.d(TAG, "success update pp // key :$key")
 
@@ -138,7 +141,7 @@ internal class TJLabsPathPixelManager {
 
     }
 
-    private fun loadPathPixelUrlFromCache(key: String): String? {
+    private fun loadPathPixelServerUrlFromCache(key: String): String? {
         val keyPpURL = "TJLabsPathPixelURL_$key"
         return sharedPrefs.getString(keyPpURL, null)
     }
@@ -149,12 +152,24 @@ internal class TJLabsPathPixelManager {
         Log.d("TJLabsResource", "Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
     }
 
+    private fun loadPathPixelCacheDirFromCache(key: String): String? {
+        val keyPpURL = "TJLabsPathPixelDir_$key"
+        return sharedPrefs.getString(keyPpURL, null)
+    }
 
-    private fun loadSectorPathPixelFromCache(key : String) : PathPixelData{
-        val loadedPpLocalUrl = loadPathPixelUrlFromCache(key)
-        if (!loadedPpLocalUrl.isNullOrEmpty()) {
+    private fun savePathPixelCacheDirToCache(key: String, pathPixelUrlFromServer: String) {
+        val keyPpURL = "TJLabsPathPixelDir_$key"
+        sharedPrefs.edit().putString(keyPpURL, pathPixelUrlFromServer).apply()
+        Log.d("TJLabsResource", "Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
+    }
+
+
+    private fun loadPathPixelFileFromCache(key : String) : PathPixelData{
+        val loadedPpLocalDir = loadPathPixelCacheDirFromCache(key)
+        Log.d(TAG, "loadedPpLocalDir : $loadedPpLocalDir")
+        if (!loadedPpLocalDir.isNullOrEmpty()) {
             var fivalext = ""
-            val file = File(loadedPpLocalUrl)
+            val file = File(loadedPpLocalDir)
             if (file.exists()) {
                 fivalext = file.readText()
             }

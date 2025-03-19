@@ -52,8 +52,10 @@ internal class TJLabsEntranceManager {
                             if (isSuccessSave) {
                                 saveEntranceRouteUrlToCache(key, url)
                             }
+                            val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
                             entranceRouteDataMap[key] = loadEntranceRouteFileUrlFromCache(key)
                             entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(isSuccessSave, url)
+                            delegate?.onEntranceData( true, key, entranceRouteData)
                         }
                     } else {
                         Log.d(TAG, "already exist entrance data // data key : $key")
@@ -120,7 +122,7 @@ internal class TJLabsEntranceManager {
                 if (file != null) {
                     entranceRouteDataMap[key] = loadEntranceRouteFileUrlFromCache(key)
                     entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(true, entranceUrl)
-                    saveEntranceRouteUrlToCache(key, dir)
+                    saveEntranceRouteDirToCache(key, dir)
                     completion(true, "")
                     Log.d(TAG, "success update entrance // key :$key")
 
@@ -151,7 +153,7 @@ internal class TJLabsEntranceManager {
     }
 
     private fun loadEntranceRouteFileUrlFromCache(key : String) : EntranceRouteData{
-        val loadedPpLocalUrl = loadEntranceRouteUrlFromCache(key)
+        val loadedPpLocalUrl = loadEntranceRouteDirFromCache(key)
         if (!loadedPpLocalUrl.isNullOrEmpty()) {
             var fivalext = ""
             val file = File(loadedPpLocalUrl)
@@ -162,6 +164,18 @@ internal class TJLabsEntranceManager {
         }
         return EntranceRouteData()
     }
+
+    private fun loadEntranceRouteDirFromCache(key: String): String? {
+        val keyPpURL = "TJLabsEntranceRouteDir_$key"
+        return sharedPrefs.getString(keyPpURL, null)
+    }
+
+    private fun saveEntranceRouteDirToCache(key: String, pathPixelUrlFromServer: String) {
+        val keyPpURL = "TJLabsEntranceRouteDir_$key"
+        sharedPrefs.edit().putString(keyPpURL, pathPixelUrlFromServer).apply()
+        Log.d("TJLabsResource", "Info: save $key Entrnace URL $pathPixelUrlFromServer")
+    }
+
 
     private fun parseRoute(data: String): EntranceRouteData {
         val entranceLevelArray = mutableListOf<String>()
