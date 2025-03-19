@@ -25,4 +25,7 @@ internal interface PostInput {
 
     @POST("/{parameter_version}/parameter")
     fun postParameter(@Body param: SectorInput, @Path("parameter_version") parameterVersion : String) : Call<ParameterData>
+
+    @POST("/{geo_fence_version}/geofence")
+    fun postGeoFence(@Body param: SectorInput, @Path("geo_fence_version") geoFenceVersion : String) : Call<OutputGeofence>
 }

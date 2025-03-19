@@ -14,7 +14,7 @@ class TJLabsResourceManager :
     BuildingLevelImageDelegate,
     ScaleOffsetDelegate,
     EntranceDelegate,
-    UnitDelegate, ParamDelegate {
+    UnitDelegate, ParamDelegate, GeofenceDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
@@ -25,6 +25,7 @@ class TJLabsResourceManager :
     private var entranceManager = TJLabsEntranceManager()
     private var unitManager = TJLabsUnitManager()
     private var paramManager = TJLabsParamManager()
+    private var geofenceManager = TJLabsGeofenceManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -36,7 +37,7 @@ class TJLabsResourceManager :
         entranceManager.delegate = this
         unitManager.delegate = this
         paramManager.delegate = this
-
+        geofenceManager.delegate = this
     }
 
     override fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>) {
@@ -108,12 +109,21 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Param)
     }
 
+    override fun onGeofenceData(isOn: Boolean, key: String, geofenceData: Map<String, Areas>) {
+        delegate?.onGeofenceData(isOn, key, geofenceData)
+    }
+
+    override fun onGeofenceError() {
+        delegate?.onError(ResourceError.Geo)
+    }
+
 
     fun loadJupiterResources(application: Application ,region: String, sectorId: Int) {
         init(application, region)
         loadPathPixel(application, sectorId)
         loadEntrance(application, sectorId)
         loadParam(sectorId)
+        loadGeo(sectorId)
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
@@ -123,7 +133,6 @@ class TJLabsResourceManager :
         loadScaleOffset(sectorId)
         loadUnit(sectorId)
     }
-
 
 
     private fun init(application: Application, region: String) {
@@ -178,6 +187,10 @@ class TJLabsResourceManager :
 
     fun getUnitData() : Map<String, List<UnitData>> {
         return TJLabsUnitManager.unitDataMap
+    }
+
+    fun getGeofenceData() : Map<String, Areas> {
+        return TJLabsGeofenceManager.geofenceDataMap
     }
 
     fun updatePathPixelData(region: String, sectorId: Int, key : String, url : String) {
@@ -235,6 +248,9 @@ class TJLabsResourceManager :
         paramManager.loadParam(sectorId)
     }
 
+    private fun loadGeo(sectorId: Int) {
+        geofenceManager.loadGeofenceData(sectorId)
+    }
     private fun setRegion(region : String) {
         TJLabsResourceNetworkConstant.setServerURL(region)
         TJLabsFileDownloader.region = region
@@ -244,7 +260,7 @@ class TJLabsResourceManager :
         scaleOffsetManager.region = region
         entranceManager.region = region
         unitManager.region = region
+        geofenceManager.region = region
     }
-
 
 }

@@ -74,7 +74,8 @@ enum class ResourceError {
     Scale,
     Entrance,
     Unit,
-    Param
+    Param,
+    Geo
 }
 
 
@@ -86,6 +87,7 @@ interface TJLabsResourceManagerDelegate {
     fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
     fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
     fun onParamData(isOn: Boolean, data : ParameterData?)
+    fun onGeofenceData(isOn : Boolean, key : String, data : Map<String, Areas>?)
     fun onError(error: ResourceError)
 }
 
@@ -162,3 +164,37 @@ data class ParameterData(
     val debug :Boolean = false,
     val standard_rss : List<Int> = listOf()
 )
+
+data class Node(
+    val number: Int = 0,
+    val center_pos: List<Int> = listOf(),
+    val direction_type: String = ""
+)
+
+data class DrModeArea(
+    val number: Int = 0,
+    val range : List<Int> = listOf(),
+    val direction : Int = 0,
+    val nodes : List<Node> = listOf()
+)
+
+data class Geofence(
+    val building_name: String = "",
+    val level_name: String = "",
+    val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val dr_mode_areas : List<DrModeArea> = listOf(DrModeArea())
+)
+
+data class OutputGeofence(
+    val geofence_list : List<Geofence> = listOf()
+)
+
+data class Areas(
+    val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val dr_mode_areas : List<DrModeArea> = listOf(DrModeArea())
+)
+
