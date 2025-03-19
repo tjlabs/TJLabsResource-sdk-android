@@ -109,7 +109,7 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Param)
     }
 
-    override fun onGeofenceData(isOn: Boolean, key: String, geofenceData: Map<String, Areas>) {
+    override fun onGeofenceData(isOn: Boolean, key: String, geofenceData: GeofenceData) {
         delegate?.onGeofenceData(isOn, key, geofenceData)
     }
 
@@ -189,7 +189,7 @@ class TJLabsResourceManager :
         return TJLabsUnitManager.unitDataMap
     }
 
-    fun getGeofenceData() : Map<String, Areas> {
+    fun getGeofenceData() : Map<String, GeofenceData> {
         return TJLabsGeofenceManager.geofenceDataMap
     }
 

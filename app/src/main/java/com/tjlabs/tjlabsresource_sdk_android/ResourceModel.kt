@@ -87,7 +87,7 @@ interface TJLabsResourceManagerDelegate {
     fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
     fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
     fun onParamData(isOn: Boolean, data : ParameterData?)
-    fun onGeofenceData(isOn : Boolean, key : String, data : Map<String, Areas>?)
+    fun onGeofenceData(isOn : Boolean, key : String, data : GeofenceData?)
     fun onError(error: ResourceError)
 }
 
@@ -191,7 +191,7 @@ data class OutputGeofence(
     val geofence_list : List<Geofence> = listOf()
 )
 
-data class Areas(
+data class GeofenceData(
     val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
