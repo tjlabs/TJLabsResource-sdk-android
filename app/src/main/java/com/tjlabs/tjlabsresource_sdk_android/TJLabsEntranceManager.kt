@@ -88,8 +88,10 @@ internal class TJLabsEntranceManager {
             if (statusCode == 200) {
                 // 섹터 내 모든 pp 가져옴
                 if (outputEntrance.entrance_list.isNotEmpty()) {
-                    val entranceInfo = outputEntrance.entrance_list
-                    for (element in entranceInfo) {
+                    val outputEntranceList = outputEntrance.entrance_list
+                    val entranceInfoList = mutableListOf<EntranceInfo>()
+
+                    for (element in outputEntranceList) {
                         val buildingName = element.building_name
                         val levelName = element.level_name
                         val key = "${region}_${input.sector_id}_${buildingName}_${levelName}"
@@ -98,9 +100,9 @@ internal class TJLabsEntranceManager {
                         entranceNumbers += entrances.size
                         for (ent in entrances) {
                             val entranceKey = "${key}_${ent.spot_number}"
-                            val entranceData = EntranceData(ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss,
-                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction), ent.outermost_ward_id)
-                            entranceDataMap[entranceKey] = entranceData
+                            val entranceInfo = EntranceInfo(buildingName, levelName, ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss,
+                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction))
+                            entranceInfoList.add(entranceInfo)
                             entranceRouteUrl[entranceKey] = ent.url
                             entranceOuterWards.add(ent.outermost_ward_id)
                             Log.d(TAG,"(Olympus) entrance[$entranceKey] : $ent")
@@ -108,6 +110,9 @@ internal class TJLabsEntranceManager {
 
                     }
                     val msg = "(Olympus) Success : Load Sector Info // Path"
+
+                    val key = "$sectorId"
+                    val entranceData = EntranceData(entranceInfoList, entranceNumbers, entranceOuterWards)
                     completion(true, msg, entranceRouteUrl, entranceDataMap)
                 } else {
                     val msg = "(Olympus) Error Path Pixel List is empty // Level $statusCode"
