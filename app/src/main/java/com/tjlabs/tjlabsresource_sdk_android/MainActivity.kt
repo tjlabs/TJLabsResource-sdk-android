@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         pathPixelKey: String,
         data: PathPixelData?
     ) {
-        Log.d(TAG, "isOn : $isOn // pathPixelKey : $pathPixelKey")
+        Log.d(TAG, "isOn : $isOn // pathPixelKey : $pathPixelKey // data : $data")
 
     }
 
@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         scaleKey: String,
         data: List<Float>
     ) {
-        Log.d(TAG, "isOn : $isOn // scaleKey : $scaleKey")
+        Log.d(TAG, "isOn : $isOn // scaleKey : $scaleKey // data : $data")
 
     }
 
@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         entranceKey: String,
         data: EntranceRouteData?
     ) {
-        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey")
+        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey// data : $data")
 
     }
 
