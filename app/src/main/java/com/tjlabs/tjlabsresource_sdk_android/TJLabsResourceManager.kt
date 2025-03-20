@@ -80,11 +80,15 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Scale)
     }
 
-    override fun onEntranceData(
+    override fun onEntranceRouteData(
         isOn: Boolean,
         entranceKey: String,
         data: EntranceRouteData?
     ) {
+        delegate?.onEntranceRouteData(isOn, entranceKey, data)
+    }
+
+    override fun onEntranceData(isOn: Boolean, entranceKey: String, data: EntranceData?) {
         delegate?.onEntranceData(isOn, entranceKey, data)
     }
 
