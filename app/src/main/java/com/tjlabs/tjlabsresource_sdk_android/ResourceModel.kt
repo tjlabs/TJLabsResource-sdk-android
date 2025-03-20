@@ -98,7 +98,8 @@ data class EntranceData(
     var velocityScale: Float = 0f,
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
-    var innerWardCoord: List<Int> = emptyList()
+    var innerWardCoord: List<Int> = emptyList(),
+    val outermost_ward_id: String = ""
 )
 
 data class EntranceRouteData(

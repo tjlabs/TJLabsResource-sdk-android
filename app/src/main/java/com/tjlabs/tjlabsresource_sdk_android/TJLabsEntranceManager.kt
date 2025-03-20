@@ -98,7 +98,8 @@ internal class TJLabsEntranceManager {
                         entranceNumbers += entrances.size
                         for (ent in entrances) {
                             val entranceKey = "${key}_${ent.spot_number}"
-                            val entranceData = EntranceData(ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss, ent.innermost_ward.pos + listOf(ent.innermost_ward.direction))
+                            val entranceData = EntranceData(ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss,
+                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction), ent.outermost_ward_id)
                             entranceDataMap[entranceKey] = entranceData
                             entranceRouteUrl[entranceKey] = ent.url
                             entranceOuterWards.add(ent.outermost_ward_id)
