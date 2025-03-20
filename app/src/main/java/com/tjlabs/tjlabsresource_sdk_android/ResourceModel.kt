@@ -92,14 +92,21 @@ interface TJLabsResourceManagerDelegate {
     fun onError(error: ResourceError)
 }
 
-data class EntranceData(
+data class EntranceInfo(
+    var building : String = "",
+    var level : String = "",
     var number: Int = 0,
     var networkStatus: Boolean = false,
     var velocityScale: Float = 0f,
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
     var innerWardCoord: List<Int> = emptyList(),
-    val outermost_ward_id: String = ""
+)
+
+data class EntranceData(
+    var entranceInfoList : List<EntranceInfo> = listOf(),
+    var entranceNumber : Int = 0,
+    var outerWards : List<String> = listOf()
 )
 
 data class EntranceRouteData(
