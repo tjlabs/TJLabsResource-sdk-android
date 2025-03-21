@@ -84,20 +84,28 @@ interface TJLabsResourceManagerDelegate {
     fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
     fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
     fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
-    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onEntranceRouteData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceData?)
     fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
     fun onParamData(isOn: Boolean, data : ParameterData?)
     fun onGeofenceData(isOn : Boolean, key : String, data : GeofenceData?)
     fun onError(error: ResourceError)
 }
 
-data class EntranceData(
+data class EntranceInfo(
+    var building : String = "",
+    var level : String = "",
     var number: Int = 0,
     var networkStatus: Boolean = false,
     var velocityScale: Float = 0f,
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
-    var innerWardCoord: List<Int> = emptyList()
+    var innerWardCoord: List<Int> = emptyList(),
+    var outerWards : String = ""
+)
+
+data class EntranceData(
+    var entranceInfoList : List<EntranceInfo> = listOf(),
 )
 
 data class EntranceRouteData(

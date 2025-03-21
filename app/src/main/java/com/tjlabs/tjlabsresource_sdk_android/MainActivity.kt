@@ -60,13 +60,17 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     }
 
-    override fun onEntranceData(
+    override fun onEntranceRouteData(
         isOn: Boolean,
         entranceKey: String,
         data: EntranceRouteData?
     ) {
-        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey// data : $data")
+        Log.d(TAG, "isOn : $isOn // entrance route Key : $entranceKey// data : $data")
 
+    }
+
+    override fun onEntranceData(isOn: Boolean, entranceKey: String, data: EntranceData?) {
+        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey// data : $data")
     }
 
     override fun onUnitData(isOn: Boolean, unitKey: String, data: List<UnitData>?) {

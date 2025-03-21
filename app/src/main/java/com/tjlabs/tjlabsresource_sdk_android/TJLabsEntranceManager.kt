@@ -13,7 +13,8 @@ import java.io.File
 import java.net.URL
 
 internal interface EntranceDelegate {
-    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onEntranceRouteData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
+    fun onEntranceData(isOn: Boolean, entranceKey : String, data : EntranceData?)
     fun onEntranceError()
 }
 
@@ -41,7 +42,7 @@ internal class TJLabsEntranceManager {
 
     fun loadEntrance(sectorId : Int) {
         getEntranceInfo(region, sectorId)
-        { isSuccess, msg, sectorPathPixelInfo ->
+        { isSuccess, msg, sectorPathPixelInfo, entranceDataMap ->
             Log.d(TAG, msg)
 
             if (isSuccess) {
@@ -55,15 +56,20 @@ internal class TJLabsEntranceManager {
                             val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
                             entranceRouteDataMap[key] = loadEntranceRouteFileUrlFromCache(key)
                             entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(isSuccessSave, url)
-                            delegate?.onEntranceData( true, key, entranceRouteData)
+                            delegate?.onEntranceRouteData( true, key, entranceRouteData)
                         }
                     } else {
                         Log.d(TAG, "already exist entrance data // data key : $key")
                         val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
                         entranceRouteDataMap[key] = entranceRouteData
                         entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(true, url)
-                        delegate?.onEntranceData( true, key, entranceRouteData)
+                        delegate?.onEntranceRouteData( true, key, entranceRouteData)
                     }
+                }
+
+                for ((key, entranceData) in entranceDataMap) {
+                    Log.d(TAG, "entrance data map : $entranceData")
+                    delegate?.onEntranceData( true, key, entranceData)
                 }
             } else {
                 delegate?.onEntranceError()
@@ -71,7 +77,7 @@ internal class TJLabsEntranceManager {
         }
     }
 
-    private fun getEntranceInfo(region: String, sectorId: Int, completion: (Boolean, String, Map<String, String>) -> Unit) {
+    private fun getEntranceInfo(region: String, sectorId: Int, completion: (Boolean, String, Map<String, String>, Map<String, EntranceData>) -> Unit) {
         val entranceRouteUrl = mutableMapOf<String, String>()
         val input = SectorInput(sectorId, operating_system = "Android")
         TJLabsResourceNetworkManager.postEntrance(
@@ -82,8 +88,10 @@ internal class TJLabsEntranceManager {
             if (statusCode == 200) {
                 // 섹터 내 모든 pp 가져옴
                 if (outputEntrance.entrance_list.isNotEmpty()) {
-                    val entranceInfo = outputEntrance.entrance_list
-                    for (element in entranceInfo) {
+                    val outputEntranceList = outputEntrance.entrance_list
+                    val entranceInfoList = mutableListOf<EntranceInfo>()
+
+                    for (element in outputEntranceList) {
                         val buildingName = element.building_name
                         val levelName = element.level_name
                         val key = "${region}_${input.sector_id}_${buildingName}_${levelName}"
@@ -92,23 +100,28 @@ internal class TJLabsEntranceManager {
                         entranceNumbers += entrances.size
                         for (ent in entrances) {
                             val entranceKey = "${key}_${ent.spot_number}"
-                            val entranceData = EntranceData(ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss, ent.innermost_ward.pos + listOf(ent.innermost_ward.direction))
-                            entranceDataMap[key] = entranceData
+                            val entranceInfo = EntranceInfo(buildingName, levelName, ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss,
+                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction), ent.outermost_ward_id)
+                            entranceInfoList.add(entranceInfo)
                             entranceRouteUrl[entranceKey] = ent.url
-                            entranceOuterWards.add(ent.outermost_ward_id)
                             Log.d(TAG,"(Olympus) entrance[$entranceKey] : $ent")
                         }
 
                     }
                     val msg = "(Olympus) Success : Load Sector Info // Path"
-                    completion(true, msg, entranceRouteUrl)
+
+                    val key = "$sectorId"
+                    val entranceData = EntranceData(entranceInfoList)
+                    entranceDataMap[key] = entranceData
+
+                    completion(true, msg, entranceRouteUrl, entranceDataMap)
                 } else {
                     val msg = "(Olympus) Error Path Pixel List is empty // Level $statusCode"
-                    completion(false, msg, entranceRouteUrl)
+                    completion(false, msg, entranceRouteUrl, entranceDataMap)
                 }
             } else {
                 val msg = "(Olympus) Error Load Sector Info // Level $statusCode"
-                completion(false, msg, entranceRouteUrl)
+                completion(false, msg, entranceRouteUrl, entranceDataMap)
             }
         }
     }
@@ -131,12 +144,12 @@ internal class TJLabsEntranceManager {
                         completion(false, exception.message.toString())
                     }
                     entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
-                    delegate?.onEntranceData(false, key, null)
+                    delegate?.onEntranceRouteData(false, key, null)
                 }
             } catch (e: Exception) {
                 completion(false, "")
                 entranceRouteDataLoaded[key] = EntranceRouteDataIsLoaded(false, entranceUrl)
-                delegate?.onEntranceData(false, key, null)
+                delegate?.onEntranceRouteData(false, key, null)
             }
         }
     }
