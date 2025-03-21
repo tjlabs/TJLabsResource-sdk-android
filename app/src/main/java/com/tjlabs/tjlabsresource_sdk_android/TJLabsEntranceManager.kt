@@ -101,10 +101,9 @@ internal class TJLabsEntranceManager {
                         for (ent in entrances) {
                             val entranceKey = "${key}_${ent.spot_number}"
                             val entranceInfo = EntranceInfo(buildingName, levelName, ent.spot_number, ent.network_status, ent.scale, ent.innermost_ward.id, ent.innermost_ward.rss,
-                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction))
+                                ent.innermost_ward.pos + listOf(ent.innermost_ward.direction), ent.outermost_ward_id)
                             entranceInfoList.add(entranceInfo)
                             entranceRouteUrl[entranceKey] = ent.url
-                            entranceOuterWards.add(ent.outermost_ward_id)
                             Log.d(TAG,"(Olympus) entrance[$entranceKey] : $ent")
                         }
 
@@ -112,7 +111,9 @@ internal class TJLabsEntranceManager {
                     val msg = "(Olympus) Success : Load Sector Info // Path"
 
                     val key = "$sectorId"
-                    val entranceData = EntranceData(entranceInfoList, entranceNumbers, entranceOuterWards)
+                    val entranceData = EntranceData(entranceInfoList)
+                    entranceDataMap[key] = entranceData
+
                     completion(true, msg, entranceRouteUrl, entranceDataMap)
                 } else {
                     val msg = "(Olympus) Error Path Pixel List is empty // Level $statusCode"

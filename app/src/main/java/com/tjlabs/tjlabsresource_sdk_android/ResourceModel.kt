@@ -101,12 +101,11 @@ data class EntranceInfo(
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
     var innerWardCoord: List<Int> = emptyList(),
+    var outerWards : String = ""
 )
 
 data class EntranceData(
     var entranceInfoList : List<EntranceInfo> = listOf(),
-    var entranceNumber : Int = 0,
-    var outerWards : List<String> = listOf()
 )
 
 data class EntranceRouteData(
