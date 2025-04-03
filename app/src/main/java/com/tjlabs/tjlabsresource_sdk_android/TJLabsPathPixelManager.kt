@@ -57,8 +57,6 @@ internal class TJLabsPathPixelManager {
                             val pathPixelData = loadPathPixelFileFromCache(key)
                             ppDataMap[key] = loadPathPixelFileFromCache(key)
                             ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
-                            delegate?.onPathPixelData( true, key, pathPixelData)
-                            delegate?.onPathPixelDataLoaded( true, key, PathPixelDataIsLoaded(isSuccessSave, url))
                         }
                     } else {
                         Log.d(TAG, "already exist pp data // data key : $key")
@@ -121,22 +119,24 @@ internal class TJLabsPathPixelManager {
                     ppDataMap[key] = loadPathPixelFileFromCache(key)
                     ppDataLoaded[key] = PathPixelDataIsLoaded(true, ppUrl)
                     savePathPixelCacheDirToCache(key, dir)
-                    completion(true, "")
                     Log.d(TAG, "success update pp // key :$key")
+                    delegate?.onPathPixelData( true, key,  ppDataMap[key] )
+                    delegate?.onPathPixelDataLoaded( true, key, ppDataLoaded[key])
+                    completion(true, "")
 
                 } else {
-                    if (exception != null) {
-                        completion(false, exception.message.toString())
-                    }
                     ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
                     delegate?.onPathPixelData(false, key, null)
 
+                    if (exception != null) {
+                        completion(false, exception.message.toString())
+                    }
+
                 }
             } catch (e: Exception) {
-                completion(false, "")
                 ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
                 delegate?.onPathPixelData(false, key, null)
-
+                completion(false, "")
             }
         }
 
