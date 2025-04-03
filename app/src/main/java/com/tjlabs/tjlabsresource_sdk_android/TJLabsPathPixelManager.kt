@@ -14,6 +14,7 @@ import java.net.URL
 
 internal interface PathPixelDelegate {
     fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
+    fun onPathPixelDataLoaded(isOn: Boolean, pathPixelKey: String, data : PathPixelDataIsLoaded?)
     fun onPathPixelError()
 }
 
@@ -57,7 +58,7 @@ internal class TJLabsPathPixelManager {
                             ppDataMap[key] = loadPathPixelFileFromCache(key)
                             ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
                             delegate?.onPathPixelData( true, key, pathPixelData)
-
+                            delegate?.onPathPixelDataLoaded( true, key, PathPixelDataIsLoaded(isSuccessSave, url))
                         }
                     } else {
                         Log.d(TAG, "already exist pp data // data key : $key")
@@ -65,7 +66,7 @@ internal class TJLabsPathPixelManager {
                         ppDataMap[key] = pathPixelData
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
                         delegate?.onPathPixelData( true, key, pathPixelData)
-
+                        delegate?.onPathPixelDataLoaded( true, key, PathPixelDataIsLoaded(true, url))
                     }
                 }
             }else {
