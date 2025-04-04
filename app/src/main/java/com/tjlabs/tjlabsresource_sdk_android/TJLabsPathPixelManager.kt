@@ -127,6 +127,7 @@ internal class TJLabsPathPixelManager {
                 } else {
                     ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
                     delegate?.onPathPixelData(false, key, null)
+                    delegate?.onPathPixelDataLoaded( false, key, null)
 
                     if (exception != null) {
                         completion(false, exception.message.toString())
@@ -136,6 +137,7 @@ internal class TJLabsPathPixelManager {
             } catch (e: Exception) {
                 ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
                 delegate?.onPathPixelData(false, key, null)
+                delegate?.onPathPixelDataLoaded( false, key, null)
                 completion(false, "")
             }
         }
