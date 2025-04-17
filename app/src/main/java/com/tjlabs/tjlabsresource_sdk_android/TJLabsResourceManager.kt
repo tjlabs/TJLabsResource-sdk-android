@@ -136,6 +136,9 @@ class TJLabsResourceManager :
         loadEntrance(application, sectorId)
         loadParam(sectorId)
         loadGeo(sectorId)
+        loadBuildingLevel(sectorId) {
+                isSuccess, buildingLevelData ->
+        }
     }
 
     fun loadMapResources(application: Application, region: String, sectorId: Int) {
