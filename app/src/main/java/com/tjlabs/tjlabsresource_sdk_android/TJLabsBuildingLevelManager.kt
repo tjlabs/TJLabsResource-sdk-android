@@ -50,12 +50,9 @@ internal class TJLabsBuildingLevelManager {
         for (element in outputLevel.level_list) {
             val buildingName = element.building_name
             val levelName = element.level_name
-
-            if (!levelName.contains("_D")) {
-                val levels = infoBuildingLevel.getOrDefault(buildingName, mutableListOf())
-                levels.add(levelName)
-                infoBuildingLevel[buildingName] = levels.sortedWith(::compareFloorNames).toMutableList()
-            }
+            val levels = infoBuildingLevel.getOrDefault(buildingName, mutableListOf())
+            levels.add(levelName)
+            infoBuildingLevel[buildingName] = levels.sortedWith(::compareFloorNames).toMutableList()
         }
         return infoBuildingLevel
     }
