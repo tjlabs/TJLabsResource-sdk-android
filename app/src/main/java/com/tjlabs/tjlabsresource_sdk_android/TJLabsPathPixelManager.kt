@@ -14,6 +14,7 @@ import java.net.URL
 
 internal interface PathPixelDelegate {
     fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
+    fun onPathPixelDataLoaded(isOn: Boolean, pathPixelKey: String, data : PathPixelDataIsLoaded?)
     fun onPathPixelError()
 }
 
@@ -56,8 +57,6 @@ internal class TJLabsPathPixelManager {
                             val pathPixelData = loadPathPixelFileFromCache(key)
                             ppDataMap[key] = loadPathPixelFileFromCache(key)
                             ppDataLoaded[key] = PathPixelDataIsLoaded(isSuccessSave, url)
-                            delegate?.onPathPixelData( true, key, pathPixelData)
-
                         }
                     } else {
                         Log.d(TAG, "already exist pp data // data key : $key")
@@ -65,7 +64,7 @@ internal class TJLabsPathPixelManager {
                         ppDataMap[key] = pathPixelData
                         ppDataLoaded[key] = PathPixelDataIsLoaded(true, url)
                         delegate?.onPathPixelData( true, key, pathPixelData)
-
+                        delegate?.onPathPixelDataLoaded( true, key, PathPixelDataIsLoaded(true, url))
                     }
                 }
             }else {
@@ -120,22 +119,26 @@ internal class TJLabsPathPixelManager {
                     ppDataMap[key] = loadPathPixelFileFromCache(key)
                     ppDataLoaded[key] = PathPixelDataIsLoaded(true, ppUrl)
                     savePathPixelCacheDirToCache(key, dir)
-                    completion(true, "")
                     Log.d(TAG, "success update pp // key :$key")
+                    delegate?.onPathPixelData( true, key,  ppDataMap[key] )
+                    delegate?.onPathPixelDataLoaded( true, key, ppDataLoaded[key])
+                    completion(true, "")
 
                 } else {
+                    ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
+                    delegate?.onPathPixelData(false, key, null)
+                    delegate?.onPathPixelDataLoaded( false, key, null)
+
                     if (exception != null) {
                         completion(false, exception.message.toString())
                     }
-                    ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
-                    delegate?.onPathPixelData(false, key, null)
 
                 }
             } catch (e: Exception) {
-                completion(false, "")
                 ppDataLoaded[key] = PathPixelDataIsLoaded(false, ppUrl)
                 delegate?.onPathPixelData(false, key, null)
-
+                delegate?.onPathPixelDataLoaded( false, key, null)
+                completion(false, "")
             }
         }
 

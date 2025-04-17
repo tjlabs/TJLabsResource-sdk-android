@@ -56,6 +56,14 @@ class TJLabsResourceManager :
         delegate?.onPathPixelData(isOn, pathPixelKey, data)
     }
 
+    override fun onPathPixelDataLoaded(
+        isOn: Boolean,
+        pathPixelKey: String,
+        data: PathPixelDataIsLoaded?
+    ) {
+        delegate?.onPathPixelDataLoaded(isOn, pathPixelKey, data)
+    }
+
     override fun onPathPixelError() {
         delegate?.onError(ResourceError.PathPixel)
     }

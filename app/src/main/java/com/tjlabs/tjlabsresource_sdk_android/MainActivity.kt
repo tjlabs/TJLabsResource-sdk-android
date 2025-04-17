@@ -42,6 +42,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     }
 
+    override fun onPathPixelDataLoaded(
+        isOn: Boolean,
+        pathPixelKey: String,
+        data: PathPixelDataIsLoaded?
+    ) {
+        Log.d(TAG, "PathPixel Loaded isOn : $isOn // pathPixelKey : $pathPixelKey // data : $data")
+    }
+
     override fun onBuildingLevelImageData(
         isOn: Boolean,
         imageKey: String,
@@ -82,6 +90,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onGeofenceData(isOn: Boolean, key: String, data: GeofenceData?) {
+        Log.d(TAG, "isOn : $isOn // geo key : $key")
+
     }
 
     override fun onError(error: ResourceError) {
