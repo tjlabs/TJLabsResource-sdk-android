@@ -27,14 +27,16 @@ internal class TJLabsImageManager {
     fun loadImage(sectorId: Int, buildingLevelData : Map<String, List<String>>){
         for ((buildingName, levelNameList) in buildingLevelData) {
             for (levelName in levelNameList) {
-                val imageKey = "image_${sectorId}_${buildingName}_$levelName"
-                loadBuildingLevelImage(sectorId, buildingName, levelName) { bitmap, _ ->
-                    if (bitmap != null) {
-                        buildingLevelImageDataMap[imageKey] = bitmap
-                        delegate?.onBuildingLevelImageData( true, imageKey, bitmap)
+                if (!levelName.contains("_D")){
+                    val imageKey = "image_${sectorId}_${buildingName}_$levelName"
+                    loadBuildingLevelImage(sectorId, buildingName, levelName) { bitmap, _ ->
+                        if (bitmap != null) {
+                            buildingLevelImageDataMap[imageKey] = bitmap
+                            delegate?.onBuildingLevelImageData( true, imageKey, bitmap)
 
-                    } else {
-                        delegate?.onBuildingLevelImageData( false, imageKey, null)
+                        } else {
+                            delegate?.onBuildingLevelImageData( false, imageKey, null)
+                        }
                     }
                 }
             }
