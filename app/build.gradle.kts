@@ -1,8 +1,8 @@
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
 plugins {
-//    id("com.android.application")
-    id("com.android.library")
+    id("com.android.application")
+//    id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
 }
@@ -12,19 +12,19 @@ android {
     compileSdk = 34
 
     defaultConfig {
-//        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
-//        versionCode = 1
-//        versionName = "1.0"
+        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
+        versionCode = 1
+        versionName = "1.0"
         minSdk = 29
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    libraryVariants.all {
-        outputs.all {
-            (this as BaseVariantOutputImpl).outputFileName = "app-release-resource.aar"
-        }
-    }
+//    libraryVariants.all {
+//        outputs.all {
+//            (this as BaseVariantOutputImpl).outputFileName = "app-release-resource.aar"
+//        }
+//    }
 
     buildTypes {
         release {
@@ -45,6 +45,11 @@ android {
 }
 
 dependencies {
+    implementation ("com.tjlabs:appauthlib:1.0.2")
+    implementation ("androidx.security:security-crypto-ktx:1.1.0-alpha03") //auth 사용을 위해 같이 추가해야함
+
+    implementation ("androidx.compose.material3:material3:1.2.1") // 또는 최신 버전
+    implementation ("com.google.android.material:material:1.9.0") // M3 호환 목적
     implementation (libs.opencsv)
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
