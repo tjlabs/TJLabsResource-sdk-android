@@ -7,21 +7,36 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 
 class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
+
+        val tenantId = "tjlabs"
+        val tenantPw = "TJlabs0407@"
+
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
 
-        val tjlabsResourceManager = TJLabsResourceManager()
-        tjlabsResourceManager.delegate = this
-        tjlabsResourceManager.loadJupiterResources(application, ResourceRegion.KOREA, 6)
+        // sector id 1 = Tips town
+        TJLabsAuthManager.initialize(application)
+        TJLabsAuthManager.setServerURL("jupiter")
+        TJLabsAuthManager.auth(tenantId, tenantPw) {
+                code, success->
+            Log.d("VenusServiceResult", "code : $code // auth : $success")
+
+            if (success) {
+                val tjlabsResourceManager = TJLabsResourceManager()
+                tjlabsResourceManager.delegate = this
+                tjlabsResourceManager.loadJupiterResources(application, ResourceRegion.KOREA, 1)
+            }
+        }
     }
 
     override fun onBuildingLevelData(

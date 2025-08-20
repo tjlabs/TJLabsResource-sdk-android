@@ -16,6 +16,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { setUrl(uri("/Users/yuchangsoo/local-maven-repo")) }
     }
 }
 
