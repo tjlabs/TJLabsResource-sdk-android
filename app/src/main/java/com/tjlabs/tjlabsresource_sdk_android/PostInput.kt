@@ -8,24 +8,58 @@ internal interface PostInput {
         "accept: application/json",
         "content-type: application/json"
     )
-    @POST("/{path_pixel_version}/path")
-    fun postPathPixel(@Body param: SectorInput, @Path("path_pixel_version") pathPixelVersion : String) : Call<OutputPathPixel>
 
-    @POST("/{scale_version}/scale")
-    fun postSectorScale(@Body param: SectorInput, @Path("scale_version") scaleVersion : String) : Call<ScaleOutputList>
+    @GET("/{server_version}/sectors/{pk}")
+    fun getSector(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int
+    ): Call<SectorOutput>
 
-    @POST("/{level_version}/level")
-    fun postLevel(@Body param: SectorIdInput, @Path("level_version") levelVersion : String) : Call<LevelOutputList>
+    @GET("/{server_version}/levels/{pk}/entrance")
+    fun getEntrance(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<EntranceOutput>
 
-    @POST("/{entrance_version}/entrance")
-    fun postEntrance(@Body param: SectorInput, @Path("entrance_version") entranceVersion : String) : Call<EntranceOutputList>
+    @GET("/{server_version}/levels/{pk}/scale")
+    fun getScaleOffset(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<ScaleOffsetOutput>
 
-    @POST("/{unit_version}/unit")
-    fun postUnit(@Body param: SectorIdInput, @Path("unit_version") unitVersion : String) : Call<UnitOutputList>
+    @GET("/{server_version}/levels/{pk}/path")
+    fun getPathPixel(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<PathPixelOutput>
 
-    @POST("/{parameter_version}/parameter")
-    fun postParameter(@Body param: SectorInput, @Path("parameter_version") parameterVersion : String) : Call<ParameterData>
+    @GET("/{server_version}/levels/{pk}/geofence")
+    fun getGeofence(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<GeofenceData>
 
-    @POST("/{geo_fence_version}/geofence")
-    fun postGeoFence(@Body param: SectorInput, @Path("geo_fence_version") geoFenceVersion : String) : Call<OutputGeofence>
+    @GET("/{server_version}/sectors/{pk}/parameter")
+    fun getSectorParam(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<SectorParameterOutput>
+
+    @GET("/{server_version}/levels/{pk}/parameter")
+    fun getLevelParam(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String
+    ): Call<LevelParameterOutput>
+
+    @GET("/{server_version}/levels/{pk}/unit")
+    fun getUnit(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int
+    ): Call<UnitOutput>
 }
