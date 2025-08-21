@@ -1,23 +1,29 @@
-package com.tjlabs.tjlabsresource_sdk_android.manager
+package com.tjlabs.tjlabsresource_sdk_android
 
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
-import android.util.Log
-import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
-import com.tjlabs.tjlabsresource_sdk_android.EntranceData
-import com.tjlabs.tjlabsresource_sdk_android.EntranceRouteData
-import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
-import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput
-import com.tjlabs.tjlabsresource_sdk_android.ParameterData
-import com.tjlabs.tjlabsresource_sdk_android.PathPixelData
-import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
-import com.tjlabs.tjlabsresource_sdk_android.SectorParameterOutput
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceManagerDelegate
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.UnitData
+import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingLevelImageDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
+import com.tjlabs.tjlabsresource_sdk_android.manager.GeofenceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ParamDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
+import com.tjlabs.tjlabsresource_sdk_android.manager.PathPixelDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ScaleOffsetDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.SectorDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsUnitManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.UnitDelegate
 import com.tjlabs.tjlabsresource_sdk_android.util.Logger
 
 class TJLabsResourceManager :
@@ -29,7 +35,7 @@ class TJLabsResourceManager :
     EntranceDelegate,
     ParamDelegate,
     BuildingLevelImageDelegate,
-    UnitDelegate{
+    UnitDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
@@ -62,15 +68,13 @@ class TJLabsResourceManager :
         setRegion(region)
         loadSector(region = region, sectorId = sectorId) {
                 sectorData ->
-            Logger.d("sectorData : $sectorData")
-
             if (sectorData != null) {
                 buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
                 pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
                 imageManager.loadImage(region, sectorId, sectorData.buildings)
                 unitManager.loadUnit(region, sectorId, sectorData.buildings)
             } else {
-                delegate?.onSectorError()
+                delegate?.onSectorError(ResourceError.Sector)
             }
         }
 
@@ -81,8 +85,6 @@ class TJLabsResourceManager :
         setRegion(region)
         loadSector(region = region, sectorId = sectorId) {
             sectorData ->
-            Logger.d("sectorData : $sectorData")
-
             if (sectorData != null) {
                 buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
                 scaleOffsetManager.loadScaleOffset(region, sectorId, sectorData.buildings)
@@ -92,7 +94,7 @@ class TJLabsResourceManager :
                 paramManager.loadSectorParam(region, sectorId)
                 paramManager.loadLevelParam(region, sectorId, sectorData.buildings)
             } else {
-                delegate?.onSectorError()
+                delegate?.onSectorError(ResourceError.Sector)
             }
         }
 
@@ -125,6 +127,123 @@ class TJLabsResourceManager :
         }
     }
 
+    fun getMatchedLevelId(key: String): Int? {
+        return TJLabsBuildingsManager.levelIdMap[key]
+    }
+
+    fun getMatchedLevelImageUrl(key: String): String? {
+        return TJLabsBuildingsManager.levelImageUrlMap[key]
+    }
+
+    fun getSectorData(sectorId: Int): SectorOutput? {
+        return TJLabsSectorManager.sectorDataMap[sectorId]
+    }
+
+    fun getBuildingLevelData(): Map<Int, List<BuildingOutput>> {
+        return TJLabsBuildingsManager.buildingsDataMap
+    }
+
+    fun getScaleOffset(): Map<String, List<Float>> {
+        return TJLabsScaleOffsetManager.scaleOffsetDataMap
+    }
+
+    fun getPathPixelData(): Map<String, PathPixelData> {
+        return TJLabsPathPixelManager.ppDataMap
+    }
+
+    fun getUnitData(): Map<String, List<UnitData>> {
+        return TJLabsUnitManager.unitDataMap
+    }
+
+    fun getGeofenceData(): Map<String, GeofenceData> {
+        return TJLabsGeofenceManager.geofenceDataMap
+    }
+
+    fun getEntranceData(): Map<String, EntranceData> {
+        return TJLabsEntranceManager.entranceDataMap
+    }
+
+    fun getEntranceRouteData(): Map<String, EntranceRouteData> {
+        return TJLabsEntranceManager.entranceRouteDataMap
+    }
+
+    fun getBuildingLevelImageData(): Map<String, Bitmap> {
+        return TJLabsImageManager.buildingLevelImageDataMap
+    }
+
+    fun getSectorParamData(): Map<Int, SectorParameterOutput> {
+        return TJLabsParamManager.sectorParamData
+    }
+
+    fun getLevelParamData(): Map<String, LevelParameterOutput> {
+        return TJLabsParamManager.levelParamData
+    }
+
+    
+    // MARK: - Public Update Methods
+    fun updateScaleOffsetData(key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            scaleOffsetManager.updateLevelScaleOffset(key, levelId)
+        } else {
+            delegate?.onError(ResourceError.Scale, key)
+        }
+    }
+
+    fun updatePathPixelData(sectorId: Int, key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            pathPixelManager.updateLevelPathPixel(key, sectorId, levelId)
+        } else {
+            delegate?.onError(ResourceError.PathPixel, key)
+        }
+    }
+
+    fun updateUnitData(key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            unitManager.updateLevelUnit(key, levelId)
+        } else {
+            delegate?.onError(ResourceError.Unit, key)
+        }
+    }
+
+    fun updateGeofence(key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            geofenceManager.updateLevelGeofence(key, levelId)
+        } else {
+            delegate?.onError(ResourceError.Geofence, key)
+        }
+    }
+
+    fun updateEntrance(sectorId: Int, key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            entranceManager.updateLevelEntrance(key, sectorId, levelId)
+        } else {
+            delegate?.onError(ResourceError.Entrance, key)
+        }
+    }
+
+    fun updateImage(key: String) {
+        val imageUrl = getMatchedLevelImageUrl(key)
+        if (imageUrl != null) {
+            imageManager.updateLevelImage(key, imageUrl)
+        } else {
+            delegate?.onError(ResourceError.Image, key)
+        }
+    }
+
+    fun updateLevelParam(sectorId: Int, key: String) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            paramManager.updateLevelParam(key, levelId)
+        } else {
+            delegate?.onError(ResourceError.Param, key)
+        }
+    }
+
     fun setDebugOption(set : Boolean) {
         Logger.setDebugOption(set)
     }
@@ -134,7 +253,7 @@ class TJLabsResourceManager :
     }
 
     override fun onSectorError() {
-        delegate?.onSectorError()
+        delegate?.onSectorError(ResourceError.Sector)
     }
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
@@ -146,8 +265,7 @@ class TJLabsResourceManager :
     }
 
     override fun onScaleOffsetError(scaleKey: String) {
-        delegate?.onScaleOffsetError(scaleKey)
-
+        delegate?.onError(ResourceError.Scale, scaleKey)
     }
 
     override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
@@ -155,7 +273,7 @@ class TJLabsResourceManager :
     }
 
     override fun onPathPixelError(pathPixelKey: String) {
-        delegate?.onPathPixelError(pathPixelKey)
+        delegate?.onError(ResourceError.PathPixel, pathPixelKey)
     }
 
     override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
@@ -163,7 +281,7 @@ class TJLabsResourceManager :
     }
 
     override fun onGeofenceError(geofenceKey: String) {
-        delegate?.onGeofenceError(geofenceKey,)
+        delegate?.onError(ResourceError.Geofence, geofenceKey)
     }
 
     override fun onEntranceData(entranceKey: String, data: EntranceData) {
@@ -175,7 +293,7 @@ class TJLabsResourceManager :
     }
 
     override fun onEntranceError(type: EntranceErrorType, entranceKey: String) {
-        delegate?.onEntranceError(type, entranceKey)
+        delegate?.onError(ResourceError.Entrance, entranceKey)
     }
 
     override fun onSectorParamData(data: SectorParameterOutput) {
@@ -187,7 +305,7 @@ class TJLabsResourceManager :
     }
 
     override fun onParamError(type: ParamErrorType, paramKey: String?) {
-        delegate?.onParamError(type, paramKey)
+        Logger.e("onParamError // type : $type")
     }
 
     override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
@@ -195,7 +313,7 @@ class TJLabsResourceManager :
     }
 
     override fun onBuildingLevelImageError(imageKey: String) {
-        delegate?.onBuildingLevelImageError(imageKey)
+        delegate?.onError(ResourceError.Image, imageKey)
     }
 
     override fun onUnitData(unitKey: String, data: List<UnitData>?) {
@@ -203,6 +321,6 @@ class TJLabsResourceManager :
     }
 
     override fun onUnitDataError(unitKey: String) {
-        delegate?.onUnitDataError(unitKey)
+        delegate?.onError(ResourceError.Unit, unitKey)
     }
 }
