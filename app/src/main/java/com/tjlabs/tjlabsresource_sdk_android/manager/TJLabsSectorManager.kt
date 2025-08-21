@@ -1,7 +1,5 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import android.util.Log
-import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
