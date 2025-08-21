@@ -38,12 +38,12 @@ internal class TJLabsUnitManager {
                     continue
                 }
 
-                updateUnits(unitKey, level.id)
+                updateLevelUnit(unitKey, level.id)
             }
         }
     }
 
-    fun updateUnits(key: String, levelId: Int) {
+    fun updateLevelUnit(key: String, levelId: Int) {
         val input = LevelIdOsInput(level_id = levelId)
 
         TJLabsResourceNetworkManager.getUnit(

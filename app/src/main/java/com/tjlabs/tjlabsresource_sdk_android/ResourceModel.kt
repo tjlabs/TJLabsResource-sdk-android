@@ -1,8 +1,8 @@
 package com.tjlabs.tjlabsresource_sdk_android
+
 import android.graphics.Bitmap
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsResourceManager
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -14,7 +14,7 @@ data class PathPixelData(
     val roadType: List<Int> = listOf(),
     val nodeNumber: List<Int> = listOf(),
     val road: List<List<Float>> = listOf(),
-    val roadMinMax : List<Float> = listOf(),
+    val roadMinMax: List<Float> = listOf(),
     val roadScale: List<Float> = listOf(),
     val roadHeading: List<String> = listOf()
 )
@@ -49,15 +49,15 @@ data class UnitData(
 data class ParameterData(
     val trajectory_length: Int = 0,
     val trajectory_diagonal: Int = 0,
-    val debug :Boolean = false,
-    val standard_rss : List<Int> = listOf()
+    val debug: Boolean = false,
+    val standard_rss: List<Int> = listOf()
 )
 
 data class GeofenceData(
     val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val dr_mode_areas : List<DRModeArea> = listOf()
+    val dr_mode_areas: List<DRModeArea> = listOf()
 )
 
 internal data class SectorIdInput(
@@ -70,16 +70,16 @@ internal data class SectorIdOsInput(
 )
 
 internal data class LevelIdOsInput(
-    var level_id : Int = 0,
+    var level_id: Int = 0,
     var operating_system: String = "Android"
 )
 
 data class SectorOutput(
-    val id : Int,
-    val name : String,
-    val request_service : String,
+    val id: Int,
+    val name: String,
+    val request_service: String,
     val debug: Boolean,
-    val buildings : List<BuildingOutput>
+    val buildings: List<BuildingOutput>
 )
 
 data class BuildingOutput(
@@ -102,16 +102,16 @@ data class PathPixelOutput(
 // MARK: - Entrance
 data class InnermostWard(
     val name: String,
-    val rssi: Float,        
+    val rssi: Float,
     val x: Int,
     val y: Int,
-    val direction: Float    
+    val direction: Float
 )
 
 data class Entrance(
     val number: Int,
     val outermost_ward_name: String,
-    val scale: Float,          
+    val scale: Float,
     val csv: String,
     val network_status: Boolean,
     val innermost_ward: InnermostWard
@@ -133,13 +133,13 @@ data class UnitOutput(
 
 // MARK: - Parameter
 data class SectorParameterOutput(
-    val standard_max_rssi: Float,     
-    val standard_min_rssi: Float      
+    val standard_max_rssi: Float,
+    val standard_min_rssi: Float
 )
 
 data class LevelParameterOutput(
-    val trajectory_length: Float,     
-    val trajectory_diagonal: Float    
+    val trajectory_length: Float,
+    val trajectory_diagonal: Float
 )
 
 // MARK: - Geofence
@@ -152,8 +152,8 @@ data class DRModeArea(
 
 data class DRModeAreaNode(
     var number: Int,
-    var center_x: Float,          
-    var center_y: Float,          
+    var center_x: Float,
+    var center_y: Float,
     var direction_type: String
 )
 
@@ -176,22 +176,16 @@ enum class ResourceError {
 
 interface TJLabsResourceManagerDelegate {
     fun onSectorData(data: SectorOutput)
-    fun onSectorError()
+    fun onSectorError(error: ResourceError)
     fun onBuildingsData(data: List<BuildingOutput>)
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
-    fun onScaleOffsetError(scaleKey: String)
     fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
-    fun onPathPixelError(pathPixelKey: String)
     fun onGeofenceData(geofenceKey: String, data: GeofenceData)
-    fun onGeofenceError(geofenceKey: String)
     fun onEntranceData(entranceKey: String, data: EntranceData)
     fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData)
-    fun onEntranceError(type: EntranceErrorType, entranceKey: String)
     fun onSectorParamData(data: SectorParameterOutput)
     fun onLevelParamData(paramKey: String, data: LevelParameterOutput)
-    fun onParamError(type: ParamErrorType, paramKey: String?)
-    fun onBuildingLevelImageData(imageKey: String, data : Bitmap?)
-    fun onBuildingLevelImageError(imageKey: String)
-    fun onUnitData(unitKey: String, data : List<UnitData>?)
-    fun onUnitDataError(unitKey: String)
+    fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
+    fun onUnitData(unitKey: String, data: List<UnitData>?)
+    fun onError(error: ResourceError, key: String)
 }

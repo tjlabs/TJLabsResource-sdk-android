@@ -59,7 +59,6 @@ internal class TJLabsEntranceManager {
                 val input = LevelIdOsInput(level_id = level.id)
                 val key = "${sectorId}_${building.name}_${level.name}"
 
-                Logger.d("loadEntranceUrl // key : $key")
                 TJLabsResourceNetworkManager.getEntrance(
                     TJLabsResourceNetworkConstants.getUserBaseURL(),
                     input,
@@ -67,8 +66,6 @@ internal class TJLabsEntranceManager {
                 ) { status, msg, result ->
                     try {
                         // 실패 처리
-                        Logger.d("loadEntranceUrl // status : $status // result : $result")
-
                         if (status != 200) {
                             delegate?.onEntranceError(EntranceErrorType.Common, key)
                         }
@@ -168,6 +165,58 @@ internal class TJLabsEntranceManager {
             }
         }
     }
+
+    fun updateLevelEntrance(key: String, sectorId: Int, levelId: Int) {
+        val input = LevelIdOsInput(level_id = levelId)
+
+        TJLabsResourceNetworkManager.getEntrance(
+            TJLabsResourceNetworkConstants.getUserBaseURL(),
+            input,
+            TJLabsResourceNetworkConstants.getUserEntranceServerVersion()
+        ) { status, msg, result ->
+            // 실패 처리
+            if (status != 200) {
+                delegate?.onEntranceError(EntranceErrorType.Common, key)
+            }
+
+            if (result != null) {
+                for (ent in result.entrances) {
+                    val entUrl = ent.csv
+                    val entKey = key + "_${ent.number}"
+
+                    val innerWardCoord = listOf(ent.innermost_ward.x.toFloat(), ent.innermost_ward.y.toFloat())
+                    val entInfo = EntranceData(ent.number, ent.network_status, ent.scale, ent.innermost_ward.name, ent.innermost_ward.rssi, innerWardCoord, ent.outermost_ward_name)
+                    entranceDataMap[key] = entInfo
+                    delegate?.onEntranceData(entKey, entInfo)
+
+                    val pathPixelUrlFromCache = loadEntranceRouteUrlFromCache(key)
+                    if (pathPixelUrlFromCache != null) {
+                        if (pathPixelUrlFromCache == entUrl) {
+                            // 버전이 같다면
+                            // 내가 가지고 있는 파일을 그대로 사용해도 됨.
+                            val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
+                            if (entranceRouteData != null) {
+                                entranceRouteDataMap[key] = entranceRouteData
+                                delegate?.onEntranceRouteData(key, entranceRouteData)
+                            } else {
+                                // 파일이 없으면 서버에서 다운로드
+                                updateEntranceRoute(key, sectorId, entUrl)
+                            }
+                        } else {
+                            // 버전이 다르다면 서버에서 다운로드
+                            updateEntranceRoute(key, sectorId, entUrl)
+                        }
+                    } else {
+                        // Cache에서 파일 URL 가져오기 실패
+                        updateEntranceRoute(key, sectorId, entUrl)
+                    }
+                }
+            } else {
+                delegate?.onEntranceError(EntranceErrorType.Common, key)
+            }
+        }
+    }
+
 
     private fun loadEntranceRouteUrlFromCache(key: String): String? {
         val keyPpURL = "TJLabsEntranceRouteURL_$key"

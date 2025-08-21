@@ -2,7 +2,6 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -10,7 +9,6 @@ import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsResourceManager
 import com.tjlabs.tjlabsresource_sdk_android.util.Logger
 
 class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {

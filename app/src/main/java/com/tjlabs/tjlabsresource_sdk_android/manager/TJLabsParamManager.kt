@@ -71,13 +71,13 @@ internal class TJLabsParamManager {
                     continue
                 }
 
-                updateLevelParamOutput(levelKey, level.id)
+                updateLevelParam(levelKey, level.id)
             }
         }
     }
 
 
-    fun updateLevelParamOutput(key : String, levelId : Int) {
+    fun updateLevelParam(key : String, levelId : Int) {
         val input = LevelIdOsInput(level_id = levelId)
 
         TJLabsResourceNetworkManager.getLevelParam(

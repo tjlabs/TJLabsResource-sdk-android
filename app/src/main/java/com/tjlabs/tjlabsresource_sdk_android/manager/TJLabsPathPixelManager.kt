@@ -15,6 +15,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
+import java.util.logging.Level
 
 
 internal interface PathPixelDelegate {
@@ -180,6 +181,50 @@ internal class TJLabsPathPixelManager {
             }
         }
     }
+
+    fun updateLevelPathPixel(key: String, sectorId: Int, levelId: Int) {
+        val input = LevelIdOsInput(level_id = levelId)
+
+        TJLabsResourceNetworkManager.getPathPixel(
+            TJLabsResourceNetworkConstants.getUserBaseURL(),
+            input,
+            TJLabsResourceNetworkConstants.getUserScaleServerVersion()
+        ) { status, msg, result ->
+
+            // 실패 처리
+            if (status != 200) {
+                delegate?.onPathPixelError(key)
+            }
+
+            if (result != null) {
+                val ppUrl = result.csv
+                val pathPixelUrlFromCache = loadPathPixelServerUrlFromCache(key)
+                if (pathPixelUrlFromCache != null) {
+                    if (pathPixelUrlFromCache == ppUrl) {
+                        // 버전이 같다면
+                        // 내가 가지고 있는 파일을 그대로 사용해도 됨.
+                        val ppData = loadPathPixelFileFromCache(key)
+                        if (ppData != null) {
+                            ppDataMap[key] = ppData
+                            delegate?.onPathPixelData(key, ppData)
+                        } else {
+                            // 파일이 없으면 서버에서 다운로드
+                            updatePathPixel(key, sectorId, ppUrl)
+                        }
+                    } else {
+                        // 버전이 다르다면 서버에서 다운로드
+                        updatePathPixel(key, sectorId, ppUrl)
+                    }
+                } else {
+                    // Cache에서 파일 URL 가져오기 실패
+                    updatePathPixel(key, sectorId, ppUrl)
+                }
+            } else {
+                delegate?.onPathPixelError(key)
+            }
+        }
+    }
+
 
     private fun loadPathPixelServerUrlFromCache(key: String): String? {
         val keyPpURL = "TJLabsPathPixelURL_$key"
