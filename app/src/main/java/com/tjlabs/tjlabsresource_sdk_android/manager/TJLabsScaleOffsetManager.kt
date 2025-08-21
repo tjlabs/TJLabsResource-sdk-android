@@ -33,7 +33,6 @@ internal class TJLabsScaleOffsetManager {
             for (level in building.levels) {
                 if (level.name.contains("_D")) continue
 
-                val input = LevelIdOsInput(level_id = level.id)
                 val scaleKey = "${sectorId}_${building.name}_${level.name}"
 
                 val cached = scaleOffsetDataMap[scaleKey]
@@ -42,25 +41,7 @@ internal class TJLabsScaleOffsetManager {
                     continue
                 }
 
-                TJLabsResourceNetworkManager.getScaleOffset(
-                    TJLabsResourceNetworkConstants.getUserBaseURL(),
-                    input,
-                    TJLabsResourceNetworkConstants.getUserScaleServerVersion()
-                ) { status, msg, result ->
-
-                    // 실패 처리
-                    if (status != 200) {
-                        Logger.d(msg)
-                        delegate?.onScaleOffsetError(scaleKey)
-                    }
-
-                    if (result != null) {
-                        scaleOffsetDataMap[scaleKey] = result.image_scale
-                        delegate?.onScaleOffsetData(scaleKey, result.image_scale)
-                    } else {
-                        delegate?.onScaleOffsetError(scaleKey)
-                    }
-                }
+                updateLevelScaleOffset(scaleKey, level.id)
             }
         }
     }
