@@ -98,6 +98,12 @@ internal class TJLabsPathPixelManager {
         }.start()
     }
 
+    /**
+     *
+     * @param region
+     * @param sectorId
+     * @param buildingsData
+     */
     fun loadPathPixel(region: String,
                       sectorId: Int,
                       buildingsData: List<BuildingOutput>
@@ -134,6 +140,15 @@ internal class TJLabsPathPixelManager {
         }
     }
 
+    /**
+     * 서버에서 받아온 url 을 이용하여 csv 를 다운로드 받음.
+     * 다운로드함과 동시에 캐시에 해당 file 경로를 저장하고,
+     * 경로를 이용하여 file 정보를 가져옴
+     *
+     * @param key
+     * @param sectorId
+     * @param pathPixelUrlFromServer
+     */
     private fun updatePathPixel(key: String, sectorId: Int, pathPixelUrlFromServer: String) {
         val parsedUrl = try {
             URL(pathPixelUrlFromServer)
@@ -141,8 +156,7 @@ internal class TJLabsPathPixelManager {
             delegate?.onPathPixelError(key)
             return
         }
-
-        Logger.d("updatePathPixel // key : $key")
+        
         GlobalScope.launch(Dispatchers.Main) {
             try {
                 val (file, dir, exception) = downloadCSVFile(
@@ -151,20 +165,13 @@ internal class TJLabsPathPixelManager {
                     sectorId,
                     "$key.csv"
                 )
-                savePathPixelCacheDirToCache(key, dir)
-                Logger.d("update path pixel dir : $dir // file : $file")
                 if (file != null) {
-                    val ppData = loadPathPixelFileFromCache(key)
+                    val fileText = file.readText()
+                    val ppData = parsePathPixelData(fileText)
+                    ppDataMap[key] = ppData
+                    savePathPixelCacheDirToCache(key, dir)
+                    delegate?.onPathPixelData(key, ppData)
 
-                    Logger.d("update path pixel ppData : $ppData")
-
-                    if (ppData != null) {
-                        ppDataMap[key] = ppData
-                        delegate?.onPathPixelData(key, ppData)
-                    } else {
-                        // 파일이 없으면 서버에서 다운로드
-                        delegate?.onPathPixelError(key)
-                    }
                 } else {
                     delegate?.onPathPixelError(key)
                 }
