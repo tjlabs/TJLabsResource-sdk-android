@@ -76,7 +76,7 @@ internal class TJLabsEntranceManager {
                                 val entKey = key + "_${ent.number}"
                                 entranceUrl[entKey] = entUrl
                                 saveEntranceRouteUrlToCache(entKey, entUrl)
-                                val innerWardCoord = listOf(ent.innermost_ward.x.toFloat(), ent.innermost_ward.y.toFloat())
+                                val innerWardCoord = listOf(ent.innermost_ward.x.toFloat(), ent.innermost_ward.y.toFloat(), ent.innermost_ward.direction)
                                 val entInfo = EntranceData(ent.number, ent.network_status, ent.scale, ent.innermost_ward.name, ent.innermost_ward.rssi, innerWardCoord, ent.outermost_ward_name)
                                 entranceDataMap[key] = entInfo
                                 delegate?.onEntranceData(entKey, entInfo)
@@ -184,7 +184,7 @@ internal class TJLabsEntranceManager {
                     val entUrl = ent.csv
                     val entKey = key + "_${ent.number}"
 
-                    val innerWardCoord = listOf(ent.innermost_ward.x.toFloat(), ent.innermost_ward.y.toFloat())
+                    val innerWardCoord = listOf(ent.innermost_ward.x.toFloat(), ent.innermost_ward.y.toFloat(), ent.innermost_ward.direction)
                     val entInfo = EntranceData(ent.number, ent.network_status, ent.scale, ent.innermost_ward.name, ent.innermost_ward.rssi, innerWardCoord, ent.outermost_ward_name)
                     entranceDataMap[key] = entInfo
                     delegate?.onEntranceData(entKey, entInfo)
