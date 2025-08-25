@@ -28,6 +28,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         // sector id 1 = Tips town
         // coex id 7
+        // commiro id 58
         TJLabsAuthManager.initialize(application)
         TJLabsAuthManager.setServerURL("jupiter")
         TJLabsAuthManager.auth(tenantId, tenantPw) {
@@ -38,7 +39,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
                 tjlabsResourceManager.setDebugOption(true)
 //                tjlabsResourceManager.loadJupiterResource(application, ResourceRegion.KOREA.value, 7)
 
-                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, 7)
+                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, 58)
             }
         }
     }
@@ -48,9 +49,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     }
 
-    override fun onSectorError() {
-        Logger.d("onSectorError")
-
+    override fun onSectorError(error: ResourceError) {
+        Logger.d("onSectorError : $error")
     }
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
@@ -61,24 +61,12 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         Logger.d("onScaleOffsetData : $scaleKey // data : $data")
     }
 
-    override fun onScaleOffsetError(scaleKey: String) {
-        Logger.d("onScaleOffsetError : $scaleKey")
-    }
-
     override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
         Logger.d("onPathPixelData : $pathPixelKey // data : $data")
     }
 
-    override fun onPathPixelError(pathPixelKey: String) {
-        Logger.d("onPathPixelData : $pathPixelKey")
-    }
-
     override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
         Logger.d("onGeofenceData : $geofenceKey // data : $data")
-    }
-
-    override fun onGeofenceError(geofenceKey: String) {
-        Logger.d("onGeofenceError : $geofenceKey")
     }
 
     override fun onEntranceData(entranceKey: String, data: EntranceData) {
@@ -89,10 +77,6 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         Logger.d("onEntranceRouteData : $entranceKey // data : $data")
     }
 
-    override fun onEntranceError(type: EntranceErrorType, entranceKey: String) {
-        Logger.d("onEntranceError type $type // $entranceKey")
-    }
-
     override fun onSectorParamData(data: SectorParameterOutput) {
         Logger.d("onSectorParamData data $data")
     }
@@ -101,23 +85,15 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         Logger.d("onLevelParamData type $paramKey // $data")
     }
 
-    override fun onParamError(type: ParamErrorType, paramKey: String?) {
-        Logger.d("onParamError type $type // $paramKey")
-    }
-
     override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
         Logger.d("onBuildingLevelImageData imageKey $imageKey // $data")
-    }
-
-    override fun onBuildingLevelImageError(imageKey: String) {
-        Logger.d("onBuildingLevelImageData imageKey $imageKey")
     }
 
     override fun onUnitData(unitKey: String, data: List<UnitData>?) {
         Logger.d("onUnitData unitKey $unitKey // data : $data")
     }
 
-    override fun onUnitDataError(unitKey: String) {
-        Logger.d("onUnitDataError unitKey $unitKey")
+    override fun onError(error: ResourceError, key: String) {
+        Logger.d("onError : $error // key : $key")
     }
 }
