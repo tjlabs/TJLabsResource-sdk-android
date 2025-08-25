@@ -23,14 +23,8 @@ internal class TJLabsGeofenceManager {
     }
 
     var delegate: GeofenceDelegate? = null
-    private var region: String = ResourceRegion.KOREA.value
 
-    fun setRegion(region: String) {
-        this.region = region
-    }
-
-    fun loadGeofence(region: String,
-                     sectorId: Int,
+    fun loadGeofence(sectorId: Int,
                      buildingsData: List<BuildingOutput>
     ) {
         for (building in buildingsData) {

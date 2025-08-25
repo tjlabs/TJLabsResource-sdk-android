@@ -25,14 +25,9 @@ internal class TJLabsParamManager {
     }
 
     var delegate: ParamDelegate? = null
-    private var region: String = ResourceRegion.KOREA.value
 
-    fun setRegion(region: String) {
-        this.region = region
-    }
 
-    fun loadSectorParam(region: String,
-                     sectorId: Int) {
+    fun loadSectorParam(sectorId: Int) {
         val input = SectorIdOsInput(sector_id = sectorId)
 
         TJLabsResourceNetworkManager.getSectorParam(
@@ -55,8 +50,7 @@ internal class TJLabsParamManager {
         }
     }
 
-    fun loadLevelParam(region: String,
-                     sectorId: Int,
+    fun loadLevelParam(sectorId: Int,
                      buildingsData: List<BuildingOutput>
     ) {
         for (building in buildingsData) {

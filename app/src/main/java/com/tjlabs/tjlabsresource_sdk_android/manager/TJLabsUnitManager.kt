@@ -19,10 +19,8 @@ internal class TJLabsUnitManager {
     }
 
     var delegate: UnitDelegate? = null
-    var region = ResourceRegion.KOREA
 
     fun loadUnit(
-        region: String,
         sectorId: Int,
         buildingsData: List<BuildingOutput>
     ) {

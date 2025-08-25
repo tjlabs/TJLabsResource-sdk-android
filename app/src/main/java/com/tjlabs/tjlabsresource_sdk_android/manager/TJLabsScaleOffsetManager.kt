@@ -18,14 +18,8 @@ internal class TJLabsScaleOffsetManager {
     }
 
     var delegate: ScaleOffsetDelegate? = null
-    private var region: String = ResourceRegion.KOREA.value
-
-    fun setRegion(region: String) {
-        this.region = region
-    }
 
     fun loadScaleOffset(
-        region: String,
         sectorId: Int,
         buildingsData: List<BuildingOutput>
     ) {

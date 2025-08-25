@@ -15,11 +15,6 @@ internal class TJLabsBuildingsManager {
     }
 
     var delegate: BuildingsDelegate? = null
-    private var region: String = ResourceRegion.KOREA.value
-
-    fun setRegion(region: String) {
-        this.region = region
-    }
 
     fun setBuildings(sectorId: Int, buildings: List<BuildingOutput>) {
         buildingsDataMap[sectorId] = buildings

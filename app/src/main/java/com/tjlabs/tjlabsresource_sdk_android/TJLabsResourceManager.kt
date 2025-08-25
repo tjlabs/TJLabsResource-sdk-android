@@ -66,13 +66,13 @@ class TJLabsResourceManager :
     fun loadMapResource(application: Application, region: String, sectorId: Int) {
         init(application, region)
         setRegion(region)
-        loadSector(region = region, sectorId = sectorId) {
+        loadSector(sectorId = sectorId) {
                 sectorData ->
             if (sectorData != null) {
                 buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
                 pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
-                imageManager.loadImage(region, sectorId, sectorData.buildings)
-                unitManager.loadUnit(region, sectorId, sectorData.buildings)
+                imageManager.loadImage(sectorId, sectorData.buildings)
+                unitManager.loadUnit(sectorId, sectorData.buildings)
             } else {
                 delegate?.onSectorError(ResourceError.Sector)
             }
@@ -83,16 +83,16 @@ class TJLabsResourceManager :
     fun loadJupiterResource(application: Application, region: String, sectorId: Int) {
         init(application, region)
         setRegion(region)
-        loadSector(region = region, sectorId = sectorId) {
+        loadSector(sectorId = sectorId) {
             sectorData ->
             if (sectorData != null) {
                 buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
-                scaleOffsetManager.loadScaleOffset(region, sectorId, sectorData.buildings)
+                scaleOffsetManager.loadScaleOffset(sectorId, sectorData.buildings)
                 pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
-                geofenceManager.loadGeofence(region, sectorId, sectorData.buildings)
+                geofenceManager.loadGeofence(sectorId, sectorData.buildings)
                 entranceManager.loadEntrance(region, sectorId, sectorData.buildings)
-                paramManager.loadSectorParam(region, sectorId)
-                paramManager.loadLevelParam(region, sectorId, sectorData.buildings)
+                paramManager.loadSectorParam(sectorId)
+                paramManager.loadLevelParam(sectorId, sectorData.buildings)
             } else {
                 delegate?.onSectorError(ResourceError.Sector)
             }
@@ -112,17 +112,12 @@ class TJLabsResourceManager :
     private fun setRegion(region : String) {
         TJLabsResourceNetworkConstants.setServerURL(region)
         TJLabsFileDownloader.region = region
-        sectorManager.setRegion(region)
-        buildingLevelManager.setRegion(region)
-        scaleOffsetManager.setRegion(region)
         pathPixelManager.setRegion(region)
-        geofenceManager.setRegion(region)
         entranceManager.setRegion(region)
-        paramManager.setRegion(region)
     }
 
-    private fun loadSector(region: String, sectorId: Int, forceUpdate: Boolean = false, completion: (SectorOutput?) -> Unit) {
-        sectorManager.loadSector(region, sectorId, forceUpdate) {
+    private fun loadSector(sectorId: Int, forceUpdate: Boolean = false, completion: (SectorOutput?) -> Unit) {
+        sectorManager.loadSector(sectorId, forceUpdate) {
             data -> completion(data)
         }
     }

@@ -17,15 +17,8 @@ internal class TJLabsSectorManager {
     }
 
     var delegate: SectorDelegate? = null
-    private var region: String = ResourceRegion.KOREA.value
 
-    fun setRegion(region: String) {
-        this.region = region
-    }
-
-    fun loadSector(
-        region: String,
-        sectorId: Int,
+    fun loadSector(sectorId: Int,
         forceUpdate: Boolean,
         completion: (SectorOutput?) -> Unit
     ) {

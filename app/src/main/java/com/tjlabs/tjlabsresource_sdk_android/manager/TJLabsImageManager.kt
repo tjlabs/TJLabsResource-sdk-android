@@ -29,13 +29,7 @@ internal class TJLabsImageManager {
 
     var delegate: BuildingLevelImageDelegate? = null
 
-    private var region = ResourceRegion.KOREA.value
-
-    fun setRegion(region: String) {
-        this.region = region
-    }
-
-    fun loadImage(region : String, sectorId: Int, buildingsData: List<BuildingOutput>) {
+    fun loadImage(sectorId: Int, buildingsData: List<BuildingOutput>) {
         Logger.d("(TJLabsResource) loadImage")
 
         for (building in buildingsData) {
