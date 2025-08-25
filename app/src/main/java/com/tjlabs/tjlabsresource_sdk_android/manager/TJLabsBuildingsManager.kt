@@ -1,7 +1,5 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
-import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
 
 internal interface BuildingsDelegate {
     fun onBuildingsData(data: List<BuildingOutput>)

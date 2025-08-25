@@ -24,7 +24,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsUnitManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.UnitDelegate
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 class TJLabsResourceManager :
     SectorDelegate,
@@ -240,7 +240,7 @@ class TJLabsResourceManager :
     }
 
     fun setDebugOption(set : Boolean) {
-        Logger.setDebugOption(set)
+        TJLogger.setDebugOption(set)
     }
 
     override fun onSectorData(data: SectorOutput) {
@@ -300,7 +300,7 @@ class TJLabsResourceManager :
     }
 
     override fun onParamError(type: ParamErrorType, paramKey: String?) {
-        Logger.e("onParamError // type : $type")
+        TJLogger.e("onParamError // type : $type")
     }
 
     override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {

@@ -1,13 +1,9 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
-import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager.Companion.levelParamData
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -30,7 +26,7 @@ internal class TJLabsImageManager {
     var delegate: BuildingLevelImageDelegate? = null
 
     fun loadImage(sectorId: Int, buildingsData: List<BuildingOutput>) {
-        Logger.d("(TJLabsResource) loadImage")
+        TJLogger.d("(TJLabsResource) loadImage")
 
         for (building in buildingsData) {
             for (level in building.levels) {
@@ -49,11 +45,11 @@ internal class TJLabsImageManager {
     }
 
     fun updateLevelImage(key: String, url: String) {
-        Logger.d("(TJLabsResource) updateLevelImage")
+        TJLogger.d("(TJLabsResource) updateLevelImage")
 
         loadBuildingLevelImage(url) { bitmap, _ ->
             if (bitmap != null) {
-                Logger.d("(TJLabsResource) loadBuildingLevelImage // bitmap : $bitmap")
+                TJLogger.d("(TJLabsResource) loadBuildingLevelImage // bitmap : $bitmap")
 
                 buildingLevelImageDataMap[key] = bitmap
                 delegate?.onBuildingLevelImageData(key, bitmap)

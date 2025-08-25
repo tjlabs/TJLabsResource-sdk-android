@@ -7,9 +7,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
-import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
-import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,55 +43,55 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onSectorData(data: SectorOutput) {
-        Logger.d("onSectorData : $data")
+        TJLogger.d("onSectorData : $data")
 
     }
 
     override fun onSectorError(error: ResourceError) {
-        Logger.d("onSectorError : $error")
+        TJLogger.d("onSectorError : $error")
     }
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
-         Logger.d("onBuildingsData : $data")
+         TJLogger.d("onBuildingsData : $data")
     }
 
     override fun onScaleOffsetData(scaleKey: String, data: List<Float>) {
-        Logger.d("onScaleOffsetData : $scaleKey // data : $data")
+        TJLogger.d("onScaleOffsetData : $scaleKey // data : $data")
     }
 
     override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
-        Logger.d("onPathPixelData : $pathPixelKey // data : $data")
+        TJLogger.d("onPathPixelData : $pathPixelKey // data : $data")
     }
 
     override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
-        Logger.d("onGeofenceData : $geofenceKey // data : $data")
+        TJLogger.d("onGeofenceData : $geofenceKey // data : $data")
     }
 
     override fun onEntranceData(entranceKey: String, data: EntranceData) {
-        Logger.d("onEntranceData : $entranceKey // data : $data")
+        TJLogger.d("onEntranceData : $entranceKey // data : $data")
     }
 
     override fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData) {
-        Logger.d("onEntranceRouteData : $entranceKey // data : $data")
+        TJLogger.d("onEntranceRouteData : $entranceKey // data : $data")
     }
 
     override fun onSectorParamData(data: SectorParameterOutput) {
-        Logger.d("onSectorParamData data $data")
+        TJLogger.d("onSectorParamData data $data")
     }
 
     override fun onLevelParamData(paramKey: String, data: LevelParameterOutput) {
-        Logger.d("onLevelParamData type $paramKey // $data")
+        TJLogger.d("onLevelParamData type $paramKey // $data")
     }
 
     override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
-        Logger.d("onBuildingLevelImageData imageKey $imageKey // $data")
+        TJLogger.d("onBuildingLevelImageData imageKey $imageKey // $data")
     }
 
     override fun onUnitData(unitKey: String, data: List<UnitData>?) {
-        Logger.d("onUnitData unitKey $unitKey // data : $data")
+        TJLogger.d("onUnitData unitKey $unitKey // data : $data")
     }
 
     override fun onError(error: ResourceError, key: String) {
-        Logger.d("onError : $error // key : $key")
+        TJLogger.d("onError : $error // key : $key")
     }
 }

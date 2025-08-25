@@ -2,9 +2,8 @@ package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
-import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 internal interface ScaleOffsetDelegate {
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
@@ -52,7 +51,7 @@ internal class TJLabsScaleOffsetManager {
 
             // 실패 처리
             if (status != 200) {
-                Logger.d(msg)
+                TJLogger.d(msg)
                 delegate?.onScaleOffsetError(key)
             }
 

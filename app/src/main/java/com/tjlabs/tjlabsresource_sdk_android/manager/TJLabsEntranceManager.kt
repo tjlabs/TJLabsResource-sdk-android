@@ -10,7 +10,7 @@ import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -94,7 +94,7 @@ internal class TJLabsEntranceManager {
         // 모든 요청 완료 후 실행
         Thread {
             latch.await()
-            Logger.d("(TJLabsResource) Info : complete $entranceUrl")
+            TJLogger.d("(TJLabsResource) Info : complete $entranceUrl")
             completion(entranceUrl)
         }.start()
     }
@@ -105,7 +105,7 @@ internal class TJLabsEntranceManager {
 
         loadEntranceUrl(sectorId, buildingsData) {
             entranceRouteUrl ->
-            Logger.d("(TJLabsResource) loadPathPixel $entranceRouteUrl")
+            TJLogger.d("(TJLabsResource) loadPathPixel $entranceRouteUrl")
 
             for ((key, value) in entranceRouteUrl) {
                 //서버에서 가져온 결과를 캐시에 저장된 값과 비교

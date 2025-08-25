@@ -2,20 +2,18 @@ package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import android.app.Application
 import android.content.SharedPreferences
-import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.PathPixelData
 import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
-import java.util.logging.Level
 
 
 internal interface PathPixelDelegate {
@@ -94,7 +92,7 @@ internal class TJLabsPathPixelManager {
         // 모든 요청 완료 후 실행
         Thread {
             latch.await()
-            Logger.d("(TJLabsResource) Info : complete $pathPixelUrl")
+            TJLogger.d("(TJLabsResource) Info : complete $pathPixelUrl")
             completion(pathPixelUrl)
         }.start()
     }
@@ -112,7 +110,7 @@ internal class TJLabsPathPixelManager {
         loadPathPixelUrl(sectorId, buildingsData) {
             pathPixelUrl ->
 
-            Logger.d("(TJLabsResource) loadPathPixel $pathPixelUrl")
+            TJLogger.d("(TJLabsResource) loadPathPixel $pathPixelUrl")
 
             for ((key, value) in pathPixelUrl) {
                 //서버에서 가져온 결과를 캐시에 저장된 값과 비교
@@ -247,7 +245,7 @@ internal class TJLabsPathPixelManager {
     private fun savePathPixelUrlToCache(key: String, pathPixelUrlFromServer: String) {
         val keyPpURL = "TJLabsPathPixelURL_$key"
         sharedPrefs.edit().putString(keyPpURL, pathPixelUrlFromServer).apply()
-        Logger.d("Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
+        TJLogger.d("Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
     }
 
     private fun loadPathPixelCacheDirFromCache(key: String): String? {
@@ -258,7 +256,7 @@ internal class TJLabsPathPixelManager {
     private fun savePathPixelCacheDirToCache(key: String, pathPixelUrlFromServer: String) {
         val keyPpURL = "TJLabsPathPixelDir_$key"
         sharedPrefs.edit().putString(keyPpURL, pathPixelUrlFromServer).apply()
-        Logger.d("Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
+        TJLogger.d("Info: save $key Path-Pixel URL $pathPixelUrlFromServer")
     }
 
     private fun parsePathPixelData(data: String): PathPixelData {
@@ -279,7 +277,7 @@ internal class TJLabsPathPixelManager {
             val parts = line.split(",")
             if (parts.size < 5) {
                 // 잘못된 라인 형태
-                Logger.d("Invalid line format: $line")
+                TJLogger.d("Invalid line format: $line")
                 continue
             }
 
@@ -297,7 +295,7 @@ internal class TJLabsPathPixelManager {
                 val scaleVal = scaleString.toFloatOrNull()
 
                 if (typeVal == null || nodeVal == null || xVal == null || yVal == null || scaleVal == null) {
-                    Logger.d("Parse error: $line")
+                    TJLogger.d("Parse error: $line")
                     continue
                 }
 

@@ -1,10 +1,9 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 internal interface SectorDelegate {
     fun onSectorData(data: SectorOutput)
@@ -42,7 +41,7 @@ internal class TJLabsSectorManager {
 
             // 실패 처리
             if (status != 200) {
-                Logger.d(msg)
+                TJLogger.d(msg)
                 delegate?.onSectorError()
                 completion(null)
                 return@getSector
@@ -62,6 +61,6 @@ internal class TJLabsSectorManager {
 
     private fun setSectorDataMap(sectorId: Int, sectorData : SectorOutput) {
         sectorDataMap[sectorId] = sectorData
-        Logger.d("Info : sectorDataMap = $sectorDataMap")
+        TJLogger.d("Info : sectorDataMap = $sectorDataMap")
     }
 }

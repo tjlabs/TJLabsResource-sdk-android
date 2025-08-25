@@ -1,15 +1,9 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import android.app.Application
-import android.content.SharedPreferences
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
-import com.tjlabs.tjlabsresource_sdk_android.PathPixelData
-import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager.Companion.scaleOffsetDataMap
-import com.tjlabs.tjlabsresource_sdk_android.util.Logger
 
 
 internal interface GeofenceDelegate {

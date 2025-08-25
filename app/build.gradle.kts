@@ -1,8 +1,8 @@
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
 plugins {
-    id("com.android.application")
-//    id("com.android.library")
+//    id("com.android.application")
+    id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
 }
@@ -12,19 +12,19 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
-        versionCode = 1
-        versionName = "1.0"
+//        applicationId = "com.tjlabs.tjlabsresource_sdk_android"
+//        versionCode = 1
+//        versionName = "1.0"
         minSdk = 29
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-//    libraryVariants.all {
-//        outputs.all {
-//            (this as BaseVariantOutputImpl).outputFileName = "app-release-resource.aar"
-//        }
-//    }
+    libraryVariants.all {
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "app-release-resource.aar"
+        }
+    }
 
     buildTypes {
         release {
