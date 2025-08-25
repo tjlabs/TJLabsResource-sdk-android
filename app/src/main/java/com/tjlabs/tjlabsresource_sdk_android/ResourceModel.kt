@@ -133,8 +133,8 @@ data class UnitOutput(
 
 // MARK: - Parameter
 data class SectorParameterOutput(
-    val standard_max_rssi: Float,
-    val standard_min_rssi: Float
+    val standard_max_rssi: Int,
+    val standard_min_rssi: Int
 )
 
 data class LevelParameterOutput(
