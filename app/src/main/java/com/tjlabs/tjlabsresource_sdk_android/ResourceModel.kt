@@ -1,149 +1,38 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
+import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
+import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
+
+enum class ResourceRegion(val value: String) {
+    KOREA("Korea"),
+    US_EAST("US_EAST"),
+    CANADA("Canada")
+}
 
 data class PathPixelData(
     val roadType: List<Int> = listOf(),
     val nodeNumber: List<Int> = listOf(),
     val road: List<List<Float>> = listOf(),
+    val roadMinMax: List<Float> = listOf(),
     val roadScale: List<Float> = listOf(),
     val roadHeading: List<String> = listOf()
 )
 
-data class PathPixelDataIsLoaded(
-    var isLoaded : Boolean = false,
-    val url : String = ""
-)
-
-internal data class SectorIdInput(
-    var sector_id: Int = 0
-)
-
-internal data class SectorInput(
-    var sector_id: Int = 0,
-    var operating_system: String = "Android"
-)
-
-internal data class PathPixel(
-    val building_name: String = "",
-    val level_name: String = "",
-    val url : String = "",
-    val OutputPathPixel : List<PathPixel> = listOf()
-)
-
-internal data class OutputPathPixel(
-    val path_pixel_list : List<PathPixel> = listOf()
-)
-
-internal data class LevelOutput(
-    val building_name: String = "",
-    val level_name: String = ""
-)
-
-internal data class LevelOutputList(
-    val level_list : List<LevelOutput> = listOf()
-)
-
-
-internal data class ScaleOutputList(
-    val scale_list : List<ScaleOutput> = listOf()
-)
-
-internal data class ScaleOutput(
-    val building_name : String = "",
-    val level_name : String = "",
-    val image_scale : List<Float> = listOf()
-)
-
-data class ResourceRegion(
-    val KOREA : String,
-    val US_EAST : String,
-    val CANADA : String
-) {
-    companion object {
-        val KOREA : String = "Korea"
-        val US_EAST : String = "US_EAST"
-        val CANADA : String = "Canada"
-    }
-}
-
-enum class ResourceError {
-    PathPixel,
-    BuildingLevel,
-    Image,
-    Scale,
-    Entrance,
-    Unit,
-    Param,
-    Geo
-}
-
-
-interface TJLabsResourceManagerDelegate {
-    fun onBuildingLevelData(isOn: Boolean, buildingLevelData: Map<String, List<String>>)
-    fun onPathPixelData(isOn: Boolean, pathPixelKey: String, data : PathPixelData?)
-    fun onPathPixelDataLoaded(isOn: Boolean, pathPixelKey: String, data : PathPixelDataIsLoaded?)
-    fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
-    fun onScaleOffsetData(isOn: Boolean, scaleKey: String, data : List<Float>)
-    fun onEntranceRouteData(isOn: Boolean, entranceKey: String, data : EntranceRouteData?)
-    fun onEntranceData(isOn: Boolean, entranceKey: String, data : EntranceData?)
-    fun onUnitData(isOn: Boolean, unitKey: String, data : List<UnitData>?)
-    fun onParamData(isOn: Boolean, data : ParameterData?)
-    fun onGeofenceData(isOn : Boolean, key : String, data : GeofenceData?)
-    fun onError(error: ResourceError)
-}
-
-data class EntranceInfo(
-    var building : String = "",
-    var level : String = "",
+data class EntranceData(
     var number: Int = 0,
     var networkStatus: Boolean = false,
     var velocityScale: Float = 0f,
     var innerWardId: String = "",
     var innerWardRssi: Float = 0f,
-    var innerWardCoord: List<Int> = emptyList(),
-    var outerWards : String = ""
+    var innerWardCoord: List<Float> = emptyList(),
+    var outerWardId: String = ""
 )
 
-data class EntranceData(
-    var entranceInfoList : List<EntranceInfo> = listOf(),
-)
 
 data class EntranceRouteData(
     var routeLevel: List<String> = emptyList(),
     var route: List<List<Float>> = listOf(emptyList())
-)
-
-data class EntranceRouteDataIsLoaded(
-    var isLoaded: Boolean = false,
-    var url: String = ""
-)
-
-data class EntranceRf(
-    val id : String = "",
-    val rss : Float = 0f,
-    val pos : List<Int> = listOf(),
-    val direction : Int = 0
-)
-
-data class Entrance(
-    val spot_number: Int = 0,
-    val outermost_ward_id: String = "",
-    val scale : Float = 0f,
-    val url : String = "",
-    val network_status : Boolean = false,
-    val innermost_ward : EntranceRf = EntranceRf()
-)
-
-data class EntranceList(
-    val building_name: String = "",
-    val level_name: String = "",
-    val entrances : List<Entrance> = listOf()
-)
-
-
-data class EntranceOutputList(
-    val entrance_list: List<EntranceList> = listOf()
 )
 
 data class UnitData(
@@ -157,53 +46,146 @@ data class UnitData(
     val y: Float = 0f
 )
 
-data class UnitOutput (
-    val building_name: String = "",
-    val level_name: String = "",
-    val units : List<UnitData> = listOf()
-)
-
-data class UnitOutputList (
-    val unit_list : List<UnitOutput> = listOf()
-)
-
 data class ParameterData(
     val trajectory_length: Int = 0,
     val trajectory_diagonal: Int = 0,
-    val debug :Boolean = false,
-    val standard_rss : List<Int> = listOf()
-)
-
-data class Node(
-    val number: Int = 0,
-    val center_pos: List<Int> = listOf(),
-    val direction_type: String = ""
-)
-
-data class DrModeArea(
-    val number: Int = 0,
-    val range : List<Int> = listOf(),
-    val direction : Int = 0,
-    val nodes : List<Node> = listOf()
-)
-
-data class Geofence(
-    val building_name: String = "",
-    val level_name: String = "",
-    val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val dr_mode_areas : List<DrModeArea> = listOf(DrModeArea())
-)
-
-data class OutputGeofence(
-    val geofence_list : List<Geofence> = listOf()
+    val debug: Boolean = false,
+    val standard_rss: List<Int> = listOf()
 )
 
 data class GeofenceData(
     val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val dr_mode_areas : List<DrModeArea> = listOf(DrModeArea())
+    val dr_mode_areas: List<DRModeArea> = listOf()
 )
 
+internal data class SectorIdInput(
+    var sector_id: Int = 0
+)
+
+internal data class SectorIdOsInput(
+    val sector_id: Int = 0,
+    val operating_system: String = "Android"
+)
+
+internal data class LevelIdOsInput(
+    var level_id: Int = 0,
+    var operating_system: String = "Android"
+)
+
+data class SectorOutput(
+    val id: Int,
+    val name: String,
+    val request_service: String,
+    val debug: Boolean,
+    val buildings: List<BuildingOutput>
+)
+
+data class BuildingOutput(
+    val id: Int,
+    val name: String,
+    val levels: List<LevelOutput>
+)
+
+data class LevelOutput(
+    val id: Int,
+    val name: String,
+    val image: String
+)
+
+// MARK: - PathPixel
+data class PathPixelOutput(
+    val csv: String
+)
+
+// MARK: - Entrance
+data class InnermostWard(
+    val name: String,
+    val rssi: Float,
+    val x: Int,
+    val y: Int,
+    val direction: Float
+)
+
+data class Entrance(
+    val number: Int,
+    val outermost_ward_name: String,
+    val scale: Float,
+    val csv: String,
+    val network_status: Boolean,
+    val innermost_ward: InnermostWard
+)
+
+data class EntranceOutput(
+    val entrances: List<Entrance>
+)
+
+// MARK: - Scale Offset
+data class ScaleOffsetOutput(
+    val image_scale: List<Float>
+)
+
+// MARK: - Unit
+data class UnitOutput(
+    val units: List<UnitData>
+)
+
+// MARK: - Parameter
+data class SectorParameterOutput(
+    val standard_max_rssi: Int,
+    val standard_min_rssi: Int
+)
+
+data class LevelParameterOutput(
+    val trajectory_length: Float,
+    val trajectory_diagonal: Float
+)
+
+// MARK: - Geofence
+data class DRModeArea(
+    var number: Int,
+    var range: List<Float>,
+    var direction: Float,
+    var nodes: List<DRModeAreaNode>
+)
+
+data class DRModeAreaNode(
+    var number: Int,
+    var center_x: Float,
+    var center_y: Float,
+    var direction_type: String
+)
+
+// MARK: - Resource Error
+enum class ResourceError {
+    Sector,
+    PathPixel,
+    BuildingLevel,
+    Image,
+    Scale,
+    Entrance,
+    Unit,
+    Param,
+    Geofence
+}
+
+// MARK: - Delegate (protocol → interface)
+// delegate 체인이 TJLabsBuildingsManager → TJLabsResourceManager → TJLabsResourceManagerDelegate 형태로 단일 경로
+// manager 를 따로 입력받을 필요 없음. manager 입력은 어디서 호출했는지 확인하기 위함임
+
+interface TJLabsResourceManagerDelegate {
+    fun onSectorData(data: SectorOutput)
+    fun onSectorError(error: ResourceError)
+    fun onBuildingsData(data: List<BuildingOutput>)
+    fun onScaleOffsetData(scaleKey: String, data: List<Float>)
+    fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
+    fun onGeofenceData(geofenceKey: String, data: GeofenceData)
+    fun onEntranceData(entranceKey: String, data: EntranceData)
+    fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData)
+    fun onSectorParamData(data: SectorParameterOutput)
+    fun onLevelParamData(paramKey: String, data: LevelParameterOutput)
+    fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
+    fun onUnitData(unitKey: String, data: List<UnitData>?)
+    fun onError(error: ResourceError, key: String)
+}

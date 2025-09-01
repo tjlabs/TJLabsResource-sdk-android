@@ -2,12 +2,12 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,92 +25,73 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         }
 
         // sector id 1 = Tips town
+        // coex id 7
+        // commiro id 58
         TJLabsAuthManager.initialize(application)
         TJLabsAuthManager.setServerURL("jupiter")
         TJLabsAuthManager.auth(tenantId, tenantPw) {
                 code, success->
-            Log.d("VenusServiceResult", "code : $code // auth : $success")
-
             if (success) {
                 val tjlabsResourceManager = TJLabsResourceManager()
                 tjlabsResourceManager.delegate = this
-                tjlabsResourceManager.loadJupiterResources(application, ResourceRegion.KOREA, 1)
+                tjlabsResourceManager.setDebugOption(true)
+//                tjlabsResourceManager.loadJupiterResource(application, ResourceRegion.KOREA.value, 7)
+
+                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, 58)
             }
         }
     }
 
-    override fun onBuildingLevelData(
-        isOn: Boolean,
-        buildingLevelData: Map<String, List<String>>
-    ) {
-
-        Log.d(TAG, "isOn : $isOn // buildingLevelData : $buildingLevelData")
+    override fun onSectorData(data: SectorOutput) {
+        TJLogger.d("onSectorData : $data")
 
     }
 
-    override fun onPathPixelData(
-        isOn: Boolean,
-        pathPixelKey: String,
-        data: PathPixelData?
-    ) {
-        Log.d(TAG, "isOn : $isOn // pathPixelKey : $pathPixelKey // data : $data")
-
+    override fun onSectorError(error: ResourceError) {
+        TJLogger.d("onSectorError : $error")
     }
 
-    override fun onPathPixelDataLoaded(
-        isOn: Boolean,
-        pathPixelKey: String,
-        data: PathPixelDataIsLoaded?
-    ) {
-        Log.d(TAG, "PathPixel Loaded isOn : $isOn // pathPixelKey : $pathPixelKey // data : $data")
+    override fun onBuildingsData(data: List<BuildingOutput>) {
+         TJLogger.d("onBuildingsData : $data")
     }
 
-    override fun onBuildingLevelImageData(
-        isOn: Boolean,
-        imageKey: String,
-        data: Bitmap?
-    ) {
-        Log.d(TAG, "isOn : $isOn // imageKey : $imageKey // data : $data")
-
+    override fun onScaleOffsetData(scaleKey: String, data: List<Float>) {
+        TJLogger.d("onScaleOffsetData : $scaleKey // data : $data")
     }
 
-    override fun onScaleOffsetData(
-        isOn: Boolean,
-        scaleKey: String,
-        data: List<Float>
-    ) {
-        Log.d(TAG, "isOn : $isOn // scaleKey : $scaleKey // data : $data")
-
+    override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
+        TJLogger.d("onPathPixelData : $pathPixelKey // data : $data")
     }
 
-    override fun onEntranceRouteData(
-        isOn: Boolean,
-        entranceKey: String,
-        data: EntranceRouteData?
-    ) {
-        Log.d(TAG, "isOn : $isOn // entrance route Key : $entranceKey// data : $data")
-
+    override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
+        TJLogger.d("onGeofenceData : $geofenceKey // data : $data")
     }
 
-    override fun onEntranceData(isOn: Boolean, entranceKey: String, data: EntranceData?) {
-        Log.d(TAG, "isOn : $isOn // entranceKey : $entranceKey// data : $data")
+    override fun onEntranceData(entranceKey: String, data: EntranceData) {
+        TJLogger.d("onEntranceData : $entranceKey // data : $data")
     }
 
-    override fun onUnitData(isOn: Boolean, unitKey: String, data: List<UnitData>?) {
-        Log.d(TAG, "isOn : $isOn // unit : $data")
+    override fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData) {
+        TJLogger.d("onEntranceRouteData : $entranceKey // data : $data")
     }
 
-    override fun onParamData(isOn: Boolean, data: ParameterData?) {
-        Log.d(TAG, "isOn : $isOn // param : $data")
+    override fun onSectorParamData(data: SectorParameterOutput) {
+        TJLogger.d("onSectorParamData data $data")
     }
 
-    override fun onGeofenceData(isOn: Boolean, key: String, data: GeofenceData?) {
-        Log.d(TAG, "isOn : $isOn // geo key : $key")
-
+    override fun onLevelParamData(paramKey: String, data: LevelParameterOutput) {
+        TJLogger.d("onLevelParamData type $paramKey // $data")
     }
 
-    override fun onError(error: ResourceError) {
+    override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
+        TJLogger.d("onBuildingLevelImageData imageKey $imageKey // $data")
     }
 
+    override fun onUnitData(unitKey: String, data: List<UnitData>?) {
+        TJLogger.d("onUnitData unitKey $unitKey // data : $data")
+    }
 
+    override fun onError(error: ResourceError, key: String) {
+        TJLogger.d("onError : $error // key : $key")
+    }
 }

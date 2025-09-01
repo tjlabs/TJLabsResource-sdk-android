@@ -1,4 +1,4 @@
-package com.tjlabs.tjlabsresource_sdk_android
+package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import android.graphics.Bitmap
 import android.util.LruCache

@@ -1,8 +1,9 @@
-package com.tjlabs.tjlabsresource_sdk_android
+package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstant.getImageBaseURL
+import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -13,7 +14,9 @@ import java.net.URL
 
 
 internal interface BuildingLevelImageDelegate {
-    fun onBuildingLevelImageData(isOn: Boolean, imageKey: String, data : Bitmap?)
+    fun onBuildingLevelImageData(imageKey: String, data : Bitmap?)
+    fun onBuildingLevelImageError(imageKey: String)
+
 }
 internal class TJLabsImageManager {
     companion object {
@@ -21,31 +24,43 @@ internal class TJLabsImageManager {
     }
 
     var delegate: BuildingLevelImageDelegate? = null
-    private var baseURL = getImageBaseURL()
-    var region = ResourceRegion.KOREA
 
-    fun loadImage(sectorId: Int, buildingLevelData : Map<String, List<String>>){
-        for ((buildingName, levelNameList) in buildingLevelData) {
-            for (levelName in levelNameList) {
-                if (!levelName.contains("_D")){
-                    val imageKey = "image_${sectorId}_${buildingName}_$levelName"
-                    loadBuildingLevelImage(sectorId, buildingName, levelName) { bitmap, _ ->
-                        if (bitmap != null) {
-                            buildingLevelImageDataMap[imageKey] = bitmap
-                            delegate?.onBuildingLevelImageData( true, imageKey, bitmap)
+    fun loadImage(sectorId: Int, buildingsData: List<BuildingOutput>) {
+        TJLogger.d("(TJLabsResource) loadImage")
 
-                        } else {
-                            delegate?.onBuildingLevelImageData( false, imageKey, null)
-                        }
-                    }
+        for (building in buildingsData) {
+            for (level in building.levels) {
+                if (level.name.contains("_D")) continue
+                val imageKey = "${sectorId}_${building.name}_${level.name}"
+
+                val cached = buildingLevelImageDataMap[imageKey]
+                if (cached != null) {
+                    delegate?.onBuildingLevelImageData(imageKey, cached)
+                    continue
                 }
+
+                updateLevelImage(imageKey, level.image)
             }
         }
     }
 
-    private fun loadBuildingLevelImage(sectorId: Int, building: String, level: String, completion: (Bitmap?, Exception?) -> Unit) {
-        val urlString = "$baseURL/map/$sectorId/$building/$level.png"
+    fun updateLevelImage(key: String, url: String) {
+        TJLogger.d("(TJLabsResource) updateLevelImage")
 
+        loadBuildingLevelImage(url) { bitmap, _ ->
+            if (bitmap != null) {
+                TJLogger.d("(TJLabsResource) loadBuildingLevelImage // bitmap : $bitmap")
+
+                buildingLevelImageDataMap[key] = bitmap
+                delegate?.onBuildingLevelImageData(key, bitmap)
+
+            } else {
+                delegate?.onBuildingLevelImageError(key)
+            }
+        }
+    }
+
+    private fun loadBuildingLevelImage(urlString : String, completion: (Bitmap?, Exception?) -> Unit) {
         try {
             val url = URL(urlString)
 
