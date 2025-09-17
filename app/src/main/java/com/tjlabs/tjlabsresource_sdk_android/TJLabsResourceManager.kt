@@ -9,6 +9,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.GeofenceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.LevelsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.PathPixelDelegate
@@ -18,6 +19,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
@@ -29,6 +31,7 @@ import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 class TJLabsResourceManager :
     SectorDelegate,
     BuildingsDelegate,
+    LevelsDelegate,
     ScaleOffsetDelegate,
     PathPixelDelegate,
     GeofenceDelegate,
@@ -39,8 +42,9 @@ class TJLabsResourceManager :
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
-    private var buildingLevelManager = TJLabsBuildingsManager()
     private var sectorManager = TJLabsSectorManager()
+    private var buildingLevelManager = TJLabsBuildingsManager()
+    private var levelsManager = TJLabsLevelsManager()
     private var scaleOffsetManager = TJLabsScaleOffsetManager()
     private var pathPixelManager = TJLabsPathPixelManager()
     private var geofenceManager = TJLabsGeofenceManager()
@@ -54,6 +58,7 @@ class TJLabsResourceManager :
     init {
         sectorManager.delegate = this
         buildingLevelManager.delegate = this
+        levelsManager.delegate = this
         scaleOffsetManager.delegate = this
         pathPixelManager.delegate = this
         geofenceManager.delegate = this
@@ -87,6 +92,7 @@ class TJLabsResourceManager :
             sectorData ->
             if (sectorData != null) {
                 buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+                levelsManager.loadLevelsWards(sectorId, sectorData.buildings)
                 scaleOffsetManager.loadScaleOffset(sectorId, sectorData.buildings)
                 pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
                 geofenceManager.loadGeofence(sectorId, sectorData.buildings)
@@ -136,6 +142,10 @@ class TJLabsResourceManager :
 
     fun getBuildingLevelData(): Map<Int, List<BuildingOutput>> {
         return TJLabsBuildingsManager.buildingsDataMap
+    }
+
+    fun getLevelWardsData() : Map<String, List<String>> {
+        return TJLabsLevelsManager.levelWardsDataMap
     }
 
     fun getScaleOffset(): Map<String, List<Float>> {
@@ -317,5 +327,13 @@ class TJLabsResourceManager :
 
     override fun onUnitDataError(unitKey: String) {
         delegate?.onError(ResourceError.Unit, unitKey)
+    }
+
+    override fun onLevelWardsData(levelKey: String, data : List<String>) {
+        delegate?.onLevelWardsData(levelKey, data)
+    }
+
+    override fun onLevelWardsDataError(unitKey: String) {
+        delegate?.onError(ResourceError.LevelWars, unitKey)
     }
 }

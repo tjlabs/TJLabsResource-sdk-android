@@ -4,6 +4,7 @@ import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelWardsOutput
 import com.tjlabs.tjlabsresource_sdk_android.PathPixelOutput
 import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.ScaleOffsetOutput
@@ -180,4 +181,27 @@ internal object TJLabsResourceNetworkManager {
             }
         })
     }
+
+    fun getLevelWards(url : String, input : LevelIdOsInput, serverVersion : String, completion : (Int, String, LevelWardsOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelWards = retrofit.create(PostInput::class.java)
+        getLevelWards.getLevelWards(serverVersion, input.level_id).enqueue(object :
+            Callback<LevelWardsOutput> {
+            override fun onFailure(call: Call<LevelWardsOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelWards  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<LevelWardsOutput>, response: Response<LevelWardsOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelWards", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelWards // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+
+    }
+
+
 }
