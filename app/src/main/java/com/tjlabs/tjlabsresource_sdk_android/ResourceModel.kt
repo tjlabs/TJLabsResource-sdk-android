@@ -1,8 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
-import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
-import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -191,7 +189,7 @@ interface TJLabsResourceManagerDelegate {
     fun onSectorData(data: SectorOutput)
     fun onSectorError(error: ResourceError)
     fun onBuildingsData(data: List<BuildingOutput>)
-    fun onLevelWardsData(unitKey: String, data : List<String>)
+    fun onLevelWardsData(levelKey: String, data : List<String>)
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
     fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
     fun onGeofenceData(geofenceKey: String, data: GeofenceData)
