@@ -1,8 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
-import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
-import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -157,11 +155,24 @@ data class DRModeAreaNode(
     var direction_type: String
 )
 
+data class LevelWardsOutput(
+    var id : Int,
+    val name : String,
+    val wards : List<Ward>
+)
+
+data class Ward (
+    val id : Int,
+    val name : String
+)
+
+
 // MARK: - Resource Error
 enum class ResourceError {
     Sector,
     PathPixel,
     BuildingLevel,
+    LevelWards,
     Image,
     Scale,
     Entrance,
@@ -178,6 +189,7 @@ interface TJLabsResourceManagerDelegate {
     fun onSectorData(data: SectorOutput)
     fun onSectorError(error: ResourceError)
     fun onBuildingsData(data: List<BuildingOutput>)
+    fun onLevelWardsData(levelKey: String, data : List<String>)
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
     fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
     fun onGeofenceData(geofenceKey: String, data: GeofenceData)

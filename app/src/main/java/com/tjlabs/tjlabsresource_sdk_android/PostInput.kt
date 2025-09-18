@@ -62,4 +62,10 @@ internal interface PostInput {
         @Path("server_version") serverVersion: String,
         @Path("pk") pk: Int
     ): Call<UnitOutput>
+
+    @GET("/{server_version}/levels/{pk}")
+    fun getLevelWards(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int
+    ): Call<LevelWardsOutput>
 }

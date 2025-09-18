@@ -17,6 +17,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         val tenantId = "tjlabs"
         val tenantPw = "TJlabs0407@"
+        val sectorId = 6
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -24,9 +25,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             insets
         }
 
-        // sector id 1 = Tips town
-        // coex id 7
-        // commiro id 58
+
         TJLabsAuthManager.initialize(application)
         TJLabsAuthManager.setServerURL("jupiter")
         TJLabsAuthManager.auth(tenantId, tenantPw) {
@@ -35,9 +34,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
                 val tjlabsResourceManager = TJLabsResourceManager()
                 tjlabsResourceManager.delegate = this
                 tjlabsResourceManager.setDebugOption(true)
-//                tjlabsResourceManager.loadJupiterResource(application, ResourceRegion.KOREA.value, 7)
-
-                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, 58)
+                tjlabsResourceManager.loadJupiterResource(application, ResourceRegion.KOREA.value, sectorId)
+                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, sectorId)
             }
         }
     }
@@ -53,6 +51,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
          TJLogger.d("onBuildingsData : $data")
+    }
+
+    override fun onLevelWardsData(levelKey: String, data: List<String>) {
+        TJLogger.d("onLevelWardsData : $levelKey // data : $data")
     }
 
     override fun onScaleOffsetData(scaleKey: String, data: List<Float>) {
