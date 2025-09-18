@@ -172,7 +172,7 @@ enum class ResourceError {
     Sector,
     PathPixel,
     BuildingLevel,
-    LevelWars,
+    LevelWards,
     Image,
     Scale,
     Entrance,
