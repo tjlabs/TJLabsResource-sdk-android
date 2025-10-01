@@ -1,5 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
+import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
@@ -203,5 +204,35 @@ internal object TJLabsResourceNetworkManager {
 
     }
 
+    fun getUserAffineTrans(url : String, sectorId : Int, userAffineTransVersion : String, completion : (Int, String, AffineTransParamOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getAffineTrans = retrofit.create(PostInput::class.java)
+        getAffineTrans.getUserAffineTrans(userAffineTransVersion, sectorId).enqueue(object :
+            Callback<AffineTransParamOutput>{
+            override fun onFailure(call: Call<AffineTransParamOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelWards  // status code : 500  // sectorId : $sectorId", null)
+            }
+
+            override fun onResponse(
+                call: Call<AffineTransParamOutput>,
+                response: Response<AffineTransParamOutput>
+            ) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300){
+                    val resultData = response.body()
+                    if (resultData != null) {
+                        completion(statusCode, "(TJLabsResource) Success : getUserAffineTrans", resultData)
+                    } else {
+                        completion(statusCode, "(TJLabsResource) AffineParam code : $statusCode // result == null", null)
+                    }
+                } else if (statusCode in 400 until 500){
+                    // 값이 없을 경우에도 400 -> 실행은 된다.
+                    completion(statusCode, "(TJLabsResource) AffineParam : sector $sectorId is not support affine converting // code : $statusCode", null)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getUserAffineTrans // status code : $statusCode // sectorId : $sectorId", null)
+                }
+            }
+        })
+    }
 
 }
