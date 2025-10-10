@@ -17,7 +17,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         val tenantId = "tjlabs"
         val tenantPw = "TJlabs0407@"
-        val sectorId = 6
+        val sectorId = 20
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -91,6 +91,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
     override fun onUnitData(unitKey: String, data: List<UnitData>?) {
         TJLogger.d("onUnitData unitKey $unitKey // data : $data")
+    }
+
+    override fun onAffineData(sectorId: Int, data: AffineTransParamOutput) {
+        TJLogger.d("onAffineData sectorId $sectorId // data : $data")
     }
 
     override fun onError(error: ResourceError, key: String) {
