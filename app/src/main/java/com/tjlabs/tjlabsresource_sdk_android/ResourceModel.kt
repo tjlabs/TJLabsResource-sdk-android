@@ -161,6 +161,16 @@ data class LevelWardsOutput(
     val wards : List<Ward>
 )
 
+data class AffineTransParamOutput(
+    val xx_scale: Float = 0f,
+    val xy_shear: Float = 0f,
+    val x_translation: Float = 0f,
+    val yx_shear: Float = 0f,
+    val yy_scale: Float = 0f,
+    val y_translation: Float = 0f,
+    val heading_offset : Float = 0f
+)
+
 data class Ward (
     val id : Int,
     val name : String
@@ -178,7 +188,8 @@ enum class ResourceError {
     Entrance,
     Unit,
     Param,
-    Geofence
+    Geofence,
+    Affine
 }
 
 // MARK: - Delegate (protocol → interface)
@@ -199,5 +210,6 @@ interface TJLabsResourceManagerDelegate {
     fun onLevelParamData(paramKey: String, data: LevelParameterOutput)
     fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
     fun onUnitData(unitKey: String, data: List<UnitData>?)
+    fun onAffineData(sectorId : Int, data : AffineTransParamOutput)
     fun onError(error: ResourceError, key: String)
 }

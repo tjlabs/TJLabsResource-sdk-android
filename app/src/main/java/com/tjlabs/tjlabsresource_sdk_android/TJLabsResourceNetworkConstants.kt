@@ -20,7 +20,6 @@ internal object TJLabsResourceNetworkConstants {
             when(tokenResult) {
                 is TokenResult.Success -> {
                     token = tokenResult.token
-                    Log.d("VenusServiceResult", "token : $token")
                 }
 
                 is TokenResult.Failure -> {
@@ -53,6 +52,7 @@ internal object TJLabsResourceNetworkConstants {
     private const val USER_SECTOR_PARAM_SERVER_VERSION = "2025-03-31"
     private const val USER_LEVEL_PARAM_SERVER_VERSION = "2025-03-31"
     private const val USER_LEVEL_WARDS_SERVER_VERSION = "2025-04-17"
+    private const val USER_AFFINE_SERVER_VERSION = "2025-08-25"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
@@ -126,6 +126,10 @@ internal object TJLabsResourceNetworkConstants {
 
     fun getUserLevelWardsVersion() : String {
         return USER_LEVEL_WARDS_SERVER_VERSION
+    }
+
+    fun getUserAffineServerVersion() : String {
+        return USER_AFFINE_SERVER_VERSION
     }
 
     class HeaderInterceptor (private val token: String) : Interceptor {
