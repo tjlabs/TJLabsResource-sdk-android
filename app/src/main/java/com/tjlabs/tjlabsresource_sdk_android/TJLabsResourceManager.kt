@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import com.tjlabs.tjlabsresource_sdk_android.manager.AffineDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingLevelImageDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
@@ -15,6 +16,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.PathPixelDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ScaleOffsetDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.SectorDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsAffineManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
@@ -38,7 +40,7 @@ class TJLabsResourceManager :
     EntranceDelegate,
     ParamDelegate,
     BuildingLevelImageDelegate,
-    UnitDelegate {
+    UnitDelegate, AffineDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
@@ -52,6 +54,7 @@ class TJLabsResourceManager :
     private var paramManager = TJLabsParamManager()
     private var imageManager = TJLabsImageManager()
     private var unitManager = TJLabsUnitManager()
+    private var affineManager = TJLabsAffineManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -66,6 +69,7 @@ class TJLabsResourceManager :
         paramManager.delegate = this
         imageManager.delegate = this
         unitManager.delegate = this
+        affineManager.delegate = this
     }
 
     fun loadMapResource(application: Application, region: String, sectorId: Int) {
@@ -99,6 +103,7 @@ class TJLabsResourceManager :
                 entranceManager.loadEntrance(region, sectorId, sectorData.buildings)
                 paramManager.loadSectorParam(sectorId)
                 paramManager.loadLevelParam(sectorId, sectorData.buildings)
+                affineManager.loadAffineParam(sectorId)
             } else {
                 delegate?.onSectorError(ResourceError.Sector)
             }
@@ -184,6 +189,10 @@ class TJLabsResourceManager :
         return TJLabsParamManager.levelParamData
     }
 
+    fun getAffineParamData() : Map<Int, AffineTransParamOutput?> {
+        return TJLabsAffineManager.affineParamMap
+    }
+
     
     // MARK: - Public Update Methods
     fun updateScaleOffsetData(key: String) {
@@ -247,6 +256,10 @@ class TJLabsResourceManager :
         } else {
             delegate?.onError(ResourceError.Param, key)
         }
+    }
+
+    fun updateAffineParam(sectorId: Int) {
+        affineManager.updateAffineParam(sectorId)
     }
 
     fun setDebugOption(set : Boolean) {
@@ -334,6 +347,14 @@ class TJLabsResourceManager :
     }
 
     override fun onLevelWardsDataError(unitKey: String) {
-        delegate?.onError(ResourceError.LevelWars, unitKey)
+        delegate?.onError(ResourceError.LevelWards, unitKey)
+    }
+
+    override fun onAffineData(sectorId: Int, data: AffineTransParamOutput) {
+        delegate?.onAffineData(sectorId, data)
+    }
+
+    override fun onAffineError(sectorId: Int) {
+        delegate?.onError(ResourceError.Affine, sectorId.toString())
     }
 }

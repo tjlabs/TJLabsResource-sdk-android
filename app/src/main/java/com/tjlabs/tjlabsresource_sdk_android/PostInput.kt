@@ -68,4 +68,11 @@ internal interface PostInput {
         @Path("server_version") serverVersion: String,
         @Path("pk") pk: Int
     ): Call<LevelWardsOutput>
+
+    @GET("/{user_affine_server_version}/sectors/{sector_id}/wgs84-transform")
+    fun getUserAffineTrans(
+        @Path("user_affine_server_version") userAffineServerVersion: String,
+        @Path("sector_id") sectorId: Int
+    ): Call<AffineTransParamOutput>
+
 }
