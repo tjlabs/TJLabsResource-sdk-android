@@ -7,6 +7,11 @@ import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorParameterOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+
 
 enum class ParamErrorType {
     Sector, Level
@@ -27,70 +32,124 @@ internal class TJLabsParamManager {
     var delegate: ParamDelegate? = null
 
 
-    fun loadSectorParam(sectorId: Int) {
+    fun loadSectorParam(
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
         val input = SectorIdOsInput(sector_id = sectorId)
 
         TJLabsResourceNetworkManager.getSectorParam(
             TJLabsResourceNetworkConstants.getUserBaseURL(),
             input,
             TJLabsResourceNetworkConstants.getUserSectorParamVersion()
-        ) { status, msg, result ->
+        ) { status, _, result ->
 
-            // 실패 처리
-            if (status != 200) {
+            if (status != 200 || result == null) {
                 delegate?.onParamError(ParamErrorType.Sector, null)
+                completion(false)
+                return@getSectorParam
             }
 
-            if (result != null) {
-                sectorParamData[sectorId] = result
-                delegate?.onSectorParamData(result)
-            } else {
-                delegate?.onParamError(ParamErrorType.Sector, null)
-            }
+            sectorParamData[sectorId] = result
+            delegate?.onSectorParamData(result)
+            completion(true)
         }
     }
 
-    fun loadLevelParam(sectorId: Int,
-                     buildingsData: List<BuildingOutput>
+    fun loadLevelParam(
+        sectorId: Int,
+        buildingsData: List<BuildingOutput>,
+        completion: (Boolean) -> Unit
     ) {
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        val lock = Any()
+        var isAllSuccess = true
+        var hasAsyncWork = false
+
+        fun updateSuccess(success: Boolean) {
+            if (!success) {
+                synchronized(lock) {
+                    isAllSuccess = false
+                }
+            }
+        }
+
+        val tasks = mutableListOf<(CountDownLatch) -> Unit>()
+
         for (building in buildingsData) {
             for (level in building.levels) {
                 if (level.name.contains("_D")) continue
 
                 val levelKey = "${sectorId}_${building.name}_${level.name}"
 
+                // ✅ 캐시 히트
                 val cached = levelParamData[levelKey]
                 if (cached != null) {
                     delegate?.onLevelParamData(levelKey, cached)
                     continue
                 }
 
-                updateLevelParam(levelKey, level.id)
+                // ❌ 캐시 미스 → 비동기 작업
+                hasAsyncWork = true
+
+                tasks += { latch ->
+                    updateLevelParam(levelKey, level.id) { isSuccess ->
+                        updateSuccess(isSuccess)
+                        latch.countDown()
+                    }
+                }
+            }
+        }
+
+        // 전부 캐시 히트
+        if (!hasAsyncWork) {
+            completion(true)
+            return
+        }
+
+        val latch = CountDownLatch(tasks.size)
+        val executor = Executors.newFixedThreadPool(4)
+
+        // 병렬 실행
+        tasks.forEach { task ->
+            executor.execute {
+                task(latch)
+            }
+        }
+
+        // 전체 완료 대기
+        Executors.newSingleThreadExecutor().execute {
+            latch.await()
+            mainHandler.post {
+                completion(isAllSuccess)
             }
         }
     }
 
 
-    fun updateLevelParam(key : String, levelId : Int) {
+    fun updateLevelParam(
+        key: String,
+        levelId: Int,
+        completion: (Boolean) -> Unit
+    ) {
         val input = LevelIdOsInput(level_id = levelId)
 
         TJLabsResourceNetworkManager.getLevelParam(
             TJLabsResourceNetworkConstants.getUserBaseURL(),
             input,
             TJLabsResourceNetworkConstants.getUserLevelParamVersion()
-        ) { status, msg, result ->
+        ) { status, _, result ->
 
-            // 실패 처리
-            if (status != 200) {
+            if (status != 200 || result == null) {
                 delegate?.onParamError(ParamErrorType.Level, key)
+                completion(false)
+                return@getLevelParam
             }
 
-            if (result != null) {
-                levelParamData[key] = result
-                delegate?.onLevelParamData(key, result)
-            } else {
-                delegate?.onParamError(ParamErrorType.Level, key)
-            }
+            levelParamData[key] = result
+            delegate?.onLevelParamData(key, result)
+            completion(true)
         }
     }
 }

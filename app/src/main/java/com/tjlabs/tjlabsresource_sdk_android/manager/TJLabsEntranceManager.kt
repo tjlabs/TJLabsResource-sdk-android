@@ -2,6 +2,8 @@ package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceData
@@ -16,6 +18,8 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 enum class EntranceErrorType {
     Common,
@@ -50,7 +54,7 @@ internal class TJLabsEntranceManager {
 
     private fun loadEntranceUrl(sectorId : Int, buildingsData : List<BuildingOutput>, completion: (Map<String, String>) -> Unit) {
         val entranceUrl = mutableMapOf<String, String>()
-        val latch = java.util.concurrent.CountDownLatch(buildingsData.sumOf { it.levels.count { lvl -> !lvl.name.contains("_D") } })
+        val latch = CountDownLatch(buildingsData.sumOf { it.levels.count { lvl -> !lvl.name.contains("_D") } })
 
         for (building in buildingsData) {
             for (level in building.levels) {
@@ -99,46 +103,96 @@ internal class TJLabsEntranceManager {
         }.start()
     }
 
-    fun loadEntrance(region: String,
-                     sectorId: Int,
-                     buildingsData: List<BuildingOutput>) {
+    fun loadEntrance(
+        region: String,
+        sectorId: Int,
+        buildingsData: List<BuildingOutput>,
+        completion: (Boolean) -> Unit
+    ) {
+        val mainHandler = Handler(Looper.getMainLooper())
 
-        loadEntranceUrl(sectorId, buildingsData) {
-            entranceRouteUrl ->
-            TJLogger.d("(TJLabsResource) loadPathPixel $entranceRouteUrl")
+        loadEntranceUrl(sectorId, buildingsData) { entranceRouteUrl ->
 
-            for ((key, value) in entranceRouteUrl) {
-                //서버에서 가져온 결과를 캐시에 저장된 값과 비교
-                val pathPixelUrlFromCache = loadEntranceRouteUrlFromCache(key)
-                if (pathPixelUrlFromCache != null) {
-                    if (pathPixelUrlFromCache == value) {
-                        // 버전이 같다면
-                        // 내가 가지고 있는 파일을 그대로 사용해도 됨.
-                        val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
-                        if (entranceRouteData != null) {
+            // 서버 결과가 없으면 실패
+            if (entranceRouteUrl.isEmpty()) {
+                completion(false)
+                return@loadEntranceUrl
+            }
+
+            val lock = Any()
+            var isAllSuccess = true
+
+            val latch = CountDownLatch(entranceRouteUrl.size)
+
+            fun finishOne(success: Boolean) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            for ((key, entranceRouteUrlFromServer) in entranceRouteUrl) {
+                // 캐시에 저장된 URL (버전 개념)
+                val entranceRouteUrlFromCache = loadEntranceRouteUrlFromCache(key)
+
+                if (entranceRouteUrlFromCache != null &&
+                    entranceRouteUrlFromCache == entranceRouteUrlFromServer
+                ) {
+                    // ✅ 버전 동일 → 캐시 파일 우선
+                    val entranceRouteData = loadEntranceRouteFileUrlFromCache(key)
+                    if (entranceRouteData != null) {
+                        try {
                             entranceRouteDataMap[key] = entranceRouteData
                             delegate?.onEntranceRouteData(key, entranceRouteData)
-                        } else {
-                            // 파일이 없으면 서버에서 다운로드
-                            updateEntranceRoute(key, sectorId, value)
+                            finishOne(true)
+
+                        } catch (e: Exception) {
+                            updateEntranceRoute(
+                                key = key,
+                                sectorId = sectorId,
+                                entranceRouteUrlFromServer = entranceRouteUrlFromServer
+                            ) { isSuccess ->
+                                finishOne(isSuccess)
+                            }
                         }
                     } else {
-                        // 버전이 다르다면 서버에서 다운로드
-                        updateEntranceRoute(key, sectorId, value)
+                        updateEntranceRoute(
+                            key = key,
+                            sectorId = sectorId,
+                            entranceRouteUrlFromServer = entranceRouteUrlFromServer
+                        ) { isSuccess ->
+                            finishOne(isSuccess)
+                        }
                     }
                 } else {
-                    // Cache에서 파일 URL 가져오기 실패
-                    updateEntranceRoute(key, sectorId, value)
+                    updateEntranceRoute(
+                        key = key,
+                        sectorId = sectorId,
+                        entranceRouteUrlFromServer = entranceRouteUrlFromServer
+                    ) { isSuccess ->
+                        finishOne(isSuccess)
+                    }
+                }
+            }
+
+            // ✅ 모든 entrance 처리 완료 대기
+            Executors.newSingleThreadExecutor().execute {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
                 }
             }
         }
     }
 
-    private fun updateEntranceRoute(key: String, sectorId: Int, entranceRouteUrlFromServer: String) {
+    private fun updateEntranceRoute(key: String, sectorId: Int, entranceRouteUrlFromServer: String, completion: (Boolean) -> Unit) {
         val parsedUrl = try {
             URL(entranceRouteUrlFromServer)
         } catch (e: Exception) {
             delegate?.onEntranceError(EntranceErrorType.Route, key)
+            completion(false)
             return
         }
 
@@ -156,17 +210,20 @@ internal class TJLabsEntranceManager {
                     entranceRouteDataMap[key] = parseData
                     saveEntranceRouteDirToCache(key, dir)
                     delegate?.onEntranceRouteData(key, parseData)
+                    completion(true)
 
                 } else {
                     delegate?.onEntranceError(EntranceErrorType.Route, key)
+                    completion(false)
                 }
             } catch (e: Exception) {
                 delegate?.onEntranceError(EntranceErrorType.Route, key)
+                completion(false)
             }
         }
     }
 
-    fun updateLevelEntrance(key: String, sectorId: Int, levelId: Int) {
+    fun updateLevelEntrance(key: String, sectorId: Int, levelId: Int, completion: (Boolean) -> Unit) {
         val input = LevelIdOsInput(level_id = levelId)
 
         TJLabsResourceNetworkManager.getEntrance(
@@ -177,6 +234,7 @@ internal class TJLabsEntranceManager {
             // 실패 처리
             if (status != 200) {
                 delegate?.onEntranceError(EntranceErrorType.Common, key)
+                completion(false)
             }
 
             if (result != null) {
@@ -200,19 +258,26 @@ internal class TJLabsEntranceManager {
                                 delegate?.onEntranceRouteData(key, entranceRouteData)
                             } else {
                                 // 파일이 없으면 서버에서 다운로드
-                                updateEntranceRoute(key, sectorId, entUrl)
+                                updateEntranceRoute(key, sectorId, entUrl) {
+                                    isSuccess -> completion(isSuccess)
+                                }
                             }
                         } else {
                             // 버전이 다르다면 서버에서 다운로드
-                            updateEntranceRoute(key, sectorId, entUrl)
+                            updateEntranceRoute(key, sectorId, entUrl){
+                                    isSuccess -> completion(isSuccess)
+                            }
                         }
                     } else {
                         // Cache에서 파일 URL 가져오기 실패
-                        updateEntranceRoute(key, sectorId, entUrl)
+                        updateEntranceRoute(key, sectorId, entUrl){
+                                isSuccess -> completion(isSuccess)
+                        }
                     }
                 }
             } else {
                 delegate?.onEntranceError(EntranceErrorType.Common, key)
+                completion(false)
             }
         }
     }

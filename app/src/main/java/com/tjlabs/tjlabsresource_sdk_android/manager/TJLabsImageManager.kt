@@ -11,7 +11,10 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.MalformedURLException
 import java.net.URL
-
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 internal interface BuildingLevelImageDelegate {
     fun onBuildingLevelImageData(imageKey: String, data : Bitmap?)
@@ -25,26 +28,84 @@ internal class TJLabsImageManager {
 
     var delegate: BuildingLevelImageDelegate? = null
 
-    fun loadImage(sectorId: Int, buildingsData: List<BuildingOutput>) {
+    fun loadImage(
+        sectorId: Int,
+        buildingsData: List<BuildingOutput>,
+        completion: (Boolean) -> Unit
+    ) {
         TJLogger.d("(TJLabsResource) loadImage")
+
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        val lock = Any()
+        var isAllSuccess = true
+        var hasAsyncWork = false
+
+        fun updateSuccess(success: Boolean) {
+            if (!success) {
+                synchronized(lock) {
+                    isAllSuccess = false
+                }
+            }
+        }
+
+        val tasks = mutableListOf<(CountDownLatch) -> Unit>()
 
         for (building in buildingsData) {
             for (level in building.levels) {
                 if (level.name.contains("_D")) continue
+
                 val imageKey = "${sectorId}_${building.name}_${level.name}"
 
+                // ✅ 캐시 히트
                 val cached = buildingLevelImageDataMap[imageKey]
                 if (cached != null) {
                     delegate?.onBuildingLevelImageData(imageKey, cached)
                     continue
                 }
 
-                updateLevelImage(imageKey, level.image)
+                // ❌ 캐시 미스 → 비동기 작업 필요
+                hasAsyncWork = true
+
+                tasks += { latch ->
+                    updateLevelImage(imageKey, level.image) { isSuccess ->
+                        updateSuccess(isSuccess)
+                        latch.countDown()
+                    }
+                }
+            }
+        }
+
+        // 모든 level 이 캐시 히트였던 경우
+        if (!hasAsyncWork) {
+            completion(true)
+            return
+        }
+
+        val latch = CountDownLatch(tasks.size)
+        val executor = Executors.newFixedThreadPool(4)
+
+        // 비동기 이미지 로딩 병렬 실행
+        tasks.forEach { task ->
+            executor.execute {
+                task(latch)
+            }
+        }
+
+        // 모든 이미지 로딩 종료 대기
+        Executors.newSingleThreadExecutor().execute {
+            latch.await()
+            mainHandler.post {
+                completion(isAllSuccess)
             }
         }
     }
 
-    fun updateLevelImage(key: String, url: String) {
+    fun updateLevelImage(
+        key: String,
+        url: String,
+        completion: (Boolean) -> Unit
+    ) {
         TJLogger.d("(TJLabsResource) updateLevelImage")
 
         loadBuildingLevelImage(url) { bitmap, _ ->
@@ -53,9 +114,10 @@ internal class TJLabsImageManager {
 
                 buildingLevelImageDataMap[key] = bitmap
                 delegate?.onBuildingLevelImageData(key, bitmap)
-
+                completion(true)
             } else {
                 delegate?.onBuildingLevelImageError(key)
+                completion(false)
             }
         }
     }

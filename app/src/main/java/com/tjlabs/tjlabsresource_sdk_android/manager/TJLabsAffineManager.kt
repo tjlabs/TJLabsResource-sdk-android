@@ -18,18 +18,21 @@ internal class TJLabsAffineManager {
 
     var delegate: AffineDelegate? = null
 
-    fun loadAffineParam(sectorId: Int) {
+    fun loadAffineParam(sectorId: Int, completion : (Boolean) -> Unit) {
         val cached = affineParamMap[sectorId]
         if (cached != null) {
             delegate?.onAffineData(sectorId, cached)
+            completion(true)
         } else {
-            updateAffineParam(sectorId)
+            updateAffineParam(sectorId) {
+                isSuccess -> completion(isSuccess)
+            }
 
         }
     }
 
 
-    fun updateAffineParam(sectorId: Int) {
+    fun updateAffineParam(sectorId: Int, completion : (Boolean) -> Unit) {
         TJLabsResourceNetworkManager.getUserAffineTrans(
             TJLabsResourceNetworkConstants.getUserBaseURL(),
             sectorId,
@@ -39,13 +42,16 @@ internal class TJLabsAffineManager {
             if (status != 200) {
                 TJLogger.d(msg)
                 delegate?.onAffineError(sectorId)
+                completion(false)
             }
 
             if (result != null) {
                 affineParamMap[sectorId] = result.copy()
                 delegate?.onAffineData(sectorId, result.copy())
+                completion(true)
             } else {
                 delegate?.onAffineError(sectorId)
+                completion(false)
             }
         }
     }

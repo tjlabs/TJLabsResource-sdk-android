@@ -14,7 +14,12 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
-
+import android.os.Handler
+import android.os.Looper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 
 internal interface PathPixelDelegate {
     fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
@@ -103,41 +108,76 @@ internal class TJLabsPathPixelManager {
      * @param sectorId
      * @param buildingsData
      */
-    fun loadPathPixel(region: String,
-                      sectorId: Int,
-                      buildingsData: List<BuildingOutput>
+    fun loadPathPixel(
+        region: String,
+        sectorId: Int,
+        buildingsData: List<BuildingOutput>,
+        completion: (Boolean) -> Unit
     ) {
-        loadPathPixelUrl(sectorId, buildingsData) {
-            pathPixelUrl ->
+        val mainHandler = Handler(Looper.getMainLooper())
 
-            TJLogger.d("(TJLabsResource) loadPathPixel $pathPixelUrl")
+        loadPathPixelUrl(sectorId, buildingsData) { pathPixelUrl ->
+
+            val lock = Any()
+            var isAllSuccess = true
+            var hasAsyncWork = false
+
+            fun updateSuccess(success: Boolean) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+            }
+
+            val tasks = mutableListOf<(CountDownLatch) -> Unit>()
 
             for ((key, value) in pathPixelUrl) {
-                //서버에서 가져온 결과를 캐시에 저장된 값과 비교
                 val pathPixelUrlFromCache = loadPathPixelServerUrlFromCache(key)
-                if (pathPixelUrlFromCache != null) {
-                    if (pathPixelUrlFromCache == value) {
-                        // 버전이 같다면
-                        // 내가 가지고 있는 파일을 그대로 사용해도 됨.
-                        val ppData = loadPathPixelFileFromCache(key)
-                        if (ppData != null) {
-                            ppDataMap[key] = ppData
-                            delegate?.onPathPixelData(key, ppData)
-                        } else {
-                            // 파일이 없으면 서버에서 다운로드
-                            updatePathPixel(key, sectorId, value)
-                        }
-                    } else {
-                        // 버전이 다르다면 서버에서 다운로드
-                        updatePathPixel(key, sectorId, value)
+
+                // 캐시 URL 동일
+                if (pathPixelUrlFromCache != null && pathPixelUrlFromCache == value) {
+                    val ppData = loadPathPixelFileFromCache(key)
+                    if (ppData != null) {
+                        ppDataMap[key] = ppData
+                        delegate?.onPathPixelData(key, ppData)
+                        continue
                     }
-                } else {
-                    // Cache에서 파일 URL 가져오기 실패
-                    updatePathPixel(key, sectorId, value)
+                }
+
+                // 캐시 미스 or 파일 없음 → 비동기 다운로드
+                hasAsyncWork = true
+                tasks += { latch ->
+                    updatePathPixel(key, sectorId, value) { isSuccess ->
+                        updateSuccess(isSuccess)
+                        latch.countDown()
+                    }
+                }
+            }
+
+            if (!hasAsyncWork) {
+                completion(true)
+                return@loadPathPixelUrl
+            }
+
+            val latch = CountDownLatch(tasks.size)
+            val executor = Executors.newFixedThreadPool(4)
+
+            tasks.forEach { task ->
+                executor.execute {
+                    task(latch)
+                }
+            }
+
+            Executors.newSingleThreadExecutor().execute {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
                 }
             }
         }
     }
+
 
     /**
      * 서버에서 받아온 url 을 이용하여 csv 를 다운로드 받음.
@@ -148,39 +188,57 @@ internal class TJLabsPathPixelManager {
      * @param sectorId
      * @param pathPixelUrlFromServer
      */
-    private fun updatePathPixel(key: String, sectorId: Int, pathPixelUrlFromServer: String) {
+
+    private fun updatePathPixel(
+        key: String,
+        sectorId: Int,
+        pathPixelUrlFromServer: String,
+        completion: (Boolean) -> Unit
+    ) {
         val parsedUrl = try {
             URL(pathPixelUrlFromServer)
         } catch (e: Exception) {
             delegate?.onPathPixelError(key)
+            completion(false)
             return
         }
-        
-        GlobalScope.launch(Dispatchers.Main) {
+
+        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val (file, dir, exception) = downloadCSVFile(
+                val (file, dir, _) = downloadCSVFile(
                     application,
                     parsedUrl,
                     sectorId,
                     "$key.csv"
                 )
+
                 if (file != null) {
                     val fileText = file.readText()
                     val ppData = parsePathPixelData(fileText)
+
                     ppDataMap[key] = ppData
                     savePathPixelCacheDirToCache(key, dir)
-                    delegate?.onPathPixelData(key, ppData)
+                    savePathPixelUrlToCache(key, pathPixelUrlFromServer)
 
+                    withContext(Dispatchers.Main) {
+                        delegate?.onPathPixelData(key, ppData)
+                    }
+                    completion(true)
                 } else {
-                    delegate?.onPathPixelError(key)
+                    withContext(Dispatchers.Main) {
+                        delegate?.onPathPixelError(key)
+                    }
+                    completion(false)
                 }
             } catch (e: Exception) {
-                delegate?.onPathPixelError(key)
+                withContext(Dispatchers.Main) {
+                    delegate?.onPathPixelError(key)
+                }
+                completion(false)
             }
         }
     }
-
-    fun updateLevelPathPixel(key: String, sectorId: Int, levelId: Int) {
+    fun updateLevelPathPixel(key: String, sectorId: Int, levelId: Int, completion: (Boolean) -> Unit) {
         val input = LevelIdOsInput(level_id = levelId)
 
         TJLabsResourceNetworkManager.getPathPixel(
@@ -192,6 +250,7 @@ internal class TJLabsPathPixelManager {
             // 실패 처리
             if (status != 200) {
                 delegate?.onPathPixelError(key)
+                completion(false)
             }
 
             if (result != null) {
@@ -207,18 +266,25 @@ internal class TJLabsPathPixelManager {
                             delegate?.onPathPixelData(key, ppData)
                         } else {
                             // 파일이 없으면 서버에서 다운로드
-                            updatePathPixel(key, sectorId, ppUrl)
+                            updatePathPixel(key, sectorId, ppUrl) {
+                                    isSuccess -> completion(isSuccess)
+                            }
                         }
                     } else {
                         // 버전이 다르다면 서버에서 다운로드
-                        updatePathPixel(key, sectorId, ppUrl)
+                        updatePathPixel(key, sectorId, ppUrl) {
+                            isSuccess -> completion(isSuccess)
+                        }
                     }
                 } else {
                     // Cache에서 파일 URL 가져오기 실패
-                    updatePathPixel(key, sectorId, ppUrl)
+                    updatePathPixel(key, sectorId, ppUrl) {
+                            isSuccess -> completion(isSuccess)
+                    }
                 }
             } else {
                 delegate?.onPathPixelError(key)
+                completion(false)
             }
         }
     }
