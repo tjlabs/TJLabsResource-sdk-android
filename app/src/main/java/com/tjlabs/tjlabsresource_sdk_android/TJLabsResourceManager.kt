@@ -4,31 +4,40 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
 import com.tjlabs.tjlabsresource_sdk_android.manager.AffineDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingLevelImageDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.GeofenceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.LandmarkDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.LevelsDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.NodeLinkDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.PathPixelDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.ScaleOffsetDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.SectorDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.SpotsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsAffineManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLandmarkManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsNodeLinkManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSpotsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsUnitManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.UnitDelegate
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
+import java.util.concurrent.CountDownLatch
 
 class TJLabsResourceManager :
     SectorDelegate,
@@ -40,21 +49,28 @@ class TJLabsResourceManager :
     EntranceDelegate,
     ParamDelegate,
     BuildingLevelImageDelegate,
-    UnitDelegate, AffineDelegate {
+    UnitDelegate,
+    AffineDelegate,
+    LandmarkDelegate,
+    NodeLinkDelegate,
+    SpotsDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
-    private var sectorManager = TJLabsSectorManager()
-    private var buildingLevelManager = TJLabsBuildingsManager()
-    private var levelsManager = TJLabsLevelsManager()
-    private var scaleOffsetManager = TJLabsScaleOffsetManager()
-    private var pathPixelManager = TJLabsPathPixelManager()
-    private var geofenceManager = TJLabsGeofenceManager()
-    private var entranceManager = TJLabsEntranceManager()
-    private var paramManager = TJLabsParamManager()
-    private var imageManager = TJLabsImageManager()
-    private var unitManager = TJLabsUnitManager()
-    private var affineManager = TJLabsAffineManager()
+    private val sectorManager = TJLabsSectorManager()
+    private val buildingLevelManager = TJLabsBuildingsManager()
+    private val levelsManager = TJLabsLevelsManager()
+    private val scaleOffsetManager = TJLabsScaleOffsetManager()
+    private val pathPixelManager = TJLabsPathPixelManager()
+    private val geofenceManager = TJLabsGeofenceManager()
+    private val entranceManager = TJLabsEntranceManager()
+    private val paramManager = TJLabsParamManager()
+    private val imageManager = TJLabsImageManager()
+    private val unitManager = TJLabsUnitManager()
+    private val affineManager = TJLabsAffineManager()
+    private val landmarkManager = TJLabsLandmarkManager()
+    private val nodeLinkManager = TJLabsNodeLinkManager()
+    private val spotsManager = TJLabsSpotsManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -70,45 +86,213 @@ class TJLabsResourceManager :
         imageManager.delegate = this
         unitManager.delegate = this
         affineManager.delegate = this
+        landmarkManager.delegate = this
+        nodeLinkManager.delegate = this
+        spotsManager.delegate = this
     }
 
-    fun loadMapResource(application: Application, region: String, sectorId: Int) {
+    fun loadMapResource(
+        application: Application,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
         init(application, region)
         setRegion(region)
-        loadSector(sectorId = sectorId) {
-                sectorData ->
-            if (sectorData != null) {
-                buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
-                pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
-                imageManager.loadImage(sectorId, sectorData.buildings)
-                unitManager.loadUnit(sectorId, sectorData.buildings)
-            } else {
-                delegate?.onSectorError(ResourceError.Sector)
-            }
-        }
 
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        loadSector(sectorId = sectorId) { sectorData ->
+            if (sectorData == null) {
+                delegate?.onSectorError(ResourceError.Sector)
+                completion(false)
+                return@loadSector
+            }
+
+            // buildings 먼저 세팅
+            buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+
+            val lock = Any()
+            var isAllSuccess = true
+
+            fun finishOne(success: Boolean, latch: CountDownLatch) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            // MapResource에서 병렬로 로딩할 항목 수
+            // PathPixel / Image / Unit
+            val latch = CountDownLatch(3)
+
+            // 1. PathPixel
+            pathPixelManager.loadPathPixel(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 2. Image
+            imageManager.loadImage(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 3. Unit
+            unitManager.loadUnit(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 모든 Map 리소스 로딩 완료 대기
+            Thread {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
+                }
+            }.start()
+        }
     }
 
-    fun loadJupiterResource(application: Application, region: String, sectorId: Int) {
+
+    fun loadJupiterResource(
+        application: Application,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
         init(application, region)
         setRegion(region)
-        loadSector(sectorId = sectorId) {
-            sectorData ->
-            if (sectorData != null) {
-                buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
-                levelsManager.loadLevelsWards(sectorId, sectorData.buildings)
-                scaleOffsetManager.loadScaleOffset(sectorId, sectorData.buildings)
-                pathPixelManager.loadPathPixel(region, sectorId, sectorData.buildings)
-                geofenceManager.loadGeofence(sectorId, sectorData.buildings)
-                entranceManager.loadEntrance(region, sectorId, sectorData.buildings)
-                paramManager.loadSectorParam(sectorId)
-                paramManager.loadLevelParam(sectorId, sectorData.buildings)
-                affineManager.loadAffineParam(sectorId)
-            } else {
-                delegate?.onSectorError(ResourceError.Sector)
-            }
-        }
 
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        loadSector(sectorId = sectorId) { sectorData ->
+            if (sectorData == null) {
+                delegate?.onSectorError(ResourceError.Sector)
+                completion(false)
+                return@loadSector
+            }
+
+            buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+
+            val lock = Any()
+            var isAllSuccess = true
+
+            fun finishOne(success: Boolean, latch: CountDownLatch) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            val latch = CountDownLatch(9)
+
+            // 1. ScaleOffset
+            scaleOffsetManager.loadScaleOffset(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 2. PathPixel
+            pathPixelManager.loadPathPixel(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 3. NodeLink
+            nodeLinkManager.loadNodeLinks(
+                application.applicationContext,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 4. Geofence
+            geofenceManager.loadGeofence(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 5. Entrance
+            entranceManager.loadEntrance(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 6. SectorParam
+            paramManager.loadSectorParam(sectorId) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 7. LevelParam
+            paramManager.loadLevelParam(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 8. LevelWards
+            levelsManager.loadLevelWards(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 9. Spots
+            spotsManager.loadSpots(
+                application.applicationContext,
+                sectorId
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // Landmark
+            landmarkManager.loadLandmarks(
+                application.applicationContext,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                synchronized(lock) {
+                    if (!isSuccess) isAllSuccess = false
+                }
+            }
+
+            // AffineParam (성공/실패가 전체 결과에 영향 없음)
+            affineManager.loadAffineParam(sectorId) {
+                // intentionally ignored
+            }
+
+            Thread {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
+                }
+            }.start()
+        }
     }
 
     private fun init(application: Application, region: String) {
@@ -195,71 +379,93 @@ class TJLabsResourceManager :
 
     
     // MARK: - Public Update Methods
-    fun updateScaleOffsetData(key: String) {
+    fun updateScaleOffsetData(key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            scaleOffsetManager.updateLevelScaleOffset(key, levelId)
+            scaleOffsetManager.updateLevelScaleOffset(key, levelId) {
+                isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Scale, key)
+            completion(false)
         }
     }
 
-    fun updatePathPixelData(sectorId: Int, key: String) {
+    fun updatePathPixelData(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            pathPixelManager.updateLevelPathPixel(key, sectorId, levelId)
+            pathPixelManager.updateLevelPathPixel(key, sectorId, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.PathPixel, key)
+            completion(false)
         }
     }
 
-    fun updateUnitData(key: String) {
+    fun updateUnitData(key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            unitManager.updateLevelUnit(key, levelId)
+            unitManager.updateLevelUnit(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Unit, key)
+            completion(false)
         }
     }
 
-    fun updateGeofence(key: String) {
+    fun updateGeofence(key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            geofenceManager.updateLevelGeofence(key, levelId)
+            geofenceManager.updateLevelGeofence(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Geofence, key)
+            completion(false)
         }
     }
 
-    fun updateEntrance(sectorId: Int, key: String) {
+    fun updateEntrance(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            entranceManager.updateLevelEntrance(key, sectorId, levelId)
+            entranceManager.updateLevelEntrance(key, sectorId, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Entrance, key)
+            completion(false)
         }
     }
 
-    fun updateImage(key: String) {
+    fun updateImage(key: String, completion: (Boolean) -> Unit) {
         val imageUrl = getMatchedLevelImageUrl(key)
         if (imageUrl != null) {
-            imageManager.updateLevelImage(key, imageUrl)
+            imageManager.updateLevelImage(key, imageUrl){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Image, key)
         }
     }
 
-    fun updateLevelParam(sectorId: Int, key: String) {
+    fun updateLevelParam(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            paramManager.updateLevelParam(key, levelId)
+            paramManager.updateLevelParam(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
         } else {
             delegate?.onError(ResourceError.Param, key)
+            completion(false)
         }
     }
 
-    fun updateAffineParam(sectorId: Int) {
-        affineManager.updateAffineParam(sectorId)
+    fun updateAffineParam(sectorId: Int, completion: (Boolean) -> Unit) {
+        affineManager.updateAffineParam(sectorId){
+                isSuccess -> completion(isSuccess)
+        }
     }
 
     fun setDebugOption(set : Boolean) {
@@ -356,5 +562,29 @@ class TJLabsResourceManager :
 
     override fun onAffineError(sectorId: Int) {
         delegate?.onError(ResourceError.Affine, sectorId.toString())
+    }
+
+    override fun onLandmarkData(landmarkKey: String, data: Map<String, LandmarkData>) {
+        delegate?.onLandmarkData(landmarkKey, data)
+    }
+
+    override fun onLandmarkError(landmarkKey: String) {
+        delegate?.onError(ResourceError.Landmark,landmarkKey)
+    }
+
+    override fun onNodeLinkData(nodeLinkKey: String, type: NodeLinkType, data: Any) {
+        delegate?.onNodeLinkData(nodeLinkKey, type, data)
+    }
+
+    override fun onNodeLinkError(nodeLinkKey: String, type: NodeLinkType) {
+        delegate?.onError(ResourceError.Node, type.toString())
+    }
+
+    override fun onSpotsData(spotsKey: Int, type: SpotType, data: Any) {
+        delegate?.onSpotsData(spotsKey, type, data)
+    }
+
+    override fun onSpotsError(spotsKey: Int, type: SpotType) {
+        delegate?.onError(ResourceError.Spots, spotsKey.toString())
     }
 }
