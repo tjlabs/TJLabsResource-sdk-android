@@ -176,6 +176,65 @@ data class Ward (
     val name : String
 )
 
+data class SpotsOutput (
+    val buildilng_level_tags: List<BuildingLevelTag>
+)
+
+
+data class  BuildingLevelTag(
+    val id: Int,
+    val name: String,
+    val building_name: String,
+    val level_name: String,
+    val linked_level_name: String,
+    val rssi: Int,
+    val x: Int,
+    val y: Int,
+    val linked_links: List<Int>,
+    val distance: Int
+)
+
+
+data class LandmarkData(
+    val ward_id: String,
+    val peaks: List<PeakData>,
+)
+
+data class PeakData (
+    val x: Int,
+    val y: Int,
+    val rssi: Float
+)
+
+enum class SpotType {
+    BUILDING_LEVEL_TAG, NONE
+}
+
+data class NodeData (
+    val id: Int,
+    val coords: List<Float>,
+    val directions: List<NodeDirection>,
+    val connected_nodes: List<Int>,
+    val connected_links: List<Int>
+)
+
+data class NodeDirection (
+    val heading: Float,
+    val is_end: Boolean
+)
+
+data class LinkData (
+    val id: Int,
+    val start_node: Int,
+    val end_node: Int,
+    val distance: Float,
+    val included_heading: List<Float>,
+    val group_id: Int
+)
+
+enum class NodeLinkType {
+    NODE, LINK, FILE
+}
 
 // MARK: - Resource Error
 enum class ResourceError {
@@ -189,7 +248,11 @@ enum class ResourceError {
     Unit,
     Param,
     Geofence,
-    Affine
+    Affine,
+    Node,
+    Link,
+    Landmark,
+    Spots
 }
 
 // MARK: - Delegate (protocol → interface)
@@ -211,5 +274,8 @@ interface TJLabsResourceManagerDelegate {
     fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
     fun onUnitData(unitKey: String, data: List<UnitData>?)
     fun onAffineData(sectorId : Int, data : AffineTransParamOutput)
+    fun onLandmarkData(key : String, data : Map<String, LandmarkData>)
+    fun onSpotsData(key: Int, type: SpotType, data: Any)
+    fun onNodeLinkData(key: String, type: NodeLinkType, data: Any)
     fun onError(error: ResourceError, key: String)
 }
