@@ -1,0 +1,608 @@
+package com.tjlabs.tjlabsresource_sdk_android
+
+import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import com.tjlabs.tjlabsresource_sdk_android.manager.AffineDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingLevelImageDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
+import com.tjlabs.tjlabsresource_sdk_android.manager.GeofenceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.LandmarkDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.LevelsDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.NodeLinkDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ParamDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ParamErrorType
+import com.tjlabs.tjlabsresource_sdk_android.manager.PathPixelDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.ScaleOffsetDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.SectorDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.SpotsDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsAffineManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLandmarkManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsNodeLinkManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSpotsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsUnitManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.UnitDelegate
+import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
+import java.util.concurrent.CountDownLatch
+
+class TJLabsResourceManager :
+    SectorDelegate,
+    BuildingsDelegate,
+    LevelsDelegate,
+    ScaleOffsetDelegate,
+    PathPixelDelegate,
+    GeofenceDelegate,
+    EntranceDelegate,
+    ParamDelegate,
+    BuildingLevelImageDelegate,
+    UnitDelegate,
+    AffineDelegate,
+    LandmarkDelegate,
+    NodeLinkDelegate,
+    SpotsDelegate {
+
+    var delegate: TJLabsResourceManagerDelegate? = null
+
+    private val sectorManager = TJLabsSectorManager()
+    private val buildingLevelManager = TJLabsBuildingsManager()
+    private val levelsManager = TJLabsLevelsManager()
+    private val scaleOffsetManager = TJLabsScaleOffsetManager()
+    private val pathPixelManager = TJLabsPathPixelManager()
+    private val geofenceManager = TJLabsGeofenceManager()
+    private val entranceManager = TJLabsEntranceManager()
+    private val paramManager = TJLabsParamManager()
+    private val imageManager = TJLabsImageManager()
+    private val unitManager = TJLabsUnitManager()
+    private val affineManager = TJLabsAffineManager()
+    private val landmarkManager = TJLabsLandmarkManager()
+    private val nodeLinkManager = TJLabsNodeLinkManager()
+    private val spotsManager = TJLabsSpotsManager()
+
+    private lateinit var sharedPrefs: SharedPreferences
+
+    init {
+        sectorManager.delegate = this
+        buildingLevelManager.delegate = this
+        levelsManager.delegate = this
+        scaleOffsetManager.delegate = this
+        pathPixelManager.delegate = this
+        geofenceManager.delegate = this
+        entranceManager.delegate = this
+        paramManager.delegate = this
+        imageManager.delegate = this
+        unitManager.delegate = this
+        affineManager.delegate = this
+        landmarkManager.delegate = this
+        nodeLinkManager.delegate = this
+        spotsManager.delegate = this
+    }
+
+    fun loadMapResource(
+        application: Application,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        init(application, region)
+        setRegion(region)
+
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        loadSector(sectorId = sectorId) { sectorData ->
+            if (sectorData == null) {
+                delegate?.onSectorError(ResourceError.Sector)
+                completion(false)
+                return@loadSector
+            }
+
+            // buildings 먼저 세팅
+            buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+
+            val lock = Any()
+            var isAllSuccess = true
+
+            fun finishOne(success: Boolean, latch: CountDownLatch) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            // MapResource에서 병렬로 로딩할 항목 수
+            // PathPixel / Image / Unit
+            val latch = CountDownLatch(3)
+
+            // 1. PathPixel
+            pathPixelManager.loadPathPixel(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 2. Image
+            imageManager.loadImage(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 3. Unit
+            unitManager.loadUnit(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                finishOne(isSuccess, latch)
+            }
+
+            // 모든 Map 리소스 로딩 완료 대기
+            Thread {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
+                }
+            }.start()
+        }
+    }
+
+
+    fun loadJupiterResource(
+        application: Application,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        init(application, region)
+        setRegion(region)
+
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        loadSector(sectorId = sectorId) { sectorData ->
+            if (sectorData == null) {
+                delegate?.onSectorError(ResourceError.Sector)
+                completion(false)
+                return@loadSector
+            }
+
+            buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+
+            val lock = Any()
+            var isAllSuccess = true
+
+            fun finishOne(success: Boolean, latch: CountDownLatch) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            val latch = CountDownLatch(9)
+
+            // 1. ScaleOffset
+            scaleOffsetManager.loadScaleOffset(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadScaleOffset : $isSuccess")
+                finishOne(isSuccess, latch)
+            }
+
+            // 2. PathPixel
+            pathPixelManager.loadPathPixel(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadPathPixel : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 3. NodeLink
+            nodeLinkManager.loadNodeLinks(
+                application.applicationContext,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadNodeLinks : $isSuccess")
+                finishOne(isSuccess, latch)
+            }
+
+            // 4. Geofence
+            geofenceManager.loadGeofence(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadGeofence : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 5. Entrance
+            entranceManager.loadEntrance(
+                region,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadEntrance : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 6. SectorParam
+            paramManager.loadSectorParam(sectorId) { isSuccess ->
+                TJLogger.d("loadSectorParam : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 7. LevelParam
+            paramManager.loadLevelParam(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadLevelParam : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 8. LevelWards
+            levelsManager.loadLevelWards(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadLevelWards : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // 9. Spots
+            spotsManager.loadSpots(
+                application.applicationContext,
+                sectorId
+            ) { isSuccess ->
+                TJLogger.d("loadSpots : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            // Landmark
+            landmarkManager.loadLandmarks(
+                application.applicationContext,
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadLandmarks : $isSuccess")
+
+                synchronized(lock) {
+                    if (!isSuccess) isAllSuccess = false
+                }
+            }
+
+            // AffineParam (성공/실패가 전체 결과에 영향 없음)
+            affineManager.loadAffineParam(sectorId) {
+                // intentionally ignored
+            }
+
+            Thread {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
+                }
+            }.start()
+        }
+    }
+
+    private fun init(application: Application, region: String) {
+        this.sharedPrefs = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
+        setRegion(region)
+
+        //cached 에 접근하기 위한
+        pathPixelManager.init(application, sharedPrefs)
+        entranceManager.init(application, sharedPrefs)
+    }
+
+    private fun setRegion(region : String) {
+        TJLabsResourceNetworkConstants.setServerURL(region)
+        TJLabsFileDownloader.region = region
+        pathPixelManager.setRegion(region)
+        entranceManager.setRegion(region)
+    }
+
+    private fun loadSector(sectorId: Int, forceUpdate: Boolean = false, completion: (SectorOutput?) -> Unit) {
+        sectorManager.loadSector(sectorId, forceUpdate) {
+            data -> completion(data)
+        }
+    }
+
+    fun getMatchedLevelId(key: String): Int? {
+        return TJLabsBuildingsManager.levelIdMap[key]
+    }
+
+    fun getMatchedLevelImageUrl(key: String): String? {
+        return TJLabsBuildingsManager.levelImageUrlMap[key]
+    }
+
+    fun getSectorData(sectorId: Int): SectorOutput? {
+        return TJLabsSectorManager.sectorDataMap[sectorId]
+    }
+
+    fun getBuildingLevelData(): Map<Int, List<BuildingOutput>> {
+        return TJLabsBuildingsManager.buildingsDataMap
+    }
+
+    fun getLevelWardsData() : Map<String, List<String>> {
+        return TJLabsLevelsManager.levelWardsDataMap
+    }
+
+    fun getScaleOffset(): Map<String, List<Float>> {
+        return TJLabsScaleOffsetManager.scaleOffsetDataMap
+    }
+
+    fun getPathPixelData(): Map<String, PathPixelData> {
+        return TJLabsPathPixelManager.ppDataMap
+    }
+
+    fun getUnitData(): Map<String, List<UnitData>> {
+        return TJLabsUnitManager.unitDataMap
+    }
+
+    fun getGeofenceData(): Map<String, GeofenceData> {
+        return TJLabsGeofenceManager.geofenceDataMap
+    }
+
+    fun getEntranceData(): Map<String, EntranceData> {
+        return TJLabsEntranceManager.entranceDataMap
+    }
+
+    fun getEntranceRouteData(): Map<String, EntranceRouteData> {
+        return TJLabsEntranceManager.entranceRouteDataMap
+    }
+
+    fun getBuildingLevelImageData(): Map<String, Bitmap> {
+        return TJLabsImageManager.buildingLevelImageDataMap
+    }
+
+    fun getSectorParamData(): Map<Int, SectorParameterOutput> {
+        return TJLabsParamManager.sectorParamData
+    }
+
+    fun getLevelParamData(): Map<String, LevelParameterOutput> {
+        return TJLabsParamManager.levelParamData
+    }
+
+    fun getAffineParamData() : Map<Int, AffineTransParamOutput?> {
+        return TJLabsAffineManager.affineParamMap
+    }
+
+    
+    // MARK: - Public Update Methods
+    fun updateScaleOffsetData(key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            scaleOffsetManager.updateLevelScaleOffset(key, levelId) {
+                isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Scale, key)
+            completion(false)
+        }
+    }
+
+    fun updatePathPixelData(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            pathPixelManager.updateLevelPathPixel(key, sectorId, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.PathPixel, key)
+            completion(false)
+        }
+    }
+
+    fun updateUnitData(key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            unitManager.updateLevelUnit(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Unit, key)
+            completion(false)
+        }
+    }
+
+    fun updateGeofence(key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            geofenceManager.updateLevelGeofence(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Geofence, key)
+            completion(false)
+        }
+    }
+
+    fun updateEntrance(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            entranceManager.updateLevelEntrance(key, sectorId, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Entrance, key)
+            completion(false)
+        }
+    }
+
+    fun updateImage(key: String, completion: (Boolean) -> Unit) {
+        val imageUrl = getMatchedLevelImageUrl(key)
+        if (imageUrl != null) {
+            imageManager.updateLevelImage(key, imageUrl){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Image, key)
+        }
+    }
+
+    fun updateLevelParam(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
+        val levelId = getMatchedLevelId(key)
+        if (levelId != null) {
+            paramManager.updateLevelParam(key, levelId){
+                    isSuccess -> completion(isSuccess)
+            }
+        } else {
+            delegate?.onError(ResourceError.Param, key)
+            completion(false)
+        }
+    }
+
+    fun updateAffineParam(sectorId: Int, completion: (Boolean) -> Unit) {
+        affineManager.updateAffineParam(sectorId){
+                isSuccess -> completion(isSuccess)
+        }
+    }
+
+    fun setDebugOption(set : Boolean) {
+        TJLogger.setDebugOption(set)
+    }
+
+    override fun onSectorData(data: SectorOutput) {
+        delegate?.onSectorData(data)
+    }
+
+    override fun onSectorError() {
+        delegate?.onSectorError(ResourceError.Sector)
+    }
+
+    override fun onBuildingsData(data: List<BuildingOutput>) {
+        delegate?.onBuildingsData(data)
+    }
+
+    override fun onScaleOffsetData(scaleKey: String, data: List<Float>) {
+        delegate?.onScaleOffsetData(scaleKey, data)
+    }
+
+    override fun onScaleOffsetError(scaleKey: String) {
+        delegate?.onError(ResourceError.Scale, scaleKey)
+    }
+
+    override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
+        delegate?.onPathPixelData(pathPixelKey, data)
+    }
+
+    override fun onPathPixelError(pathPixelKey: String) {
+        delegate?.onError(ResourceError.PathPixel, pathPixelKey)
+    }
+
+    override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
+        delegate?.onGeofenceData(geofenceKey, data)
+    }
+
+    override fun onGeofenceError(geofenceKey: String) {
+        delegate?.onError(ResourceError.Geofence, geofenceKey)
+    }
+
+    override fun onEntranceData(entranceKey: String, data: EntranceData) {
+        delegate?.onEntranceData(entranceKey, data)
+    }
+
+    override fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData) {
+        delegate?.onEntranceRouteData(entranceKey, data)
+    }
+
+    override fun onEntranceError(type: EntranceErrorType, entranceKey: String) {
+        delegate?.onError(ResourceError.Entrance, entranceKey)
+    }
+
+    override fun onSectorParamData(data: SectorParameterOutput) {
+        delegate?.onSectorParamData(data)
+    }
+
+    override fun onLevelParamData(paramKey: String, data: LevelParameterOutput) {
+        delegate?.onLevelParamData(paramKey, data)
+    }
+
+    override fun onParamError(type: ParamErrorType, paramKey: String?) {
+        TJLogger.e("onParamError // type : $type")
+    }
+
+    override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
+        delegate?.onBuildingLevelImageData(imageKey, data)
+    }
+
+    override fun onBuildingLevelImageError(imageKey: String) {
+        delegate?.onError(ResourceError.Image, imageKey)
+    }
+
+    override fun onUnitData(unitKey: String, data: List<UnitData>?) {
+        delegate?.onUnitData(unitKey, data)
+    }
+
+    override fun onUnitDataError(unitKey: String) {
+        delegate?.onError(ResourceError.Unit, unitKey)
+    }
+
+    override fun onLevelWardsData(levelKey: String, data : List<String>) {
+        delegate?.onLevelWardsData(levelKey, data)
+    }
+
+    override fun onLevelWardsDataError(unitKey: String) {
+        delegate?.onError(ResourceError.LevelWards, unitKey)
+    }
+
+    override fun onAffineData(sectorId: Int, data: AffineTransParamOutput) {
+        delegate?.onAffineData(sectorId, data)
+    }
+
+    override fun onAffineError(sectorId: Int) {
+        delegate?.onError(ResourceError.Affine, sectorId.toString())
+    }
+
+    override fun onLandmarkData(landmarkKey: String, data: Map<String, LandmarkData>) {
+        delegate?.onLandmarkData(landmarkKey, data)
+    }
+
+    override fun onLandmarkError(landmarkKey: String) {
+        delegate?.onError(ResourceError.Landmark,landmarkKey)
+    }
+
+    override fun onNodeLinkData(nodeLinkKey: String, type: NodeLinkType, data: Any) {
+        delegate?.onNodeLinkData(nodeLinkKey, type, data)
+    }
+
+    override fun onNodeLinkError(nodeLinkKey: String, type: NodeLinkType) {
+        delegate?.onError(ResourceError.Node, type.toString())
+    }
+
+    override fun onSpotsData(spotsKey: Int, type: SpotType, data: Any) {
+        delegate?.onSpotsData(spotsKey, type, data)
+    }
+
+    override fun onSpotsError(spotsKey: Int, type: SpotType) {
+        delegate?.onError(ResourceError.Spots, spotsKey.toString())
+    }
+}
