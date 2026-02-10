@@ -203,7 +203,8 @@ data class LandmarkData(
 data class PeakData (
     val x: Int,
     val y: Int,
-    val rssi: Float
+    val rssi: Float,
+    val matched_links : List<Int>
 )
 
 enum class SpotType {

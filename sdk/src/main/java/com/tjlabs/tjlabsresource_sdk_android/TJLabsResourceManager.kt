@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.manager.AffineDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingLevelImageDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
@@ -135,6 +136,7 @@ class TJLabsResourceManager :
                 sectorData.buildings
             ) { isSuccess ->
                 finishOne(isSuccess, latch)
+                Log.d("CheckMapResource","pathpixel : $isSuccess")
             }
 
             // 2. Image
@@ -142,16 +144,27 @@ class TJLabsResourceManager :
                 sectorId,
                 sectorData.buildings
             ) { isSuccess ->
+                Log.d("CheckMapResource","loadImage : $isSuccess")
+
+                finishOne(isSuccess, latch)
+            }
+
+            scaleOffsetManager.loadScaleOffset(
+                sectorId,
+                sectorData.buildings
+            ) { isSuccess ->
+                TJLogger.d("loadScaleOffset : $isSuccess")
                 finishOne(isSuccess, latch)
             }
 
             // 3. Unit
-            unitManager.loadUnit(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                finishOne(isSuccess, latch)
-            }
+//            unitManager.loadUnit(
+//                sectorId,
+//                sectorData.buildings
+//            ) { isSuccess ->
+//                Log.d("CheckMapResource","loadUnit : $isSuccess")
+//                finishOne(isSuccess, latch)
+//            }
 
             // 모든 Map 리소스 로딩 완료 대기
             Thread {
