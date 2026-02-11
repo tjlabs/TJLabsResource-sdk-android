@@ -116,6 +116,9 @@ class TJLabsResourceManager :
             val lock = Any()
             var isAllSuccess = true
 
+            val tasks = mutableListOf<(CountDownLatch) -> Unit>()
+
+
             fun finishOne(success: Boolean, latch: CountDownLatch) {
                 if (!success) {
                     synchronized(lock) {
@@ -127,10 +130,9 @@ class TJLabsResourceManager :
 
             // MapResource에서 병렬로 로딩할 항목 수
             // PathPixel / Image / Unit
-            val latch = CountDownLatch(3)
 
             // 1. PathPixel
-            pathPixelManager.loadPathPixel(
+            tasks += { latch -> pathPixelManager.loadPathPixel(
                 region,
                 sectorId,
                 sectorData.buildings
@@ -138,23 +140,29 @@ class TJLabsResourceManager :
                 finishOne(isSuccess, latch)
                 Log.d("CheckMapResource","pathpixel : $isSuccess")
             }
-
-            // 2. Image
-            imageManager.loadImage(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                Log.d("CheckMapResource","loadImage : $isSuccess")
-
-                finishOne(isSuccess, latch)
             }
 
-            scaleOffsetManager.loadScaleOffset(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadScaleOffset : $isSuccess")
-                finishOne(isSuccess, latch)
+
+            // 2. Image
+            tasks += { latch ->
+                imageManager.loadImage(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    Log.d("CheckMapResource", "loadImage : $isSuccess")
+
+                    finishOne(isSuccess, latch)
+                }
+            }
+
+            tasks += { latch ->
+                scaleOffsetManager.loadScaleOffset(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadScaleOffset : $isSuccess")
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 3. Unit
@@ -165,6 +173,12 @@ class TJLabsResourceManager :
 //                Log.d("CheckMapResource","loadUnit : $isSuccess")
 //                finishOne(isSuccess, latch)
 //            }
+
+            val latch = CountDownLatch(tasks.size)
+
+            tasks.forEach { task ->
+                task(latch)
+            }
 
             // 모든 Map 리소스 로딩 완료 대기
             Thread {
@@ -199,6 +213,7 @@ class TJLabsResourceManager :
 
             val lock = Any()
             var isAllSuccess = true
+            val tasks = mutableListOf<(CountDownLatch) -> Unit>()
 
             fun finishOne(success: Boolean, latch: CountDownLatch) {
                 if (!success) {
@@ -209,59 +224,68 @@ class TJLabsResourceManager :
                 latch.countDown()
             }
 
-            val latch = CountDownLatch(9)
-
             // 1. ScaleOffset
-            scaleOffsetManager.loadScaleOffset(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadScaleOffset : $isSuccess")
-                finishOne(isSuccess, latch)
+            tasks += { latch ->
+                scaleOffsetManager.loadScaleOffset(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadScaleOffset : $isSuccess")
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 2. PathPixel
-            pathPixelManager.loadPathPixel(
-                region,
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadPathPixel : $isSuccess")
+            tasks += { latch ->
+                pathPixelManager.loadPathPixel(
+                    region,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadPathPixel : $isSuccess")
 
-                finishOne(isSuccess, latch)
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 3. NodeLink
-            nodeLinkManager.loadNodeLinks(
-                application.applicationContext,
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadNodeLinks : $isSuccess")
-                finishOne(isSuccess, latch)
+            tasks += { latch ->
+                nodeLinkManager.loadNodeLinks(
+                    application.applicationContext,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadNodeLinks : $isSuccess")
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 4. Geofence
-            geofenceManager.loadGeofence(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadGeofence : $isSuccess")
+            tasks += { latch ->
+                geofenceManager.loadGeofence(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadGeofence : $isSuccess")
 
-                finishOne(isSuccess, latch)
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 5. Entrance
-            entranceManager.loadEntrance(
-                region,
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadEntrance : $isSuccess")
+            tasks += { latch ->
+                entranceManager.loadEntrance(
+                    region,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadEntrance : $isSuccess")
 
-                finishOne(isSuccess, latch)
+                    finishOne(isSuccess, latch)
+                }
             }
 
+            /* 미사용 api
             // 6. SectorParam
             paramManager.loadSectorParam(sectorId) { isSuccess ->
                 TJLogger.d("loadSectorParam : $isSuccess")
@@ -279,42 +303,57 @@ class TJLabsResourceManager :
                 finishOne(isSuccess, latch)
             }
 
-            // 8. LevelWards
-            levelsManager.loadLevelWards(
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadLevelWards : $isSuccess")
+             */
 
-                finishOne(isSuccess, latch)
+            // 8. LevelWards
+            tasks += { latch ->
+                levelsManager.loadLevelWards(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadLevelWards : $isSuccess")
+
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // 9. Spots
-            spotsManager.loadSpots(
-                application.applicationContext,
-                sectorId
-            ) { isSuccess ->
-                TJLogger.d("loadSpots : $isSuccess")
+            tasks += { latch ->
+                spotsManager.loadSpots(
+                    application.applicationContext,
+                    sectorId
+                ) { isSuccess ->
+                    TJLogger.d("loadSpots : $isSuccess")
 
-                finishOne(isSuccess, latch)
+                    finishOne(isSuccess, latch)
+                }
             }
 
             // Landmark
-            landmarkManager.loadLandmarks(
-                application.applicationContext,
-                sectorId,
-                sectorData.buildings
-            ) { isSuccess ->
-                TJLogger.d("loadLandmarks : $isSuccess")
-
-                synchronized(lock) {
-                    if (!isSuccess) isAllSuccess = false
+            tasks += { latch ->
+                landmarkManager.loadLandmarks(
+                    application.applicationContext,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadLandmarks : $isSuccess")
+                    finishOne(isSuccess, latch)
+                    synchronized(lock) {
+                        if (!isSuccess) isAllSuccess = false
+                    }
                 }
             }
 
             // AffineParam (성공/실패가 전체 결과에 영향 없음)
             affineManager.loadAffineParam(sectorId) {
                 // intentionally ignored
+            }
+
+            val latch = CountDownLatch(tasks.size)
+
+            // 실행
+            tasks.forEach { task ->
+                task(latch)
             }
 
             Thread {
