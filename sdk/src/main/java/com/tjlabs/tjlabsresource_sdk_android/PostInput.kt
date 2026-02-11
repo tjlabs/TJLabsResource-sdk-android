@@ -39,10 +39,10 @@ internal interface PostInput {
     @GET("/{server_version}/levels/{pk}/geofence")
     fun getGeofence(
         @Path("server_version") serverVersion: String,
-        @Path("pk") pk: Int,
-        @Query("operating_system") os: String
+        @Path("pk") pk: Int
     ): Call<GeofenceData>
 
+    //제거
     @GET("/{server_version}/sectors/{pk}/parameter")
     fun getSectorParam(
         @Path("server_version") serverVersion: String,
@@ -50,6 +50,7 @@ internal interface PostInput {
         @Query("operating_system") os: String
     ): Call<SectorParameterOutput>
 
+    //제거
     @GET("/{server_version}/levels/{pk}/parameter")
     fun getLevelParam(
         @Path("server_version") serverVersion: String,

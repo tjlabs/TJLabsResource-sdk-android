@@ -1,6 +1,5 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
-import android.util.Log
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsauth_sdk_android.TokenResult
 import okhttp3.Interceptor
@@ -44,11 +43,11 @@ internal object TJLabsResourceNetworkConstants {
 
     // MARK: - VERSION
     private const val USER_SECTOR_SERVER_VERSION = "2025-03-26"
-    private const val USER_PATHPIXEL_SERVER_VERSION = "2025-03-27"
+    private const val USER_PATH_PIXEL_SERVER_VERSION = "2025-03-27"
     private const val USER_SCALE_SERVER_VERSION = "2025-03-27"
-    private const val USER_UNIT_SERVER_VERSIOM = "2025-03-28"
-    private const val USER_GEO_SERVER_VERSION = "2025-03-28"
-    private const val USER_ENTERANCE_SERVER_VERSION = "2025-03-31"
+    private const val USER_UNIT_SERVER_VERSION = "2025-03-28"
+    private const val USER_GEO_SERVER_VERSION = "2026-02-10"
+    private const val USER_ENTRANCE_SERVER_VERSION = "2026-02-10"
     private const val USER_SECTOR_PARAM_SERVER_VERSION = "2025-03-31"
     private const val USER_LEVEL_PARAM_SERVER_VERSION = "2025-03-31"
     private const val USER_LEVEL_WARDS_SERVER_VERSION = "2025-04-17"
@@ -97,7 +96,7 @@ internal object TJLabsResourceNetworkConstants {
     }
 
     fun getUserPathPixelServerVersion() : String {
-        return USER_PATHPIXEL_SERVER_VERSION
+        return USER_PATH_PIXEL_SERVER_VERSION
     }
 
     fun getUserScaleServerVersion() : String {
@@ -105,7 +104,7 @@ internal object TJLabsResourceNetworkConstants {
     }
 
     fun getUserUnitServerVersion() : String {
-        return USER_UNIT_SERVER_VERSIOM
+        return USER_UNIT_SERVER_VERSION
     }
 
     fun getUserGeoServerVersion() : String {
@@ -113,7 +112,7 @@ internal object TJLabsResourceNetworkConstants {
     }
 
     fun getUserEntranceServerVersion() : String {
-        return USER_ENTERANCE_SERVER_VERSION
+        return USER_ENTRANCE_SERVER_VERSION
     }
 
     fun getUserSectorParamVersion() : String {

@@ -1,6 +1,7 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
+import java.util.logging.Level
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -19,12 +20,9 @@ data class PathPixelData(
 
 data class EntranceData(
     var number: Int = 0,
-    var networkStatus: Boolean = false,
     var velocityScale: Float = 0f,
-    var innerWardId: String = "",
-    var innerWardRssi: Float = 0f,
-    var innerWardCoord: List<Float> = emptyList(),
-    var outerWardId: String = ""
+    var innermost_ward: InnermostWard,
+    var outermost_ward: OutermostWard
 )
 
 
@@ -55,7 +53,6 @@ data class GeofenceData(
     val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
     val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val dr_mode_areas: List<DRModeArea> = listOf()
 )
 
 internal data class SectorIdInput(
@@ -98,21 +95,29 @@ data class PathPixelOutput(
 )
 
 // MARK: - Entrance
-data class InnermostWard(
+data class OutermostWard(
+    val id : Int,
     val name: String,
-    val rssi: Float,
+)
+
+
+data class InnermostWard(
+    val level : LevelOutput,
+    val id : Int,
+    val name: String,
     val x: Int,
     val y: Int,
-    val direction: Float
+    val is_turn : Boolean,
+    val directions: List<Float>
 )
 
 data class Entrance(
+    val id : Int,
     val number: Int,
-    val outermost_ward_name: String,
     val scale: Float,
     val csv: String,
-    val network_status: Boolean,
-    val innermost_ward: InnermostWard
+    val innermost_ward: InnermostWard,
+    val outermost_ward : OutermostWard
 )
 
 data class EntranceOutput(

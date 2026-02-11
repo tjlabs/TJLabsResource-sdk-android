@@ -105,7 +105,7 @@ internal object TJLabsResourceNetworkManager {
     fun getGeofence(url : String, input : LevelIdOsInput, serverVersion : String, completion: (Int, String, GeofenceData?) -> Unit) {
         val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
         val getGeofence = retrofit.create(PostInput::class.java)
-        getGeofence.getGeofence(serverVersion, input.level_id, input.operating_system).enqueue(object :
+        getGeofence.getGeofence(serverVersion, input.level_id).enqueue(object :
             Callback<GeofenceData> {
             override fun onFailure(call: Call<GeofenceData>, t: Throwable) {
                 completion(500, "(TJLabsResource) Failure : getGeofence  // status code : 500  // input : $input", null)
