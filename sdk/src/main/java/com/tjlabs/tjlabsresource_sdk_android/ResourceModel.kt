@@ -1,7 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
-import java.util.logging.Level
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -72,7 +71,6 @@ internal data class LevelIdOsInput(
 data class SectorOutput(
     val id: Int,
     val name: String,
-    val request_service: String,
     val debug: Boolean,
     val buildings: List<BuildingOutput>
 )
@@ -108,7 +106,7 @@ data class InnermostWard(
     val x: Int,
     val y: Int,
     val is_turn : Boolean,
-    val directions: List<Float>
+    val headings: List<Float>
 )
 
 data class Entrance(
