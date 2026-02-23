@@ -5,6 +5,7 @@ import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelUnitsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelWardsOutput
 import com.tjlabs.tjlabsresource_sdk_android.PathPixelOutput
 import com.tjlabs.tjlabsresource_sdk_android.PostInput
@@ -14,7 +15,7 @@ import com.tjlabs.tjlabsresource_sdk_android.SectorIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorParameterOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.UnitOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelUnitsOutput
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -163,15 +164,15 @@ internal object TJLabsResourceNetworkManager {
         })
     }
 
-    fun getUnit(url : String, input : LevelIdOsInput, serverVersion : String, completion: (Int, String, UnitOutput?) -> Unit) {
+    fun getLevelUnits(url : String, input : LevelUnitsInput, serverVersion : String, completion: (Int, String, LevelUnitsOutput?) -> Unit) {
         val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
         val getLevelParam = retrofit.create(PostInput::class.java)
-        getLevelParam.getUnit(serverVersion, input.level_id).enqueue(object :
-            Callback<UnitOutput> {
-            override fun onFailure(call: Call<UnitOutput>, t: Throwable) {
+        getLevelParam.getLevelUnits(serverVersion, input.level_id, input.category).enqueue(object :
+            Callback<LevelUnitsOutput> {
+            override fun onFailure(call: Call<LevelUnitsOutput>, t: Throwable) {
                 completion(500, "(TJLabsResource) Failure : getUnit  // status code : 500  // input : $input", null)
             }
-            override fun onResponse(call: Call<UnitOutput>, response: Response<UnitOutput>) {
+            override fun onResponse(call: Call<LevelUnitsOutput>, response: Response<LevelUnitsOutput>) {
                 val statusCode = response.code()
                 if (statusCode in 200 until 300) {
                     val resultData = response.body()

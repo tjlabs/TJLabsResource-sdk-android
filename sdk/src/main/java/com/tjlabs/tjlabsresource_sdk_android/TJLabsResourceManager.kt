@@ -35,8 +35,8 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSpotsManager
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsUnitManager
-import com.tjlabs.tjlabsresource_sdk_android.manager.UnitDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelUnitsManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.LevelUnitsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import java.util.concurrent.CountDownLatch
 
@@ -50,7 +50,7 @@ class TJLabsResourceManager :
     EntranceDelegate,
     ParamDelegate,
     BuildingLevelImageDelegate,
-    UnitDelegate,
+    LevelUnitsDelegate,
     AffineDelegate,
     LandmarkDelegate,
     NodeLinkDelegate,
@@ -67,7 +67,7 @@ class TJLabsResourceManager :
     private val entranceManager = TJLabsEntranceManager()
     private val paramManager = TJLabsParamManager()
     private val imageManager = TJLabsImageManager()
-    private val unitManager = TJLabsUnitManager()
+    private val unitManager = TJLabsLevelUnitsManager()
     private val affineManager = TJLabsAffineManager()
     private val landmarkManager = TJLabsLandmarkManager()
     private val nodeLinkManager = TJLabsNodeLinkManager()
@@ -166,13 +166,15 @@ class TJLabsResourceManager :
             }
 
             // 3. Unit
-//            unitManager.loadUnit(
-//                sectorId,
-//                sectorData.buildings
-//            ) { isSuccess ->
-//                Log.d("CheckMapResource","loadUnit : $isSuccess")
-//                finishOne(isSuccess, latch)
-//            }
+            tasks += { latch ->
+                unitManager.loadLevelUnits(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    Log.d("CheckMapResource","loadUnit : $isSuccess")
+                    finishOne(isSuccess, latch)
+                }
+            }
 
             val latch = CountDownLatch(tasks.size)
 
@@ -416,7 +418,7 @@ class TJLabsResourceManager :
     }
 
     fun getUnitData(): Map<String, List<UnitData>> {
-        return TJLabsUnitManager.unitDataMap
+        return TJLabsLevelUnitsManager.levelUnitsDataMap
     }
 
     fun getGeofenceData(): Map<String, GeofenceData> {
@@ -480,7 +482,7 @@ class TJLabsResourceManager :
                     isSuccess -> completion(isSuccess)
             }
         } else {
-            delegate?.onError(ResourceError.Unit, key)
+            delegate?.onError(ResourceError.LevelUnits, key)
             completion(false)
         }
     }
@@ -610,12 +612,12 @@ class TJLabsResourceManager :
         delegate?.onError(ResourceError.Image, imageKey)
     }
 
-    override fun onUnitData(unitKey: String, data: List<UnitData>?) {
-        delegate?.onUnitData(unitKey, data)
+    override fun onLevelUnitsData(unitKey: String, data: List<UnitData>?) {
+        delegate?.onLevelUnitsData(unitKey, data)
     }
 
-    override fun onUnitDataError(unitKey: String) {
-        delegate?.onError(ResourceError.Unit, unitKey)
+    override fun onLevelUnitsDataError(unitKey: String) {
+        delegate?.onError(ResourceError.LevelUnits, unitKey)
     }
 
     override fun onLevelWardsData(levelKey: String, data : List<String>) {

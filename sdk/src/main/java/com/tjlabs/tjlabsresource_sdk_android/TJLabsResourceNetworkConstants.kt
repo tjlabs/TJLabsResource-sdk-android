@@ -45,7 +45,8 @@ internal object TJLabsResourceNetworkConstants {
     private const val USER_SECTOR_SERVER_VERSION = "2025-03-26"
     private const val USER_PATH_PIXEL_SERVER_VERSION = "2025-03-27"
     private const val USER_SCALE_SERVER_VERSION = "2025-03-27"
-    private const val USER_UNIT_SERVER_VERSION = "2025-03-28"
+    private const val USER_LEVEL_UNITS_SERVER_VERSION = "2026-01-27"
+    private const val USER_UNIT_SERVER_VERSION = "2026-01-27"
     private const val USER_GEO_SERVER_VERSION = "2026-02-10"
     private const val USER_ENTRANCE_SERVER_VERSION = "2026-02-10"
     private const val USER_SECTOR_PARAM_SERVER_VERSION = "2025-03-31"
@@ -103,8 +104,8 @@ internal object TJLabsResourceNetworkConstants {
         return USER_SCALE_SERVER_VERSION
     }
 
-    fun getUserUnitServerVersion() : String {
-        return USER_UNIT_SERVER_VERSION
+    fun getUserLevelUnitsServerVersion() : String {
+        return USER_LEVEL_UNITS_SERVER_VERSION
     }
 
     fun getUserGeoServerVersion() : String {

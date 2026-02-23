@@ -58,11 +58,12 @@ internal interface PostInput {
         @Query("operating_system") os: String
     ): Call<LevelParameterOutput>
 
-    @GET("/{server_version}/levels/{pk}/unit")
-    fun getUnit(
+    @GET("/{server_version}/levels/{pk}/units")
+    fun getLevelUnits(
         @Path("server_version") serverVersion: String,
-        @Path("pk") pk: Int
-    ): Call<UnitOutput>
+        @Path("pk") pk: Int,
+        @Query("category") category: Category?
+    ): Call<LevelUnitsOutput>
 
     @GET("/{server_version}/levels/{pk}")
     fun getLevelWards(

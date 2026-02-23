@@ -1,29 +1,29 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
-import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.UnitData
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import android.os.Handler
 import android.os.Looper
+import com.tjlabs.tjlabsresource_sdk_android.LevelUnitsInput
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-internal interface UnitDelegate {
-    fun onUnitData(unitKey: String, data : List<UnitData>?)
-    fun onUnitDataError(unitKey: String)
+internal interface LevelUnitsDelegate {
+    fun onLevelUnitsData(unitKey: String, data : List<UnitData>?)
+    fun onLevelUnitsDataError(unitKey: String)
 }
 
 
-internal class TJLabsUnitManager {
+internal class TJLabsLevelUnitsManager {
     companion object {
-        val unitDataMap : MutableMap<String, List<UnitData>> = mutableMapOf()
+        val levelUnitsDataMap : MutableMap<String, List<UnitData>> = mutableMapOf()
     }
 
-    var delegate: UnitDelegate? = null
+    var delegate: LevelUnitsDelegate? = null
 
-    fun loadUnit(
+    fun loadLevelUnits(
         sectorId: Int,
         buildingsData: List<BuildingOutput>,
         completion: (Boolean) -> Unit
@@ -52,9 +52,9 @@ internal class TJLabsUnitManager {
                 val unitKey = "${sectorId}_${building.name}_${level.name}"
 
                 // ✅ 캐시 히트
-                val cached = unitDataMap[unitKey]
+                val cached = levelUnitsDataMap[unitKey]
                 if (cached != null) {
-                    delegate?.onUnitData(unitKey, cached)
+                    delegate?.onLevelUnitsData(unitKey, cached)
                     continue
                 }
 
@@ -100,27 +100,27 @@ internal class TJLabsUnitManager {
         levelId: Int,
         completion: (Boolean) -> Unit
     ) {
-        val input = LevelIdOsInput(level_id = levelId)
+        val input = LevelUnitsInput(level_id = levelId)
 
-        TJLabsResourceNetworkManager.getUnit(
+        TJLabsResourceNetworkManager.getLevelUnits(
             TJLabsResourceNetworkConstants.getUserBaseURL(),
             input,
-            TJLabsResourceNetworkConstants.getUserUnitServerVersion()
+            TJLabsResourceNetworkConstants.getUserLevelUnitsServerVersion()
         ) { status, msg, result ->
 
             if (status != 200) {
                 TJLogger.d(msg)
-                delegate?.onUnitDataError(key)
+                delegate?.onLevelUnitsDataError(key)
                 completion(false)
-                return@getUnit
+                return@getLevelUnits
             }
 
             if (result != null) {
-                unitDataMap[key] = result.units
-                delegate?.onUnitData(key, result.units)
+                levelUnitsDataMap[key] = result.units
+                delegate?.onLevelUnitsData(key, result.units)
                 completion(true)
             } else {
-                delegate?.onUnitDataError(key)
+                delegate?.onLevelUnitsDataError(key)
                 completion(false)
             }
         }
