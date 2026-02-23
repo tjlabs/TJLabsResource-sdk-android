@@ -2,4 +2,11 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="card_jupiter_bg">#FFEFF6FF</color>
+    <color name="card_map_bg">#FFF1F5F9</color>
+    <color name="text_muted">#FF6B7280</color>
+    <color name="text_pending">#FF6B7280</color>
+    <color name="text_success">#FF15803D</color>
+    <color name="text_fail">#FFB91C1C</color>
+    <color name="card_log_bg">#FFF8FAFC</color>
 </resources>
