@@ -1,5 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
+import android.content.ClipData.Item
 import android.graphics.Bitmap
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -288,6 +289,63 @@ object CategorySerializer : KSerializer<Category> {
         encoder.encodeString(value.name)
     }
 }
+
+// MARK: - Graph
+data class ItemIdNumber (
+    val id : Int,
+    val number: Int
+)
+
+data class GraphLevelNodesOutput (
+    val nodes : List<GraphLevelNode>
+)
+
+data class GraphLevelNode (
+    val id : Int,
+    val number : Int,
+    val x : Int,
+    val y : Int,
+    val available_in_headings : List<Int>,
+    val available_out_headings : List<Int>,
+    val connected_links : List<ItemIdNumber>,
+    val connected_nodes : List<ItemIdNumber>
+)
+
+data class GraphLevelLinksOutput (
+    val links : List<GraphLevelLink>
+)
+
+data class GraphLevelLink (
+    val id : Int,
+    val number : Int,
+    val node_a : ItemIdNumber,
+    val node_b_: ItemIdNumber,
+    val available_headings : List<Int>,
+    val distance : Int
+)
+
+
+data class GraphLevelLinksGroupsOutput (
+    val link_groups : List<GraphLevelLinkGroup>
+)
+
+data class GraphLevelLinkGroup (
+    val id : Int,
+    val number : Int,
+    val links : List<ItemIdNumber>,
+)
+
+data class GraphLevelPathsOutput (
+    val paths : List<GraphLevelPath>
+)
+
+data class GraphLevelPath (
+    val x : Int,
+    val y : Int,
+    val available_headings : List<Int>,
+    val velocity_scale: Float
+)
+
 
 
 // MARK: - Resource Error

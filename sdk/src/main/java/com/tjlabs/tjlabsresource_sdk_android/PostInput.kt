@@ -77,4 +77,34 @@ internal interface PostInput {
         @Path("sector_id") sectorId: Int
     ): Call<AffineTransParamOutput>
 
+    @GET("/{user_graph_nodes_server_version}/levels/{pk}/graphs/nodes")
+    fun getLevelNodes(
+        @Path("user_graph_nodes_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+    ): Call<GraphLevelNodesOutput>
+
+    @GET("/{user_graph_links_server_version}/levels/{pk}/graphs/links")
+    fun getLevelLinks(
+        @Path("user_graph_links_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+    ): Call<GraphLevelLinksOutput>
+
+    @GET("/{user_graph_link_groups_server_version}/levels/{pk}/graphs/link-groups")
+    fun getLevelLinkGroups(
+        @Path("user_graph_link_groups_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+    ): Call<GraphLevelLinksGroupsOutput>
+
+    @GET("/{user_graph_path_server_version}/levels/{pk}/graphs/paths")
+    fun getLevelPaths(
+        @Path("user_graph_path_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+        @Query("operating_system") os : String = "Android"
+    ): Call<GraphLevelPathsOutput>
+
+
+
+
+
+
 }

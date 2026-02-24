@@ -3,6 +3,10 @@ package com.tjlabs.tjlabsresource_sdk_android.manager
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksGroupsOutput
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksOutput
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNodesOutput
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPathsOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelUnitsInput
@@ -231,6 +235,86 @@ internal object TJLabsResourceNetworkManager {
                     completion(statusCode, "(TJLabsResource) AffineParam : sector $sectorId is not support affine converting // code : $statusCode", null)
                 } else {
                     completion(statusCode, "(TJLabsResource) Error : getUserAffineTrans // status code : $statusCode // sectorId : $sectorId", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelNodes(url: String, input: LevelIdOsInput, serverVersion: String, completion: (Int, String, GraphLevelNodesOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelNodes = retrofit.create(PostInput::class.java)
+        getLevelNodes.getLevelNodes(serverVersion, input.level_id).enqueue(object :
+            Callback<GraphLevelNodesOutput> {
+            override fun onFailure(call: Call<GraphLevelNodesOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelNodes  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<GraphLevelNodesOutput>, response: Response<GraphLevelNodesOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelNodes", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelNodes // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelLinks(url: String, input: LevelIdOsInput, serverVersion: String, completion: (Int, String, GraphLevelLinksOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelLinks = retrofit.create(PostInput::class.java)
+        getLevelLinks.getLevelLinks(serverVersion, input.level_id).enqueue(object :
+            Callback<GraphLevelLinksOutput> {
+            override fun onFailure(call: Call<GraphLevelLinksOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelLinks  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<GraphLevelLinksOutput>, response: Response<GraphLevelLinksOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelLinks", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelLinks // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelLinkGroups(url: String, input: LevelIdOsInput, serverVersion: String, completion: (Int, String, GraphLevelLinksGroupsOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelLinkGroups = retrofit.create(PostInput::class.java)
+        getLevelLinkGroups.getLevelLinkGroups(serverVersion, input.level_id).enqueue(object :
+            Callback<GraphLevelLinksGroupsOutput> {
+            override fun onFailure(call: Call<GraphLevelLinksGroupsOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelLinkGroups  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<GraphLevelLinksGroupsOutput>, response: Response<GraphLevelLinksGroupsOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelLinkGroups", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelLinkGroups // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelPaths(url: String, input: LevelIdOsInput, serverVersion: String, completion: (Int, String, GraphLevelPathsOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelPaths = retrofit.create(PostInput::class.java)
+        getLevelPaths.getLevelPaths(serverVersion, input.level_id, input.operating_system).enqueue(object :
+            Callback<GraphLevelPathsOutput> {
+            override fun onFailure(call: Call<GraphLevelPathsOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelPaths  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<GraphLevelPathsOutput>, response: Response<GraphLevelPathsOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelPaths", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelPaths // status code : $statusCode // input : $input", null)
                 }
             }
         })
