@@ -258,7 +258,6 @@ class TJLabsResourceManager :
             // 3. NodeLink
             tasks += { latch ->
                 nodeLinkManager.loadNodeLinks(
-                    application.applicationContext,
                     sectorId,
                     sectorData.buildings
                 ) { isSuccess ->
