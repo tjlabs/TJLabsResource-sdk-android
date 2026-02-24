@@ -1,21 +1,12 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
-import com.google.gson.FieldNamingPolicy
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
-import com.google.gson.reflect.TypeToken
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
-import com.tjlabs.tjlabsresource_sdk_android.LandmarkData
 import com.tjlabs.tjlabsresource_sdk_android.LinkData
 import com.tjlabs.tjlabsresource_sdk_android.NodeData
 import com.tjlabs.tjlabsresource_sdk_android.NodeDirection
 import com.tjlabs.tjlabsresource_sdk_android.NodeLinkType
-import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
-import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
@@ -34,9 +25,9 @@ internal class TJLabsNodeLinkManager {
     }
 
     var delegate: NodeLinkDelegate? = null
+    private val graphsManager = TJLabsGraphsManager()
 
     fun loadNodeLinks(
-        context: Context,
         sectorId: Int,
         buildingsData: List<BuildingOutput>,
         completion: (Boolean) -> Unit
@@ -80,61 +71,30 @@ internal class TJLabsNodeLinkManager {
                 hasAsyncWork = true
 
                 tasks += task@{
-                    val nodeFileName = "${blKey}_node.json"
-                    val linkFileName = "${blKey}_link.json"
-
-                    // Swift의 subdirectory="Data" 우선, 없으면 root fallback
-                    fun readJsonWithFallback(fileName: String): String? {
-                        return try {
-                            context.assets.open(fileName).bufferedReader().use { it.readText() }
-                        } catch (_: Exception) {
-                            try {
-                                context.assets.open(fileName).bufferedReader().use { it.readText() }
-                            } catch (_: Exception) {
-                                null
+                    ensureGraphData(blKey, level.id) { success ->
+                        if (!success) {
+                            mainHandler.post {
+                                delegate?.onNodeLinkError(blKey, NodeLinkType.NODE)
+                                delegate?.onNodeLinkError(blKey, NodeLinkType.LINK)
                             }
+                            updateSuccess(false)
+                            return@ensureGraphData
                         }
-                    }
 
-                    val nodeJsonString = readJsonWithFallback(nodeFileName)
-                    val linkJsonString = readJsonWithFallback(linkFileName)
-
-                    // 둘 다 없으면 → 정상 skip
-                    if (nodeJsonString == null && linkJsonString == null) {
-                        // 아무 것도 안 함 (skip)
-                        return@task
-                    }
-
-                    // 하나만 없으면 → 데이터 불완전 → error
-                    if (nodeJsonString == null || linkJsonString == null) {
-                        mainHandler.post {
-                            delegate?.onNodeLinkError(blKey,
-                                if (nodeJsonString == null) NodeLinkType.NODE else NodeLinkType.LINK
-                            )
-                        }
-                        updateSuccess(false)
-                        return@task
-                    }
-
-
-                    processNodeLinkStrings(
-                        nodeJsonString = nodeJsonString,
-                        linkJsonString = linkJsonString,
-                        key = blKey
-                    ) { success, nodeDict, linkDict ->
-                        Log.d("CheckNodeLink", "success : $success // node : $nodeDict")
+                        val nodeDict = buildNodeDictFromGraphs(blKey)
+                        val linkDict = buildLinkDictFromGraphs(blKey)
 
                         mainHandler.post {
-                            if (success && nodeDict != null && linkDict != null) {
-                                // Cache
+                            if (nodeDict != null && linkDict != null) {
                                 nodeDataMap[blKey] = nodeDict
                                 linkDataMap[blKey] = linkDict
 
-                                // Delegate notify
                                 delegate?.onNodeLinkData(blKey, NodeLinkType.NODE, nodeDict)
                                 delegate?.onNodeLinkData(blKey, NodeLinkType.LINK, linkDict)
                                 updateSuccess(true)
                             } else {
+                                delegate?.onNodeLinkError(blKey, NodeLinkType.NODE)
+                                delegate?.onNodeLinkError(blKey, NodeLinkType.LINK)
                                 updateSuccess(false)
                             }
                         }
@@ -170,117 +130,112 @@ internal class TJLabsNodeLinkManager {
         }
     }
 
-    // ------------------------------------
-    // Helper Methods
-    // ------------------------------------
-    private fun processNodeLinkStrings(
-        nodeJsonString: String,
-        linkJsonString: String,
-        key: String,
-        completion: (Boolean, Map<Int, NodeData>?, Map<Int, LinkData>?) -> Unit
-    ) {
-        Log.d("CheckNodeLink", "nodeJson : $nodeJsonString // linkJson : $linkJsonString")
-        try {
-            val nodeDict = decodeNodeDict(nodeJsonString)
-            Log.d("CheckNodeLink", "nodeDict : $nodeDict")
+    private fun ensureGraphData(key: String, levelId: Int, completion: (Boolean) -> Unit) {
+        val cachedNodes = TJLabsGraphsManager.graphNodesDataMap[key]
+        val cachedLinks = TJLabsGraphsManager.graphLinksDataMap[key]
+        val cachedLinkGroups = TJLabsGraphsManager.graphLinkGroupsDataMap[key]
 
-            if (nodeDict == null) {
-                completion(false, null, null)
-                return
+        if (cachedNodes != null && cachedLinks != null && cachedLinkGroups != null) {
+            completion(true)
+            return
+        }
+
+        val latch = CountDownLatch(3)
+        var isAllSuccess = true
+        val lock = Any()
+
+        fun updateSuccess(success: Boolean) {
+            if (!success) {
+                synchronized(lock) {
+                    isAllSuccess = false
+                }
             }
+        }
 
-            val linkDict = decodeLinkDict(linkJsonString)
-            Log.d("CheckNodeLink", "linkDict : $linkDict")
+        graphsManager.updateLevelNodes(key, levelId) { success ->
+            updateSuccess(success)
+            latch.countDown()
+        }
+        graphsManager.updateLevelLinks(key, levelId) { success ->
+            updateSuccess(success)
+            latch.countDown()
+        }
+        graphsManager.updateLevelLinkGroups(key, levelId) { success ->
+            updateSuccess(success)
+            latch.countDown()
+        }
 
-            if (linkDict == null) {
-                completion(false, null, null)
-                return
-            }
-
-            completion(true, nodeDict, linkDict)
-        } catch (e: Exception) {
-            TJLogger.d("[processNodeLinkFiles] File read/parse error for key=$key : ${e.localizedMessage}")
-            completion(false, null, null)
+        Executors.newSingleThreadExecutor().execute {
+            latch.await()
+            completion(isAllSuccess)
         }
     }
 
-    // ------------------------------------
-    // Decoding
-    //  - Swift Codable의 snake_case를 대비해 LOWER_CASE_WITH_UNDERSCORES 사용
-    // ------------------------------------
-    private val gson: Gson = GsonBuilder()
-        .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
-        .create()
+    private fun buildNodeDictFromGraphs(key: String): Map<Int, NodeData>? {
+        val nodes = TJLabsGraphsManager.graphNodesDataMap[key] ?: return null
+        val result = mutableMapOf<Int, NodeData>()
 
-    // DTOs
-    private data class NodeWrapperDTO(
-        val nodes: List<NodeDataDTO>
-    )
+        for (node in nodes) {
+            val inHeadings = node.available_in_headings.toSet()
+            val outHeadings = node.available_out_headings.toSet()
+            val endOnlyHeadings = inHeadings.subtract(outHeadings)
 
-    private data class NodeDataDTO(
-        val id: Int,
-        val coords: List<Float>,
-        val directions: List<NodeDirection>,
-        val connected_nodes: List<Int>,
-        val connected_links: List<Int>
-    ) {
-        fun toDomain(): NodeData = NodeData(
-            id = id,
-            coords = coords,
-            directions = directions,
-            connected_nodes = connected_nodes,
-            connected_links = connected_links
-        )
-    }
+            val mergedHeadings = LinkedHashSet<Int>()
+            mergedHeadings.addAll(node.available_in_headings)
+            mergedHeadings.addAll(node.available_out_headings)
 
-    // DTOs
-    private data class LinkWrapperDTO(
-        val links: List<LinkDataDTO>
-    )
-
-
-    private data class LinkDataDTO(
-        val id: Int,
-        val start_node: Int,
-        val end_node: Int,
-        val distance: Float,
-        val included_heading: List<Float>,
-        val group_id: Int
-    ) {
-        fun toDomain(): LinkData = LinkData(
-            id = id,
-            start_node = start_node,
-            end_node = end_node,
-            distance = distance,
-            included_heading = included_heading,
-            group_id = group_id
-        )
-    }
-
-    private fun decodeNodeDict(jsonString: String): Map<Int, NodeData>? {
-        return try {
-            val wrapped = gson.fromJson(jsonString, NodeWrapperDTO::class.java)
-            wrapped.nodes.associate { nodeDto ->
-                nodeDto.id to nodeDto.toDomain()
+            //is_end 조건은 In에만 있는 헤딩값임.
+            val directions = mutableListOf<NodeDirection>()
+            for (heading in mergedHeadings) {
+                directions.add(
+                    NodeDirection(
+                        heading = heading.toFloat(),
+                        is_end = endOnlyHeadings.contains(heading)
+                    )
+                )
             }
-        } catch (e: Exception) {
-            TJLogger.d("[decodeNodeDict] Node decoding failed: ${e.localizedMessage}")
-            null
+
+            val connectedNodes = node.connected_nodes.map { it.number }
+            val connectedLinks = node.connected_links.map { it.number }
+
+            result[node.number] = NodeData(
+                number = node.number,
+                coords = listOf(node.x.toFloat(), node.y.toFloat()),
+                directions = directions,
+                connected_nodes = connectedNodes,
+                connected_links = connectedLinks
+            )
         }
+
+        return result
     }
 
+    private fun buildLinkDictFromGraphs(key: String): Map<Int, LinkData>? {
+        val links = TJLabsGraphsManager.graphLinksDataMap[key] ?: return null
+        val linkGroups = TJLabsGraphsManager.graphLinkGroupsDataMap[key]
 
-    private fun decodeLinkDict(jsonString: String): Map<Int, LinkData>? {
-        return try {
-            val wrapped = gson.fromJson(jsonString, LinkWrapperDTO::class.java)
-            wrapped.links.associate { linkDto ->
-                linkDto.id to linkDto.toDomain()
+        val linkIdToGroupId = mutableMapOf<Int, Int>()
+        if (linkGroups != null) {
+            for (group in linkGroups) {
+                for (item in group.links) {
+                    linkIdToGroupId[item.number] = group.number
+                }
             }
-        } catch (e: Exception) {
-            TJLogger.d("[decodeNodeDict] Link decoding failed: ${e.localizedMessage}")
-            null
         }
+
+        val result = mutableMapOf<Int, LinkData>()
+        for (link in links) {
+            val groupId = linkIdToGroupId[link.number] ?: -1
+            result[link.number] = LinkData(
+                number = link.number,
+                start_node = link.node_a.number,
+                end_node = link.node_b.number,
+                distance = link.distance.toFloat(),
+                included_heading = link.available_headings.map { it.toFloat() },
+                group_id = groupId
+            )
+        }
+
+        return result
     }
-
-
 }
