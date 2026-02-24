@@ -346,6 +346,13 @@ data class GraphLevelPath (
     val velocity_scale: Float
 )
 
+enum class GraphResourceType {
+    NODES,
+    LINKS,
+    LINK_GROUPS,
+    PATHS
+}
+
 
 
 // MARK: - Resource Error
@@ -389,5 +396,10 @@ interface TJLabsResourceManagerDelegate {
     fun onLandmarkData(key : String, data : Map<String, LandmarkData>)
     fun onSpotsData(key: Int, type: SpotType, data: Any)
     fun onNodeLinkData(key: String, type: NodeLinkType, data: Any)
+    fun onGraphNodesData(key: String, data: List<GraphLevelNode>)
+    fun onGraphLinksData(key: String, data: List<GraphLevelLink>)
+    fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>)
+    fun onGraphPathsData(key: String, data: List<GraphLevelPath>)
+    fun onGraphError(key: String, type: GraphResourceType)
     fun onError(error: ResourceError, key: String)
 }

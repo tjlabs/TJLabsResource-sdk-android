@@ -13,6 +13,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.BuildingsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.EntranceErrorType
 import com.tjlabs.tjlabsresource_sdk_android.manager.GeofenceDelegate
+import com.tjlabs.tjlabsresource_sdk_android.manager.GraphsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.LandmarkDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.LevelsDelegate
 import com.tjlabs.tjlabsresource_sdk_android.manager.NodeLinkDelegate
@@ -26,6 +27,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsAffineManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBuildingsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsEntranceManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGeofenceManager
+import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGraphsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLandmarkManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelsManager
@@ -54,7 +56,8 @@ class TJLabsResourceManager :
     AffineDelegate,
     LandmarkDelegate,
     NodeLinkDelegate,
-    SpotsDelegate {
+    SpotsDelegate,
+    GraphsDelegate {
 
     var delegate: TJLabsResourceManagerDelegate? = null
 
@@ -72,6 +75,7 @@ class TJLabsResourceManager :
     private val landmarkManager = TJLabsLandmarkManager()
     private val nodeLinkManager = TJLabsNodeLinkManager()
     private val spotsManager = TJLabsSpotsManager()
+    private val graphsManager = TJLabsGraphsManager()
 
     private lateinit var sharedPrefs: SharedPreferences
 
@@ -90,6 +94,7 @@ class TJLabsResourceManager :
         landmarkManager.delegate = this
         nodeLinkManager.delegate = this
         spotsManager.delegate = this
+        graphsManager.delegate = this
     }
 
     fun loadMapResource(
@@ -327,6 +332,17 @@ class TJLabsResourceManager :
                 ) { isSuccess ->
                     TJLogger.d("loadSpots : $isSuccess")
 
+                    finishOne(isSuccess, latch)
+                }
+            }
+
+            // 10. Graphs
+            tasks += { latch ->
+                graphsManager.loadGraphs(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadGraphs : $isSuccess")
                     finishOne(isSuccess, latch)
                 }
             }
@@ -658,5 +674,25 @@ class TJLabsResourceManager :
 
     override fun onSpotsError(spotsKey: Int, type: SpotType) {
         delegate?.onError(ResourceError.Spots, spotsKey.toString())
+    }
+
+    override fun onGraphNodesData(key: String, data: List<GraphLevelNode>) {
+        delegate?.onGraphNodesData(key, data)
+    }
+
+    override fun onGraphLinksData(key: String, data: List<GraphLevelLink>) {
+        delegate?.onGraphLinksData(key, data)
+    }
+
+    override fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>) {
+        delegate?.onGraphLinkGroupsData(key, data)
+    }
+
+    override fun onGraphPathsData(key: String, data: List<GraphLevelPath>) {
+        delegate?.onGraphPathsData(key, data)
+    }
+
+    override fun onGraphError(key: String, type: GraphResourceType) {
+        delegate?.onGraphError(key, type)
     }
 }

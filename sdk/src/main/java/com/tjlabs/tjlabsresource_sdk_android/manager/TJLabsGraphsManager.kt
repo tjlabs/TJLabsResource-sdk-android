@@ -7,18 +7,12 @@ import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLink
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinkGroup
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNode
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPath
+import com.tjlabs.tjlabsresource_sdk_android.GraphResourceType
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
-
-internal enum class GraphResourceType {
-    NODES,
-    LINKS,
-    LINK_GROUPS,
-    PATHS
-}
 
 internal interface GraphsDelegate {
     fun onGraphNodesData(key: String, data: List<GraphLevelNode>)
