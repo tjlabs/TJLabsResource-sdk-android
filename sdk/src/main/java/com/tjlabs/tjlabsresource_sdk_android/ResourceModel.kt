@@ -1,6 +1,5 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
-import android.content.ClipData.Item
 import android.graphics.Bitmap
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -218,7 +217,7 @@ enum class SpotType {
 }
 
 data class NodeData (
-    val id: Int,
+    val number: Int,
     val coords: List<Float>,
     val directions: List<NodeDirection>,
     val connected_nodes: List<Int>,
@@ -231,7 +230,7 @@ data class NodeDirection (
 )
 
 data class LinkData (
-    val id: Int,
+    val number: Int,
     val start_node: Int,
     val end_node: Int,
     val distance: Float,
@@ -319,7 +318,7 @@ data class GraphLevelLink (
     val id : Int,
     val number : Int,
     val node_a : ItemIdNumber,
-    val node_b_: ItemIdNumber,
+    val node_b: ItemIdNumber,
     val available_headings : List<Int>,
     val distance : Int
 )
