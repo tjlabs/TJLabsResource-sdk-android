@@ -6,6 +6,7 @@ import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksGroupsOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNodesOutput
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPath
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPathsOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput

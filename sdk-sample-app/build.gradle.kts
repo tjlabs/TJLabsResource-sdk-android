@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.tjlabs.sdk_sample_app"
+    namespace = "com.tjlabs.resource_sdk_sample_app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tjlabs.sdk_sample_app"
+        applicationId = "com.tjlabs.resource_sdk_sample_app"
         minSdk = 29
         targetSdk = 34
         versionCode = 1

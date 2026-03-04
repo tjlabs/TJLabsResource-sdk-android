@@ -387,6 +387,7 @@ class TJLabsResourceManager :
         setRegion(region)
 
         //cached 에 접근하기 위한
+        graphsManager.init(application, sharedPrefs)
         pathPixelManager.init(application, sharedPrefs)
         entranceManager.init(application, sharedPrefs)
     }

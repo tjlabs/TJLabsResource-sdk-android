@@ -335,14 +335,14 @@ data class GraphLevelLinkGroup (
 )
 
 data class GraphLevelPathsOutput (
-    val paths : List<GraphLevelPath>
+    val csv: String
 )
 
 data class GraphLevelPath (
-    val x : Int,
-    val y : Int,
-    val available_headings : List<Int>,
-    val velocity_scale: Float
+   val x : Float,
+   val y : Float,
+   val available_headings: List<Int>,
+   val velocity_scale : Float
 )
 
 enum class GraphResourceType {

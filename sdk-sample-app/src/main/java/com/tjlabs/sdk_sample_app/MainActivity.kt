@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.tjlabs.resource_sdk_sample_app.R
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsresource_sdk_android.*
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageCacheManager
@@ -249,6 +250,46 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             "onNodeLinkData",
             "key=$key type=$type count=${describeSize(data)}",
             "asset"
+        )
+    }
+
+    override fun onGraphNodesData(key: String, data: List<GraphLevelNode>) {
+        appendCallbackLog(
+            "onGraphNodesData",
+            "key=$key count=${data.size}",
+            "api"
+        )
+    }
+
+    override fun onGraphLinksData(key: String, data: List<GraphLevelLink>) {
+        appendCallbackLog(
+            "onGraphLinksData",
+            "key=$key count=${data.size}",
+            "api"
+        )
+    }
+
+    override fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>) {
+        appendCallbackLog(
+            "onGraphLinkGroupsData",
+            "key=$key count=${data.size}",
+            "api"
+        )
+    }
+
+    override fun onGraphPathsData(key: String, data: List<GraphLevelPath>) {
+        appendCallbackLog(
+            "onGraphPathsData",
+            "key=$key count=${data.size}",
+            "api"
+        )
+    }
+
+    override fun onGraphError(key: String, type: GraphResourceType) {
+        appendCallbackLog(
+            "onGraphError",
+            "key=$key type=$type",
+            "api"
         )
     }
 

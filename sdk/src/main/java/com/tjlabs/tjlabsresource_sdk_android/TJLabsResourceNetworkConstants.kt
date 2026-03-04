@@ -56,7 +56,7 @@ internal object TJLabsResourceNetworkConstants {
     private const val USER_GRAPHS_NODES_VERSION = "2026-02-19"
     private const val USER_GRAPHS_LINKS_VERSION = "2026-02-19"
     private const val USER_GRAPHS_LINK_GROUPS_VERSION = "2026-02-19"
-    private const val USER_GRAPHS_PATHS_VERSION = "2026-02-19" //path pixel
+    private const val USER_GRAPHS_PATHS_VERSION = "2026-02-26" //path pixel
 
 
     private const val HTTP_PREFIX = "https://"

@@ -1,7 +1,10 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
+import android.app.Application
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLink
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinkGroup
@@ -9,12 +12,15 @@ import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNode
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPath
 import com.tjlabs.tjlabsresource_sdk_android.GraphResourceType
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
-import com.tjlabs.tjlabsresource_sdk_android.LinkData
-import com.tjlabs.tjlabsresource_sdk_android.NodeData
-import com.tjlabs.tjlabsresource_sdk_android.NodeLinkType
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.downloadCSVFile
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsNodeLinkManager.Companion
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.URL
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
@@ -27,6 +33,9 @@ internal interface GraphsDelegate {
 }
 
 internal class TJLabsGraphsManager {
+    private lateinit var application: Application
+    private lateinit var sharedPrefs : SharedPreferences
+
     companion object {
         val graphNodesDataMap: MutableMap<String, List<GraphLevelNode>> = mutableMapOf()
         val graphLinksDataMap: MutableMap<String, List<GraphLevelLink>> = mutableMapOf()
@@ -35,6 +44,11 @@ internal class TJLabsGraphsManager {
     }
 
     var delegate: GraphsDelegate? = null
+
+    fun init(application: Application, sharedPreferences: SharedPreferences) {
+        this.application = application
+        this.sharedPrefs = sharedPreferences
+    }
 
     fun loadGraphs(
         sectorId: Int,
@@ -244,14 +258,166 @@ internal class TJLabsGraphsManager {
                 completion(false)
                 return@getLevelPaths
             }
-            if (result != null) {
-                graphPathsDataMap[key] = result.paths
-                delegate?.onGraphPathsData(key, result.paths)
-                completion(true)
-            } else {
+            if (result == null) {
                 delegate?.onGraphError(key, GraphResourceType.PATHS)
+                completion(false)
+                return@getLevelPaths
+            }
+
+            val pathsUrl = result.csv
+            val cachedUrl = loadGraphPathsServerUrlFromCache(key)
+
+            if (!cachedUrl.isNullOrEmpty() && cachedUrl == pathsUrl) {
+                val cached = loadGraphPathsFileFromCache(key)
+                if (cached != null) {
+                    graphPathsDataMap[key] = cached
+                    delegate?.onGraphPathsData(key, cached)
+                    completion(true)
+                    return@getLevelPaths
+                }
+            }
+
+            val sectorId = key.substringBefore("_").toIntOrNull() ?: 0
+            updateGraphPaths(key, sectorId, pathsUrl) { success ->
+                completion(success)
+            }
+        }
+    }
+
+    private fun updateGraphPaths(
+        key: String,
+        sectorId: Int,
+        graphPathsUrlFromServer: String,
+        completion: (Boolean) -> Unit
+    ) {
+        val parsedUrl = try {
+            URL(graphPathsUrlFromServer)
+        } catch (e: Exception) {
+            delegate?.onGraphError(key, GraphResourceType.PATHS)
+            completion(false)
+            return
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val (file, dir, _) = downloadCSVFile(
+                    application,
+                    parsedUrl,
+                    sectorId,
+                    "${key}_paths.csv"
+                )
+
+                if (file != null) {
+                    val fileText = file.readText()
+                    val paths = parseGraphPathsCsv(fileText)
+
+                    graphPathsDataMap[key] = paths
+                    saveGraphPathsCacheDirToCache(key, dir)
+                    saveGraphPathsUrlToCache(key, graphPathsUrlFromServer)
+
+                    withContext(Dispatchers.Main) {
+                        delegate?.onGraphPathsData(key, paths)
+                    }
+                    completion(true)
+                } else {
+                    withContext(Dispatchers.Main) {
+                        delegate?.onGraphError(key, GraphResourceType.PATHS)
+                    }
+                    completion(false)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    delegate?.onGraphError(key, GraphResourceType.PATHS)
+                }
                 completion(false)
             }
         }
+    }
+
+    private fun loadGraphPathsServerUrlFromCache(key: String): String? {
+        val cacheKey = "TJLabsGraphPathsURL_$key"
+        return sharedPrefs.getString(cacheKey, null)
+    }
+
+    private fun saveGraphPathsUrlToCache(key: String, graphPathsUrlFromServer: String) {
+        val cacheKey = "TJLabsGraphPathsURL_$key"
+        sharedPrefs.edit().putString(cacheKey, graphPathsUrlFromServer).apply()
+        TJLogger.d("Info: save $key GraphPaths URL $graphPathsUrlFromServer")
+    }
+
+    private fun loadGraphPathsCacheDirFromCache(key: String): String? {
+        val cacheKey = "TJLabsGraphPathsDir_$key"
+        return sharedPrefs.getString(cacheKey, null)
+    }
+
+    private fun saveGraphPathsCacheDirToCache(key: String, graphPathsDir: String) {
+        val cacheKey = "TJLabsGraphPathsDir_$key"
+        sharedPrefs.edit().putString(cacheKey, graphPathsDir).apply()
+        TJLogger.d("Info: save $key GraphPaths Dir $graphPathsDir")
+    }
+
+    private fun loadGraphPathsFileFromCache(key: String): List<GraphLevelPath>? {
+        val loadedLocalDir = loadGraphPathsCacheDirFromCache(key)
+        if (!loadedLocalDir.isNullOrEmpty()) {
+            val file = File(loadedLocalDir)
+            if (file.exists()) {
+                val text = file.readText()
+                return parseGraphPathsCsv(text)
+            }
+        }
+        return null
+    }
+
+    private fun parseGraphPathsCsv(data: String): List<GraphLevelPath> {
+        val result = mutableListOf<GraphLevelPath>()
+        val lines = data.lines()
+        val bracketRegex = Regex("\\[[^\\]]*\\]")
+
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            if (line.isEmpty()) continue
+            if (line.contains("encoding=")) continue
+
+            val match = bracketRegex.find(line)
+            val headings = if (match != null) {
+                match.value
+                    .removePrefix("[")
+                    .removeSuffix("]")
+                    .split(",")
+                    .mapNotNull { it.trim().toDoubleOrNull()?.toInt() }
+            } else {
+                emptyList()
+            }
+
+            val cleaned = if (match != null) line.replace(match.value, "") else line
+            val parts = cleaned.split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+
+            if (parts.size < 3) {
+                TJLogger.d("Invalid graph path line: $line")
+                continue
+            }
+
+            val xVal = parts[0].toFloatOrNull()
+            val yVal = parts[1].toFloatOrNull()
+            val velocityVal = parts[2].toFloatOrNull()
+
+            if (xVal == null || yVal == null || velocityVal == null) {
+                TJLogger.d("Parse error: $line")
+                continue
+            }
+
+            result.add(
+                GraphLevelPath(
+                    x = xVal,
+                    y = yVal,
+                    available_headings = headings,
+                    velocity_scale = velocityVal
+                )
+            )
+        }
+
+        return result
     }
 }
