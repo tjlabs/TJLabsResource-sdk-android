@@ -268,6 +268,7 @@ data class UnitData(
 @Serializable(with = CategorySerializer::class)
 enum class Category {
     PARKING_SPACE,
+    ENTRANCE_EXIT,
     UNKNOWN
 }
 
