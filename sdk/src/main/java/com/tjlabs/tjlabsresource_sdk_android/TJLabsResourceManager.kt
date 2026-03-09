@@ -31,9 +31,7 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsGraphsManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLandmarkManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsLevelsManager
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsNodeLinkManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsParamManager
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsPathPixelManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsScaleOffsetManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSectorManager
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsSpotsManager
@@ -65,7 +63,6 @@ class TJLabsResourceManager :
     private val buildingLevelManager = TJLabsBuildingsManager()
     private val levelsManager = TJLabsLevelsManager()
     private val scaleOffsetManager = TJLabsScaleOffsetManager()
-    private val pathPixelManager = TJLabsPathPixelManager()
     private val geofenceManager = TJLabsGeofenceManager()
     private val entranceManager = TJLabsEntranceManager()
     private val paramManager = TJLabsParamManager()
@@ -73,7 +70,6 @@ class TJLabsResourceManager :
     private val unitManager = TJLabsLevelUnitsManager()
     private val affineManager = TJLabsAffineManager()
     private val landmarkManager = TJLabsLandmarkManager()
-    private val nodeLinkManager = TJLabsNodeLinkManager()
     private val spotsManager = TJLabsSpotsManager()
     private val graphsManager = TJLabsGraphsManager()
 
@@ -84,7 +80,8 @@ class TJLabsResourceManager :
         buildingLevelManager.delegate = this
         levelsManager.delegate = this
         scaleOffsetManager.delegate = this
-        pathPixelManager.delegate = this
+        graphsManager.nodeLinkDelegate = this
+        graphsManager.pathPixelDelegate = this
         geofenceManager.delegate = this
         entranceManager.delegate = this
         paramManager.delegate = this
@@ -92,7 +89,6 @@ class TJLabsResourceManager :
         unitManager.delegate = this
         affineManager.delegate = this
         landmarkManager.delegate = this
-        nodeLinkManager.delegate = this
         spotsManager.delegate = this
         graphsManager.delegate = this
     }
@@ -137,7 +133,7 @@ class TJLabsResourceManager :
             // PathPixel / Image / Unit
 
             // 1. PathPixel
-            tasks += { latch -> pathPixelManager.loadPathPixel(
+            tasks += { latch -> graphsManager.loadPathPixel(
                 region,
                 sectorId,
                 sectorData.buildings
@@ -244,7 +240,7 @@ class TJLabsResourceManager :
 
             // 2. PathPixel
             tasks += { latch ->
-                pathPixelManager.loadPathPixel(
+                graphsManager.loadPathPixel(
                     region,
                     sectorId,
                     sectorData.buildings
@@ -257,7 +253,7 @@ class TJLabsResourceManager :
 
             // 3. NodeLink
             tasks += { latch ->
-                nodeLinkManager.loadNodeLinks(
+                graphsManager.loadNodeLinks(
                     sectorId,
                     sectorData.buildings
                 ) { isSuccess ->
@@ -388,14 +384,12 @@ class TJLabsResourceManager :
 
         //cached 에 접근하기 위한
         graphsManager.init(application, sharedPrefs)
-        pathPixelManager.init(application, sharedPrefs)
         entranceManager.init(application, sharedPrefs)
     }
 
     private fun setRegion(region : String) {
         TJLabsResourceNetworkConstants.setServerURL(region)
         TJLabsFileDownloader.region = region
-        pathPixelManager.setRegion(region)
         entranceManager.setRegion(region)
     }
 
@@ -430,7 +424,7 @@ class TJLabsResourceManager :
     }
 
     fun getPathPixelData(): Map<String, PathPixelData> {
-        return TJLabsPathPixelManager.ppDataMap
+        return TJLabsGraphsManager.pathPixelDataMap
     }
 
     fun getUnitData(): Map<String, List<UnitData>> {
@@ -482,7 +476,7 @@ class TJLabsResourceManager :
     fun updatePathPixelData(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
         val levelId = getMatchedLevelId(key)
         if (levelId != null) {
-            pathPixelManager.updateLevelPathPixel(key, sectorId, levelId){
+            graphsManager.updateLevelPathPixel(key, sectorId, levelId){
                     isSuccess -> completion(isSuccess)
             }
         } else {
@@ -677,22 +671,22 @@ class TJLabsResourceManager :
     }
 
     override fun onGraphNodesData(key: String, data: List<GraphLevelNode>) {
-        delegate?.onGraphNodesData(key, data)
+        // intentionally no-op (graphs are internal)
     }
 
     override fun onGraphLinksData(key: String, data: List<GraphLevelLink>) {
-        delegate?.onGraphLinksData(key, data)
+        // intentionally no-op (graphs are internal)
     }
 
     override fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>) {
-        delegate?.onGraphLinkGroupsData(key, data)
+        // intentionally no-op (graphs are internal)
     }
 
     override fun onGraphPathsData(key: String, data: List<GraphLevelPath>) {
-        delegate?.onGraphPathsData(key, data)
+        // intentionally no-op (graphs are internal)
     }
 
     override fun onGraphError(key: String, type: GraphResourceType) {
-        delegate?.onGraphError(key, type)
+        // intentionally no-op (graphs are internal)
     }
 }
