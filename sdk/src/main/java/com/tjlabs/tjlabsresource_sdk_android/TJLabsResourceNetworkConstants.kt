@@ -57,6 +57,7 @@ internal object TJLabsResourceNetworkConstants {
     private const val USER_GRAPHS_LINKS_VERSION = "2026-02-19"
     private const val USER_GRAPHS_LINK_GROUPS_VERSION = "2026-02-19"
     private const val USER_GRAPHS_PATHS_VERSION = "2026-02-26" //path pixel
+    private const val USER_LANDMARK_SERVER_VERSION = "2026-03-06"
 
 
     private const val HTTP_PREFIX = "https://"
@@ -151,6 +152,10 @@ internal object TJLabsResourceNetworkConstants {
 
     fun getUserGraphsPathsServerVersion() : String {
         return USER_GRAPHS_PATHS_VERSION
+    }
+
+    fun getUserLandmarkServerVersion() : String {
+        return USER_LANDMARK_SERVER_VERSION
     }
 
     class HeaderInterceptor (private val token: String) : Interceptor {

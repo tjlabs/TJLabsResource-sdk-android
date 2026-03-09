@@ -1,14 +1,15 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
+import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksGroupsOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNodesOutput
-import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPath
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPathsOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
+import com.tjlabs.tjlabsresource_sdk_android.LevelLandmarkOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelParameterOutput
 import com.tjlabs.tjlabsresource_sdk_android.LevelUnitsInput
 import com.tjlabs.tjlabsresource_sdk_android.LevelWardsOutput
@@ -316,6 +317,39 @@ internal object TJLabsResourceNetworkManager {
                     completion(statusCode, "(TJLabsResource) Success : getLevelPaths", resultData)
                 } else {
                     completion(statusCode, "(TJLabsResource) Error : getLevelPaths // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelLandmarks(
+        url: String,
+        input: LevelIdOsInput,
+        serverVersion: String,
+        completion: (Int, String, LevelLandmarkOutput?) -> Unit
+    ) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelLandmarks = retrofit.create(PostInput::class.java)
+        Log.d("CheckLandmark", "getLevelLandmarks : $getLevelLandmarks")
+
+        getLevelLandmarks.getLevelLandmarks(serverVersion, input.level_id).enqueue(object :
+            Callback<LevelLandmarkOutput> {
+            override fun onFailure(call: Call<LevelLandmarkOutput>, t: Throwable) {
+                Log.d("CheckLandmark", "onFailure : $input")
+
+                completion(500, "(TJLabsResource) Failure : getLevelLandmarks  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(
+                call: Call<LevelLandmarkOutput>,
+                response: Response<LevelLandmarkOutput>
+            ) {
+                val statusCode = response.code()
+                Log.d("CheckLandmark", "input : $input // response : ${response.body()} // call : ${call.request()}")
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelLandmarks", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelLandmarks // status code : $statusCode // input : $input", null)
                 }
             }
         })

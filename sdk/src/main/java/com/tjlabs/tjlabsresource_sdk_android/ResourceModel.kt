@@ -212,6 +212,33 @@ data class PeakData (
     val matched_links : List<Int>
 )
 
+// MARK: - Landmark API
+data class LevelLandmarkWard(
+    val id: Int,
+    val name: String
+)
+
+data class LevelLandmarkLink(
+    val id: Int,
+    val number: Int
+)
+
+data class LevelLandmarkOutput(
+    val rf_landmarks : List<LevelLandmark>
+)
+
+
+data class LevelLandmark(
+    val id: Int,
+    val dead_reckoning: String,
+    val operating_system: String,
+    val ward: LevelLandmarkWard,
+    val x: Int,
+    val y: Int,
+    val rssi: Float,
+    val links: List<LevelLandmarkLink>
+)
+
 enum class SpotType {
     BUILDING_LEVEL_TAG, NONE
 }
@@ -396,10 +423,5 @@ interface TJLabsResourceManagerDelegate {
     fun onLandmarkData(key : String, data : Map<String, LandmarkData>)
     fun onSpotsData(key: Int, type: SpotType, data: Any)
     fun onNodeLinkData(key: String, type: NodeLinkType, data: Any)
-    fun onGraphNodesData(key: String, data: List<GraphLevelNode>)
-    fun onGraphLinksData(key: String, data: List<GraphLevelLink>)
-    fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>)
-    fun onGraphPathsData(key: String, data: List<GraphLevelPath>)
-    fun onGraphError(key: String, type: GraphResourceType)
     fun onError(error: ResourceError, key: String)
 }

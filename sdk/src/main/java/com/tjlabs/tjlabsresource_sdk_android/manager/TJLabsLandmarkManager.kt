@@ -1,17 +1,16 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelIdOsInput
+import com.tjlabs.tjlabsresource_sdk_android.LevelLandmarkOutput
 import com.tjlabs.tjlabsresource_sdk_android.LandmarkData
-import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelLandmark
+import com.tjlabs.tjlabsresource_sdk_android.PeakData
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
-import java.net.URL
-import java.util.ResourceBundle
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -33,14 +32,15 @@ internal class TJLabsLandmarkManager {
     var delegate: LandmarkDelegate? = null
 
     fun loadLandmarks(
-        context: Context,
         sectorId: Int,
         buildingsData: List<BuildingOutput>,
         completion: (Boolean) -> Unit
     ) {
         val latch = CountDownLatch(
             buildingsData.sumOf { building ->
-                building.levels.count { !it.name.contains("_D") }
+                building.levels.count { level ->
+                    !level.name.contains("_D") && !level.name.contains("B0")
+                }
             }
         )
 
@@ -56,12 +56,15 @@ internal class TJLabsLandmarkManager {
 
         for (building in buildingsData) {
             for (level in building.levels) {
-                if (level.name.contains("_D")) continue
+                if (level.name.contains("_D") || level.name.contains("B0")) continue
 
                 val blKey = "${sectorId}_${building.name}_${level.name}"
+                Log.d("CheckLandmark", "blKey : $blKey")
 
                 // Cache hit
                 val cached = landmarksDataMap[blKey]
+                Log.d("CheckLandmark", "cached : $cached")
+
                 if (!cached.isNullOrEmpty()) {
                     delegate?.onLandmarkData(blKey, cached)
                     latch.countDown()
@@ -71,42 +74,24 @@ internal class TJLabsLandmarkManager {
                 hasAsyncWork = true
 
                 Executors.newSingleThreadExecutor().execute {
-                    Log.d("CheckLandmark", "▶ executor start: $blKey")
-                    val resourceName = "${blKey}_landmark"
-                    fun resolveAssetPath(): String? {
-                        val pathWithDir = "$resourceName.json"
-                        val pathWithoutDir = "$resourceName.json"
-                        Log.d("CheckLandmark", "pathWithDir : $pathWithDir // pathWithoutDir : $pathWithoutDir")
-
-                        return try {
-                            context.assets.open(pathWithDir).close()
-                            pathWithDir
-                        } catch (_: Exception) {
-                            try {
-                                context.assets.open(pathWithoutDir).close()
-                                pathWithoutDir
-                            } catch (_: Exception) {
-                                null
-                            }
-                        }
-                    }
-
-                    val assetPath = resolveAssetPath()
-                    Log.d("CheckLandmark", "assetPath : $assetPath")
-
-                    //데이터 없으면 스킵
-                    if (assetPath == null) {
-                        Log.d("CheckLandmark", "No landmark asset for $blKey (skip)")
-                        latch.countDown()
-                        return@execute
-                    }
-                    processLandmarkFile(context, assetPath, blKey) { success, dict ->
+                    val input = LevelIdOsInput(level_id = level.id)
+                    TJLabsResourceNetworkManager.getLevelLandmarks(
+                        TJLabsResourceNetworkConstants.getUserBaseURL(),
+                        input,
+                        TJLabsResourceNetworkConstants.getUserLandmarkServerVersion()
+                    ) { status, msg, result ->
                         mainHandler.post {
-                            if (success && dict != null) {
-                                // Cache
-                                landmarksDataMap[blKey] = dict
+                            if (status !in 200 until 300 || result == null) {
+                                TJLogger.d(msg)
+                                delegate?.onLandmarkError(blKey)
+                                updateSuccess(false)
+                                latch.countDown()
+                                return@post
+                            }
 
-                                // Notify
+                            val dict = buildLandmarkDict(result.rf_landmarks)
+                            if (dict.isNotEmpty()) {
+                                landmarksDataMap[blKey] = dict
                                 delegate?.onLandmarkData(blKey, dict)
                                 updateSuccess(true)
                             } else {
@@ -135,70 +120,32 @@ internal class TJLabsLandmarkManager {
     }
 
 
-    private fun loadAssetJson(
-        context: Context,
-        assetPath: String
-    ): String? {
-        return try {
-            context.assets.open(assetPath)
-                .bufferedReader(Charsets.UTF_8)
-                .use { it.readText() }
-        } catch (e: Exception) {
-            Log.d("CheckLandmark", "asset read error: $assetPath / ${e.message}")
-            null
-        }
-    }
+    private fun buildLandmarkDict(items: List<LevelLandmark>): Map<String, LandmarkData> {
+        val result = mutableMapOf<String, LandmarkData>()
 
+        for (item in items) {
+            val wardKey = item.ward.id.toString()
+            val matchedLinks = item.links.map { it.number }
+            val peak = PeakData(
+                x = item.x,
+                y = item.y,
+                rssi = item.rssi.toFloat(),
+                matched_links = matchedLinks
+            )
 
-    private fun processLandmarkFile(
-        context: Context,
-        assetPath: String,
-        key: String,
-        completion: (Boolean, Map<String, LandmarkData>?) -> Unit
-    ) {
-        Log.d("CheckLandmark", "▶ processLandmarkFile start: $assetPath")
-        try {
-            val jsonString = loadAssetJson(context, assetPath)
-                ?: run {
-                    completion(false, null)
-                    return
-                }
-
-            val dict = decodeLandmarkDict(jsonString)
-            if (dict == null) {
-                completion(false, null)
-                return
+            val existing = result[wardKey]
+            if (existing == null) {
+                result[wardKey] = LandmarkData(
+                    ward_id = wardKey,
+                    peaks = listOf(peak)
+                )
+            } else {
+                result[wardKey] = existing.copy(
+                    peaks = existing.peaks + peak
+                )
             }
-
-            Log.d("CheckLandmark", "▶ processLandmarkFile dict: $dict")
-
-            completion(true, dict)
-        } catch (e: Exception) {
-            Log.d("CheckLandmark", "aFile read error for key=$key: \${e.message")
-            completion(false, null)
-        }
-    }
-
-
-    private fun decodeLandmarkDict(jsonString: String): Map<String, LandmarkData>? {
-        val gson = Gson()
-
-        // 1) 배열 형태 시도
-        try {
-            val listType = object : TypeToken<List<LandmarkData>>() {}.type
-            val arr: List<LandmarkData> = gson.fromJson(jsonString, listType)
-            return arr.associateBy { it.ward_id }
-        } catch (_: Exception) {
         }
 
-        // 2) Wrapper 형태 시도
-        return try {
-            data class Wrapper(val landmarks: List<LandmarkData>)
-            val wrapper = gson.fromJson(jsonString, Wrapper::class.java)
-            wrapper.landmarks.associateBy { it.ward_id }
-        } catch (e: Exception) {
-            TJLogger.d("[decodeLandmarkDict] Landmark decoding failed: ${e.localizedMessage}")
-            null
-        }
+        return result
     }
 }

@@ -345,7 +345,6 @@ class TJLabsResourceManager :
             // Landmark
             tasks += { latch ->
                 landmarkManager.loadLandmarks(
-                    application.applicationContext,
                     sectorId,
                     sectorData.buildings
                 ) { isSuccess ->

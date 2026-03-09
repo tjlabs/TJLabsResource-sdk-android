@@ -102,6 +102,13 @@ internal interface PostInput {
         @Query("operating_system") os : String = "Android"
     ): Call<GraphLevelPathsOutput>
 
+    @GET("/{user_landmark_server_version}/levels/{pk}/maps/rf-landmarks")
+    fun getLevelLandmarks(
+        @Path("user_landmark_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+        @Query("dead_reckoning") dr : String = "DR",
+        @Query("operating_system") os : String = "Android"
+    ): Call<LevelLandmarkOutput>
 
 
 
