@@ -320,16 +320,15 @@ class TJLabsResourceManager :
             }
 
             // 9. Spots
-            tasks += { latch ->
-                spotsManager.loadSpots(
-                    application.applicationContext,
-                    sectorId
-                ) { isSuccess ->
-                    TJLogger.d("loadSpots : $isSuccess")
-
-                    finishOne(isSuccess, latch)
-                }
-            }
+            //tasks += { latch ->
+            //    spotsManager.loadSpots(
+            //        application.applicationContext,
+            //        sectorId
+            //    ) { isSuccess ->
+            //        TJLogger.d("loadSpots : $isSuccess")
+            //        finishOne(isSuccess, latch)
+            //    }
+            //}
 
             // 10. Graphs
             tasks += { latch ->
