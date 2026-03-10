@@ -925,7 +925,7 @@ internal class TJLabsGraphsManager {
 
             val xVal = parts[0].toFloatOrNull()
             val yVal = parts[1].toFloatOrNull()
-            val velocityVal = parts[2].toFloatOrNull()
+            val velocityVal = parts[3].toFloatOrNull()
 
             if (xVal == null || yVal == null || velocityVal == null) {
                 TJLogger.d("Parse error: $line")
