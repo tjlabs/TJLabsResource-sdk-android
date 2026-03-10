@@ -213,26 +213,26 @@ data class PeakData (
 )
 
 // MARK: - Landmark API
-data class LevelLandmarkWard(
-    val id: Int,
-    val name: String
-)
-
 data class LevelLandmarkLink(
     val id: Int,
     val number: Int
 )
 
 data class LevelLandmarkOutput(
-    val rf_landmarks : List<LevelLandmark>
+    val dead_reckoning: String,
+    val operating_system: String,
+    val wards : List<LevelLandmark>
 )
 
 
 data class LevelLandmark(
     val id: Int,
-    val dead_reckoning: String,
-    val operating_system: String,
-    val ward: LevelLandmarkWard,
+    val name : String,
+    val rf_landmarks : List<LandmarkInfo>
+)
+
+data class LandmarkInfo(
+    val id : Int,
     val x: Int,
     val y: Int,
     val rssi: Float,

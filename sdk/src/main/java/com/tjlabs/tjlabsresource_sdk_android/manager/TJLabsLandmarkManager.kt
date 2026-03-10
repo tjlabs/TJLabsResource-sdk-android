@@ -89,7 +89,7 @@ internal class TJLabsLandmarkManager {
                                 return@post
                             }
 
-                            val dict = buildLandmarkDict(result.rf_landmarks)
+                            val dict = buildLandmarkDict(result.wards)
                             if (dict.isNotEmpty()) {
                                 landmarksDataMap[blKey] = dict
                                 delegate?.onLandmarkData(blKey, dict)
@@ -123,26 +123,28 @@ internal class TJLabsLandmarkManager {
     private fun buildLandmarkDict(items: List<LevelLandmark>): Map<String, LandmarkData> {
         val result = mutableMapOf<String, LandmarkData>()
 
-        for (item in items) {
-            val wardKey = item.ward.id.toString()
-            val matchedLinks = item.links.map { it.number }
-            val peak = PeakData(
-                x = item.x,
-                y = item.y,
-                rssi = item.rssi.toFloat(),
-                matched_links = matchedLinks
-            )
+        for (ward in items) {
+            val wardKey = ward.name
+            for (info in ward.rf_landmarks) {
+                val matchedLinks = info.links.map { it.number }
+                val peak = PeakData(
+                    x = info.x,
+                    y = info.y,
+                    rssi = info.rssi,
+                    matched_links = matchedLinks
+                )
 
-            val existing = result[wardKey]
-            if (existing == null) {
-                result[wardKey] = LandmarkData(
-                    ward_id = wardKey,
-                    peaks = listOf(peak)
-                )
-            } else {
-                result[wardKey] = existing.copy(
-                    peaks = existing.peaks + peak
-                )
+                val existing = result[wardKey]
+                if (existing == null) {
+                    result[wardKey] = LandmarkData(
+                        ward_id = wardKey,
+                        peaks = listOf(peak)
+                    )
+                } else {
+                    result[wardKey] = existing.copy(
+                        peaks = existing.peaks + peak
+                    )
+                }
             }
         }
 
