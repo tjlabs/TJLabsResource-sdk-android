@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLink
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinkFeature
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinkGroup
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNode
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelPath
@@ -33,6 +34,7 @@ internal interface GraphsDelegate {
     fun onGraphNodesData(key: String, data: List<GraphLevelNode>)
     fun onGraphLinksData(key: String, data: List<GraphLevelLink>)
     fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>)
+    fun onGraphLinkFeatureData(key: String, data: List<GraphLevelLinkFeature>)
     fun onGraphPathsData(key: String, data: List<GraphLevelPath>)
     fun onGraphError(key: String, type: GraphResourceType)
 }
@@ -45,6 +47,8 @@ internal class TJLabsGraphsManager {
         val graphNodesDataMap: MutableMap<String, List<GraphLevelNode>> = mutableMapOf()
         val graphLinksDataMap: MutableMap<String, List<GraphLevelLink>> = mutableMapOf()
         val graphLinkGroupsDataMap: MutableMap<String, List<GraphLevelLinkGroup>> = mutableMapOf()
+        val graphLinkFeaturesDataMap: MutableMap<String, List<GraphLevelLinkFeature>> = mutableMapOf()
+
         val graphPathsDataMap: MutableMap<String, List<GraphLevelPath>> = mutableMapOf()
         val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
         val linkDataMap: MutableMap<String, Map<Int, LinkData>> = mutableMapOf()
@@ -409,6 +413,35 @@ internal class TJLabsGraphsManager {
             }
         }
     }
+
+    fun updateLevelLinkFeatures(
+        key: String,
+        levelId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        val input = LevelIdOsInput(level_id = levelId)
+        TJLabsResourceNetworkManager.getLevelLinkFeatures(
+            TJLabsResourceNetworkConstants.getUserBaseURL(),
+            input,
+            TJLabsResourceNetworkConstants.getUserGraphsLinkFeaturesServerVersion()
+        ) { status, msg, result ->
+            if (status != 200) {
+                TJLogger.d(msg)
+                delegate?.onGraphError(key, GraphResourceType.LINK_GROUPS)
+                completion(false)
+                return@getLevelLinkFeatures
+            }
+            if (result != null) {
+                graphLinkFeaturesDataMap[key] = result.link_features
+                delegate?.onGraphLinkFeatureData(key, result.link_features)
+                completion(true)
+            } else {
+                delegate?.onGraphError(key, GraphResourceType.LINK_GROUPS)
+                completion(false)
+            }
+        }
+    }
+
 
     fun updateLevelPaths(
         key: String,

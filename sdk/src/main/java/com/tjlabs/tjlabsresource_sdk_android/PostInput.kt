@@ -95,6 +95,13 @@ internal interface PostInput {
         @Path("pk") pk : Int,
     ): Call<GraphLevelLinksGroupsOutput>
 
+    @GET("/{user_graph_link_features_server_version}/levels/{pk}/graphs/links/features")
+    fun getLevelLinkFeatures(
+        @Path("user_graph_link_features_server_version") serverVersion: String,
+        @Path("pk") pk : Int,
+    ): Call<GraphLevelLinkFeaturesOutput>
+
+
     @GET("/{user_graph_path_server_version}/levels/{pk}/graphs/paths")
     fun getLevelPaths(
         @Path("user_graph_path_server_version") serverVersion: String,

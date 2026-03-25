@@ -101,12 +101,14 @@ class TJLabsResourceManager :
     ) {
         init(application, region)
         setRegion(region)
-
+        TJLogger.d("loadMapResource")
         val mainHandler = Handler(Looper.getMainLooper())
 
         loadSector(sectorId = sectorId) { sectorData ->
             if (sectorData == null) {
                 delegate?.onSectorError(ResourceError.Sector)
+                TJLogger.d("onSectorError")
+
                 completion(false)
                 return@loadSector
             }
@@ -139,7 +141,7 @@ class TJLabsResourceManager :
                 sectorData.buildings
             ) { isSuccess ->
                 finishOne(isSuccess, latch)
-                Log.d("CheckMapResource","pathpixel : $isSuccess")
+                TJLogger.d("loadPathPixel : $isSuccess")
             }
             }
 
@@ -150,7 +152,7 @@ class TJLabsResourceManager :
                     sectorId,
                     sectorData.buildings
                 ) { isSuccess ->
-                    Log.d("CheckMapResource", "loadImage : $isSuccess")
+                    TJLogger.d("loadImage : $isSuccess")
 
                     finishOne(isSuccess, latch)
                 }
@@ -172,7 +174,7 @@ class TJLabsResourceManager :
                     sectorId,
                     sectorData.buildings
                 ) { isSuccess ->
-                    Log.d("CheckMapResource","loadUnit : $isSuccess")
+                    TJLogger.d("loadLevelUnits : $isSuccess")
                     finishOne(isSuccess, latch)
                 }
             }
@@ -678,6 +680,10 @@ class TJLabsResourceManager :
 
     override fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>) {
         // intentionally no-op (graphs are internal)
+    }
+
+    override fun onGraphLinkFeatureData(key: String, data: List<GraphLevelLinkFeature>) {
+
     }
 
     override fun onGraphPathsData(key: String, data: List<GraphLevelPath>) {

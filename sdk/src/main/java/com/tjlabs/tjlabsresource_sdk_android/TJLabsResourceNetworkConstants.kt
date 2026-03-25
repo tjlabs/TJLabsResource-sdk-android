@@ -56,6 +56,7 @@ internal object TJLabsResourceNetworkConstants {
     private const val USER_GRAPHS_NODES_VERSION = "2026-02-19"
     private const val USER_GRAPHS_LINKS_VERSION = "2026-02-19"
     private const val USER_GRAPHS_LINK_GROUPS_VERSION = "2026-02-19"
+    private const val USER_GRAPHS_LINK_FEATURES_VERSION = "2026-02-19"
     private const val USER_GRAPHS_PATHS_VERSION = "2026-02-26" //path pixel
     private const val USER_LANDMARK_SERVER_VERSION = "2026-03-06"
 
@@ -148,6 +149,10 @@ internal object TJLabsResourceNetworkConstants {
 
     fun getUserGraphsLinkGroupsServerVersion() : String {
         return USER_GRAPHS_LINK_GROUPS_VERSION
+    }
+
+    fun getUserGraphsLinkFeaturesServerVersion() : String {
+        return USER_GRAPHS_LINK_FEATURES_VERSION
     }
 
     fun getUserGraphsPathsServerVersion() : String {

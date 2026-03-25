@@ -362,6 +362,19 @@ data class GraphLevelLinkGroup (
     val links : List<ItemIdNumber>,
 )
 
+data class GraphLevelLinkFeaturesOutput (
+    val link_features : List<GraphLevelLinkFeature>
+)
+
+data class GraphLevelLinkFeature (
+    val id : Int,
+    val link_id : Int,
+    val operating_system: String,
+    val point_a : List<Int>,
+    val point_b : List<Int>,
+    val velocity_scale : Int
+)
+
 data class GraphLevelPathsOutput (
     val csv: String
 )

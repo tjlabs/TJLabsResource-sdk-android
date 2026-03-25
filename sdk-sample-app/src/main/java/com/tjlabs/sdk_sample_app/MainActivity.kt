@@ -42,8 +42,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         val tenantId = "tjlabs"
         val tenantPw = "TJlabs0407@"
-        val sectorId = 6
-
+        val sectorId = 20 // covensia : 20
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
         jupiterDetailText = findViewById(R.id.textJupiterDetail)
@@ -162,11 +161,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
-        TJLogger.d("onPathPixelData : $pathPixelKey // data : $data")
+        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.road}")
+        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadScale}")
+        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadHeading}")
+
         val source = pathPixelSourceHint[pathPixelKey] ?: "api"
         appendCallbackLog(
             "onPathPixelData",
-            "key=$pathPixelKey nodes=${data.nodeNumber.size} roadPts=${data.road.firstOrNull()?.size ?: 0}",
+            "key=$pathPixelKey nodes=${data.road.size} roadPts=${data.road.firstOrNull()?.size ?: 0}",
             source
         )
     }
@@ -217,7 +219,12 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onLevelUnitsData(unitKey: String, data: List<UnitData>?) {
-        TJLogger.d("onUnitData unitKey $unitKey // data : $data")
+        if (data != null) {
+            for (info in data) {
+                TJLogger.d("onUnitData unitKey $unitKey // data : $info")
+            }
+        }
+
         appendCallbackLog(
             "onLevelUnitsData",
             "key=$unitKey count=${data?.size ?: 0}",
@@ -236,7 +243,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onSpotsData(key: Int, type: SpotType, data: Any) {
-        TJLogger.d("onLandmarkData key $key //type : $type // data : $data")
+        TJLogger.d("onSpotsData key $key //type : $type // data : $data")
         appendCallbackLog(
             "onSpotsData",
             "key=$key type=$type count=${describeSize(data)}",
@@ -245,51 +252,11 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onNodeLinkData(key: String, type: NodeLinkType, data: Any) {
-        TJLogger.d("onLandmarkData key $key // type : $type // data : $data")
+        TJLogger.d("onNodeLinkData key $key // type : $type // data : $data")
         appendCallbackLog(
             "onNodeLinkData",
             "key=$key type=$type count=${describeSize(data)}",
             "asset"
-        )
-    }
-
-    override fun onGraphNodesData(key: String, data: List<GraphLevelNode>) {
-        appendCallbackLog(
-            "onGraphNodesData",
-            "key=$key count=${data.size}",
-            "api"
-        )
-    }
-
-    override fun onGraphLinksData(key: String, data: List<GraphLevelLink>) {
-        appendCallbackLog(
-            "onGraphLinksData",
-            "key=$key count=${data.size}",
-            "api"
-        )
-    }
-
-    override fun onGraphLinkGroupsData(key: String, data: List<GraphLevelLinkGroup>) {
-        appendCallbackLog(
-            "onGraphLinkGroupsData",
-            "key=$key count=${data.size}",
-            "api"
-        )
-    }
-
-    override fun onGraphPathsData(key: String, data: List<GraphLevelPath>) {
-        appendCallbackLog(
-            "onGraphPathsData",
-            "key=$key count=${data.size}",
-            "api"
-        )
-    }
-
-    override fun onGraphError(key: String, type: GraphResourceType) {
-        appendCallbackLog(
-            "onGraphError",
-            "key=$key type=$type",
-            "api"
         )
     }
 

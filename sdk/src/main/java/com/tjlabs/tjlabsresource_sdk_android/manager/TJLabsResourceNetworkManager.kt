@@ -4,6 +4,7 @@ import android.util.Log
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceOutput
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
+import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinkFeaturesOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksGroupsOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelLinksOutput
 import com.tjlabs.tjlabsresource_sdk_android.GraphLevelNodesOutput
@@ -297,6 +298,26 @@ internal object TJLabsResourceNetworkManager {
                     completion(statusCode, "(TJLabsResource) Success : getLevelLinkGroups", resultData)
                 } else {
                     completion(statusCode, "(TJLabsResource) Error : getLevelLinkGroups // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getLevelLinkFeatures(url: String, input: LevelIdOsInput, serverVersion: String, completion: (Int, String, GraphLevelLinkFeaturesOutput?) -> Unit) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getLevelLinkFeatures = retrofit.create(PostInput::class.java)
+        getLevelLinkFeatures.getLevelLinkFeatures(serverVersion, input.level_id).enqueue(object :
+            Callback<GraphLevelLinkFeaturesOutput> {
+            override fun onFailure(call: Call<GraphLevelLinkFeaturesOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getLevelLinkGroups  // status code : 500  // input : $input", null)
+            }
+            override fun onResponse(call: Call<GraphLevelLinkFeaturesOutput>, response: Response<GraphLevelLinkFeaturesOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getLevelLinkFeatures", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getLevelLinkFeatures // status code : $statusCode // input : $input", null)
                 }
             }
         })
