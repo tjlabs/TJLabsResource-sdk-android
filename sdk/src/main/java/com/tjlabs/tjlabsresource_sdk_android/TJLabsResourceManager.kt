@@ -378,6 +378,106 @@ class TJLabsResourceManager :
         }
     }
 
+    fun loadNaviResource(
+        application: Application,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        init(application, region)
+        setRegion(region)
+
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        loadSector(sectorId = sectorId) { sectorData ->
+            if (sectorData == null) {
+                delegate?.onSectorError(ResourceError.Sector)
+                completion(false)
+                return@loadSector
+            }
+
+            buildingLevelManager.setBuildings(sectorId, sectorData.buildings)
+
+            val lock = Any()
+            var isAllSuccess = true
+            val tasks = mutableListOf<(CountDownLatch) -> Unit>()
+
+            fun finishOne(success: Boolean, latch: CountDownLatch) {
+                if (!success) {
+                    synchronized(lock) {
+                        isAllSuccess = false
+                    }
+                }
+                latch.countDown()
+            }
+
+            // 1. PathPixel
+            tasks += { latch ->
+                graphsManager.loadPathPixel(
+                    region,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadPathPixel : $isSuccess")
+
+                    finishOne(isSuccess, latch)
+                }
+            }
+
+            // 3. NodeLink
+            tasks += { latch ->
+                graphsManager.loadNodeLinks(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadNodeLinks : $isSuccess")
+                    finishOne(isSuccess, latch)
+                }
+            }
+
+            // 5. Entrance
+            tasks += { latch ->
+                entranceManager.loadEntrance(
+                    region,
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadEntrance : $isSuccess")
+
+                    finishOne(isSuccess, latch)
+                }
+            }
+
+            // Landmark
+            tasks += { latch ->
+                landmarkManager.loadLandmarks(
+                    sectorId,
+                    sectorData.buildings
+                ) { isSuccess ->
+                    TJLogger.d("loadLandmarks : $isSuccess")
+                    finishOne(isSuccess, latch)
+                    synchronized(lock) {
+                        if (!isSuccess) isAllSuccess = false
+                    }
+                }
+            }
+
+            val latch = CountDownLatch(tasks.size)
+
+            // 실행
+            tasks.forEach { task ->
+                task(latch)
+            }
+
+            Thread {
+                latch.await()
+                mainHandler.post {
+                    completion(isAllSuccess)
+                }
+            }.start()
+        }
+    }
+
     private fun init(application: Application, region: String) {
         this.sharedPrefs = application.getSharedPreferences("TJLabsResourcesPref", Context.MODE_PRIVATE)
         setRegion(region)
