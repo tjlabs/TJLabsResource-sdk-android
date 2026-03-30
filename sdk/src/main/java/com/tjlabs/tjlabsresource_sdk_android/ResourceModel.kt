@@ -82,6 +82,69 @@ data class SectorOutput(
     val buildings: List<BuildingOutput>
 )
 
+// MARK: - Sector Bundle
+data class SectorBundleMetaOutput(
+    val url: String,
+    val version_id: String
+)
+
+data class SectorBundleOutput(
+    val id: Int,
+    val name: String,
+    val debug: Boolean,
+    val wgs84_transform: AffineTransParamOutput?,
+    val buildings: List<SectorBundleBuildingOutput>
+)
+
+data class SectorBundleBuildingOutput(
+    val id: Int,
+    val name: String,
+    val levels: List<SectorBundleLevelOutput>
+)
+
+data class SectorBundleLevelOutput(
+    val id: Int,
+    val name: String,
+    val operating_system: String?,
+    val map_image: SectorBundleMapImageOutput?,
+    val geofence: GeofenceData?,
+    val entrances: List<SectorBundleEntranceOutput>?,
+    val units: List<UnitData>?,
+    val graph: SectorBundleGraphOutput?,
+    val wards: List<LevelLandmark>?
+)
+
+data class SectorBundleMapImageOutput(
+    val url: String,
+    val image_width: Int?,
+    val image_height: Int?,
+    val scale_x: Float?,
+    val scale_y: Float?,
+    val offset_x: Float?,
+    val offset_y: Float?
+)
+
+data class SectorBundleEntranceOutput(
+    val id: Int,
+    val number: Int,
+    val scale: Float,
+    val url: String,
+    val innermost_ward: InnermostWard,
+    val outermost_ward: OutermostWard
+)
+
+data class SectorBundleGraphOutput(
+    val nodes: List<GraphLevelNode>?,
+    val links: List<GraphLevelLink>?,
+    val link_features: List<GraphLevelLinkFeature>?,
+    val link_groups: List<GraphLevelLinkGroup>?,
+    val path: SectorBundleGraphPathOutput?
+)
+
+data class SectorBundleGraphPathOutput(
+    val url: String
+)
+
 data class BuildingOutput(
     val id: Int,
     val name: String,

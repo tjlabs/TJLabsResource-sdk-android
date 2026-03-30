@@ -1,8 +1,11 @@
 package com.tjlabs.tjlabsresource_sdk_android.manager
 
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdInput
+import com.tjlabs.tjlabsresource_sdk_android.SectorBundleOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
+import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.LevelOutput
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
 
 internal interface SectorDelegate {
@@ -33,13 +36,44 @@ internal class TJLabsSectorManager {
 
         // 2) 네트워크 요청
         val input = SectorIdInput(sectorId)
+        TJLabsResourceNetworkManager.getSectorBundleMeta(
+            TJLabsResourceNetworkConstants.getUserBaseURL(),
+            input,
+            TJLabsResourceNetworkConstants.getUserSectorBundleVersion()
+        ) { bundleStatus, bundleMsg, bundleMeta ->
+            if (bundleStatus in 200 until 300 && bundleMeta != null) {
+                TJLabsResourceNetworkManager.getSectorBundleJson(
+                    TJLabsResourceNetworkConstants.getUserBaseURL(),
+                    bundleMeta.url
+                ) { jsonStatus, jsonMsg, bundleData ->
+                    if (jsonStatus in 200 until 300 && bundleData != null) {
+                        val sectorData = mapBundleToSectorOutput(bundleData)
+                        setSectorDataMap(sectorId, sectorData)
+                        completion(sectorData)
+                        delegate?.onSectorData(sectorData)
+                    } else {
+                        TJLogger.d(jsonMsg)
+                        loadLegacySector(input, sectorId, completion)
+                    }
+                }
+                return@getSectorBundleMeta
+            }
+
+            TJLogger.d(bundleMsg)
+            loadLegacySector(input, sectorId, completion)
+        }
+    }
+
+    private fun loadLegacySector(
+        input: SectorIdInput,
+        sectorId: Int,
+        completion: (SectorOutput?) -> Unit
+    ) {
         TJLabsResourceNetworkManager.getSector(
             TJLabsResourceNetworkConstants.getUserBaseURL(),
             input,
             TJLabsResourceNetworkConstants.getUserSectorVersion()
         ) { status, msg, result ->
-
-            // 실패 처리
             if (status != 200) {
                 TJLogger.d(msg)
                 delegate?.onSectorError()
@@ -54,9 +88,31 @@ internal class TJLabsSectorManager {
             } else {
                 delegate?.onSectorError()
                 completion(null)
-                return@getSector
             }
         }
+    }
+
+    private fun mapBundleToSectorOutput(bundle: SectorBundleOutput): SectorOutput {
+        val buildings = bundle.buildings.map { bundleBuilding ->
+            BuildingOutput(
+                id = bundleBuilding.id,
+                name = bundleBuilding.name,
+                levels = bundleBuilding.levels.map { bundleLevel ->
+                    LevelOutput(
+                        id = bundleLevel.id,
+                        name = bundleLevel.name,
+                        image = bundleLevel.map_image?.url ?: ""
+                    )
+                }
+            )
+        }
+
+        return SectorOutput(
+            id = bundle.id,
+            name = bundle.name,
+            debug = bundle.debug,
+            buildings = buildings
+        )
     }
 
     private fun setSectorDataMap(sectorId: Int, sectorData : SectorOutput) {

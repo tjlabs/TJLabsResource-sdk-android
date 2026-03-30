@@ -43,6 +43,7 @@ internal object TJLabsResourceNetworkConstants {
 
     // MARK: - VERSION
     private const val USER_SECTOR_SERVER_VERSION = "2025-03-26"
+    private const val USER_SECTOR_BUNDLE_SERVER_VERSION = "2026-03-30"
     private const val USER_PATH_PIXEL_SERVER_VERSION = "2025-03-27"
     private const val USER_SCALE_SERVER_VERSION = "2025-03-27"
     private const val USER_LEVEL_UNITS_SERVER_VERSION = "2026-01-27"
@@ -101,6 +102,10 @@ internal object TJLabsResourceNetworkConstants {
 
     fun getUserSectorVersion() : String {
         return USER_SECTOR_SERVER_VERSION
+    }
+
+    fun getUserSectorBundleVersion() : String {
+        return USER_SECTOR_BUNDLE_SERVER_VERSION
     }
 
     fun getUserPathPixelServerVersion() : String {

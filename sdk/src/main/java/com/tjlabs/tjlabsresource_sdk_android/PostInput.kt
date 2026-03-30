@@ -15,6 +15,17 @@ internal interface PostInput {
         @Path("pk") pk: Int
     ): Call<SectorOutput>
 
+    @GET("/{server_version}/sectors/{pk}/bundle")
+    fun getSectorBundle(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int
+    ): Call<SectorBundleMetaOutput>
+
+    @GET
+    fun getSectorBundleJson(
+        @Url url: String
+    ): Call<SectorBundleOutput>
+
     @GET("/{server_version}/levels/{pk}/entrances")
     fun getEntrance(
         @Path("server_version") serverVersion: String,

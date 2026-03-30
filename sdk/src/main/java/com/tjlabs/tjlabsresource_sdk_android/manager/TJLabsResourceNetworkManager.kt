@@ -18,6 +18,8 @@ import com.tjlabs.tjlabsresource_sdk_android.PathPixelOutput
 import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.ScaleOffsetOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdInput
+import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
+import com.tjlabs.tjlabsresource_sdk_android.SectorBundleOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorIdOsInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorParameterOutput
@@ -48,6 +50,56 @@ internal object TJLabsResourceNetworkManager {
         })
 
 
+    }
+
+    fun getSectorBundleMeta(
+        url: String,
+        input: SectorIdInput,
+        serverVersion: String,
+        completion: (Int, String, SectorBundleMetaOutput?) -> Unit
+    ) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(url)
+        val getSectorBundle = retrofit.create(PostInput::class.java)
+        getSectorBundle.getSectorBundle(serverVersion, input.sector_id).enqueue(object :
+            Callback<SectorBundleMetaOutput> {
+            override fun onFailure(call: Call<SectorBundleMetaOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getSectorBundleMeta // status code : 500 // input : $input", null)
+            }
+
+            override fun onResponse(call: Call<SectorBundleMetaOutput>, response: Response<SectorBundleMetaOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getSectorBundleMeta", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getSectorBundleMeta // status code : $statusCode // input : $input", null)
+                }
+            }
+        })
+    }
+
+    fun getSectorBundleJson(
+        baseUrl: String,
+        bundleUrl: String,
+        completion: (Int, String, SectorBundleOutput?) -> Unit
+    ) {
+        val retrofit = TJLabsResourceNetworkConstants.genRetrofit(baseUrl)
+        val getSectorBundle = retrofit.create(PostInput::class.java)
+        getSectorBundle.getSectorBundleJson(bundleUrl).enqueue(object : Callback<SectorBundleOutput> {
+            override fun onFailure(call: Call<SectorBundleOutput>, t: Throwable) {
+                completion(500, "(TJLabsResource) Failure : getSectorBundleJson // status code : 500 // url : $bundleUrl", null)
+            }
+
+            override fun onResponse(call: Call<SectorBundleOutput>, response: Response<SectorBundleOutput>) {
+                val statusCode = response.code()
+                if (statusCode in 200 until 300) {
+                    val resultData = response.body()
+                    completion(statusCode, "(TJLabsResource) Success : getSectorBundleJson", resultData)
+                } else {
+                    completion(statusCode, "(TJLabsResource) Error : getSectorBundleJson // status code : $statusCode // url : $bundleUrl", null)
+                }
+            }
+        })
     }
 
     fun getEntrance(url : String, input : LevelIdOsInput, serverVersion: String, completion: (Int, String, EntranceOutput?) -> Unit) {
