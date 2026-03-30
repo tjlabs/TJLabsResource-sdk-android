@@ -462,6 +462,11 @@ class TJLabsResourceManager :
                 }
             }
 
+            // AffineParam (성공/실패가 전체 결과에 영향 없음)
+            affineManager.loadAffineParam(sectorId) {
+                // intentionally ignored
+            }
+
             val latch = CountDownLatch(tasks.size)
 
             // 실행
