@@ -82,6 +82,69 @@ data class SectorOutput(
     val buildings: List<BuildingOutput>
 )
 
+// MARK: - Sector Bundle
+data class SectorBundleMetaOutput(
+    val url: String,
+    val version_id: String
+)
+
+data class SectorBundleOutput(
+    val id: Int,
+    val name: String,
+    val debug: Boolean,
+    val wgs84_transform: AffineTransParamOutput?,
+    val buildings: List<SectorBundleBuildingOutput>
+)
+
+data class SectorBundleBuildingOutput(
+    val id: Int,
+    val name: String,
+    val levels: List<SectorBundleLevelOutput>
+)
+
+data class SectorBundleLevelOutput(
+    val id: Int,
+    val name: String,
+    val operating_system: String?,
+    val map_image: SectorBundleMapImageOutput?,
+    val geofence: GeofenceData?,
+    val entrances: List<SectorBundleEntranceOutput>?,
+    val units: List<UnitData>?,
+    val graph: SectorBundleGraphOutput?,
+    val wards: List<LevelLandmark>?
+)
+
+data class SectorBundleMapImageOutput(
+    val url: String,
+    val image_width: Int?,
+    val image_height: Int?,
+    val scale_x: Float?,
+    val scale_y: Float?,
+    val offset_x: Float?,
+    val offset_y: Float?
+)
+
+data class SectorBundleEntranceOutput(
+    val id: Int,
+    val number: Int,
+    val scale: Float,
+    val url: String,
+    val innermost_ward: InnermostWard,
+    val outermost_ward: OutermostWard
+)
+
+data class SectorBundleGraphOutput(
+    val nodes: List<GraphLevelNode>?,
+    val links: List<GraphLevelLink>?,
+    val link_features: List<GraphLevelLinkFeature>?,
+    val link_groups: List<GraphLevelLinkGroup>?,
+    val path: SectorBundleGraphPathOutput?
+)
+
+data class SectorBundleGraphPathOutput(
+    val url: String
+)
+
 data class BuildingOutput(
     val id: Int,
     val name: String,
@@ -284,7 +347,7 @@ data class LevelUnitsOutput(
 
 data class UnitData(
     val id: Int,
-    val category: Category,
+    val category: CategoryData,
     val name: String,
     val is_restricted: Boolean,
     val x: Float,   // Swift Double → Kotlin Float
@@ -292,11 +355,34 @@ data class UnitData(
     val parking_space_code: String
 )
 
+
+data class CategoryData(
+    val id : Int,
+    val name : String,
+    val key : Category
+)
+
 @Serializable(with = CategorySerializer::class)
 enum class Category {
     PARKING_SPACE,
     ENTRANCE_EXIT,
-    UNKNOWN
+    UNKNOWN;
+
+    companion object {
+        fun fromRaw(raw: String?): Category {
+            val normalized = raw
+                ?.trim()
+                ?.replace("-", "_")
+                ?.replace(" ", "_")
+                ?.uppercase()
+                .orEmpty()
+            return when (normalized) {
+                "PARKING_SPACE", "PARKING" -> PARKING_SPACE
+                "ENTRANCE_EXIT", "ENTRANCE", "EXIT" -> ENTRANCE_EXIT
+                else -> UNKNOWN
+            }
+        }
+    }
 }
 
 object CategorySerializer : KSerializer<Category> {
@@ -309,7 +395,7 @@ object CategorySerializer : KSerializer<Category> {
         } catch (e: Exception) {
             ""
         }
-        return Category.values().find { it.name == raw } ?: Category.UNKNOWN
+        return Category.fromRaw(raw)
     }
 
     override fun serialize(encoder: Encoder, value: Category) {
@@ -415,8 +501,7 @@ enum class ResourceError {
 }
 
 // MARK: - Delegate (protocol → interface)
-// delegate 체인이 TJLabsBuildingsManager → TJLabsResourceManager → TJLabsResourceManagerDelegate 형태로 단일 경로
-// manager 를 따로 입력받을 필요 없음. manager 입력은 어디서 호출했는지 확인하기 위함임
+// delegate 체인은 TJLabsResourceManager → TJLabsResourceManagerDelegate 단일 경로
 
 interface TJLabsResourceManagerDelegate {
     fun onSectorData(data: SectorOutput)
