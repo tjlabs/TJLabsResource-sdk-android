@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.Category
+import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.EntranceData
 import com.tjlabs.tjlabsresource_sdk_android.EntranceRouteData
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
@@ -751,7 +752,7 @@ internal class TJLabsBundleDataManager {
             result.add(
                 UnitData(
                     id = obj.optInt("id"),
-                    category = parseCategory(obj.optString("category")),
+                    category = parseCategory(obj.opt("category")),
                     name = obj.optString("name"),
                     is_restricted = obj.optBoolean("is_restricted"),
                     x = obj.optFloatOrDefault("x"),
@@ -763,18 +764,45 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
-    private fun parseCategory(raw: String?): Category {
-        val normalized = raw
-            ?.trim()
-            ?.replace("-", "_")
-            ?.replace(" ", "_")
-            ?.uppercase()
-            .orEmpty()
-        return when (normalized) {
-            "PARKING_SPACE" -> Category.PARKING_SPACE
-            "ENTRANCE_EXIT" -> Category.ENTRANCE_EXIT
-            else -> Category.UNKNOWN
+    private fun parseCategory(raw: Any?): CategoryData {
+        var id = 0
+        var name = ""
+        var keyRaw = ""
+
+        when (raw) {
+            is JSONObject -> {
+                id = raw.optInt("id", 0)
+                name = raw.optString("name")
+                keyRaw = raw.optString("key")
+                if (keyRaw.isBlank()) keyRaw = raw.optString("category")
+                if (keyRaw.isBlank()) keyRaw = raw.optString("value")
+                if (keyRaw.isBlank()) keyRaw = raw.optString("code")
+                if (name.isBlank()) name = keyRaw
+            }
+            is String -> {
+                name = raw
+                keyRaw = raw
+            }
+            is Number -> {
+                name = raw.toString()
+                keyRaw = raw.toString()
+            }
+            else -> {
+                name = ""
+                keyRaw = ""
+            }
         }
+
+        val key = Category.fromRaw(if (keyRaw.isBlank()) name else keyRaw)
+        if (key == Category.UNKNOWN && (name.isNotBlank() || keyRaw.isNotBlank())) {
+            TJLogger.d("(TJLabsResource) unknown category // raw=$raw")
+        }
+
+        return CategoryData(
+            id = id,
+            name = name,
+            key = key
+        )
     }
 
     private fun parseWards(arr: JSONArray): List<String> {

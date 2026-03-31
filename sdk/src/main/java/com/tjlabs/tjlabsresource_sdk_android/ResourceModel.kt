@@ -347,7 +347,7 @@ data class LevelUnitsOutput(
 
 data class UnitData(
     val id: Int,
-    val category: Category,
+    val category: CategoryData,
     val name: String,
     val is_restricted: Boolean,
     val x: Float,   // Swift Double → Kotlin Float
@@ -355,11 +355,34 @@ data class UnitData(
     val parking_space_code: String
 )
 
+
+data class CategoryData(
+    val id : Int,
+    val name : String,
+    val key : Category
+)
+
 @Serializable(with = CategorySerializer::class)
 enum class Category {
     PARKING_SPACE,
     ENTRANCE_EXIT,
-    UNKNOWN
+    UNKNOWN;
+
+    companion object {
+        fun fromRaw(raw: String?): Category {
+            val normalized = raw
+                ?.trim()
+                ?.replace("-", "_")
+                ?.replace(" ", "_")
+                ?.uppercase()
+                .orEmpty()
+            return when (normalized) {
+                "PARKING_SPACE", "PARKING" -> PARKING_SPACE
+                "ENTRANCE_EXIT", "ENTRANCE", "EXIT" -> ENTRANCE_EXIT
+                else -> UNKNOWN
+            }
+        }
+    }
 }
 
 object CategorySerializer : KSerializer<Category> {
@@ -372,7 +395,7 @@ object CategorySerializer : KSerializer<Category> {
         } catch (e: Exception) {
             ""
         }
-        return Category.values().find { it.name == raw } ?: Category.UNKNOWN
+        return Category.fromRaw(raw)
     }
 
     override fun serialize(encoder: Encoder, value: Category) {
