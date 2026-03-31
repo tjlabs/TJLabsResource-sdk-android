@@ -3,6 +3,7 @@ package com.tjlabs.sdk_sample_app
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
@@ -12,9 +13,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.resource_sdk_sample_app.R
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsresource_sdk_android.*
-import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsImageCacheManager
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,6 +25,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     private lateinit var mapStatusText: TextView
     private lateinit var mapDetailText: TextView
     private lateinit var callbackContainer: LinearLayout
+    private lateinit var testBundleButton: Button
 
     private val pathPixelSourceHint = mutableMapOf<String, String>()
     private val imageSourceHint = mutableMapOf<String, String>()
@@ -42,13 +42,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
         val tenantId = "tjlabs"
         val tenantPw = "TJlabs0407@"
-        val sectorId = 20 // covensia : 20
+        val sectorId = 6 // covensia : 20
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
         jupiterDetailText = findViewById(R.id.textJupiterDetail)
         mapStatusText = findViewById(R.id.textMapStatus)
         mapDetailText = findViewById(R.id.textMapDetail)
         callbackContainer = findViewById(R.id.callbackContainer)
+        testBundleButton = findViewById(R.id.buttonTestBundle)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -74,31 +75,47 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
                 tjlabsResourceManager.delegate = this
                 tjlabsResourceManager.setDebugOption(true)
 
-                updateJupiterStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
-                updateMapStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
+                testBundleButton.setOnClickListener {
+                    runSectorBundleTest(tjlabsResourceManager, sectorId)
+                }
 
-                tjlabsResourceManager.loadJupiterResource(application, ResourceRegion.KOREA.value, sectorId) {
-                        isSuccess ->
-                    TJLogger.d("loadJupiterResource(jupiter): $isSuccess")
+                updateJupiterStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
+                updateMapStatus("Loading...", "Unified load • Sector $sectorId • ${nowText()}", null)
+
+                tjlabsResourceManager.loadResource(application, ResourceRegion.KOREA.value, sectorId) {
+                    isSuccess ->
+                    TJLogger.d("loadResource : $isSuccess")
                     val detail = "Sector $sectorId • ${nowText()}"
                     updateJupiterStatus(
                         if (isSuccess) "Success" else "Failed",
                         detail,
                         isSuccess
                     )
-                }
-
-                tjlabsResourceManager.loadMapResource(application, ResourceRegion.KOREA.value, sectorId) {
-                        isSuccess ->
-                    TJLogger.d("loadMapResource(map) : $isSuccess")
-                    val detail = "Sector $sectorId • ${nowText()}"
                     updateMapStatus(
                         if (isSuccess) "Success" else "Failed",
-                        detail,
+                        "Unified load • $detail",
                         isSuccess
                     )
                 }
             }
+        }
+    }
+
+    private fun runSectorBundleTest(manager: TJLabsResourceManager, sectorId: Int) {
+        appendCallbackLog("testLoadSectorBundle", "start sectorId=$sectorId", "api")
+        manager.testLoadSectorBundle(
+            application = application,
+            region = ResourceRegion.KOREA.value,
+            sectorId = sectorId
+        ) { isSuccess, message, versionId, bundleUrl, mappedSector ->
+            val detail = buildString {
+                append("success=$isSuccess")
+                append(" version=$versionId")
+                append(" buildings=${mappedSector?.buildings?.size ?: 0}")
+                append(" url=${bundleUrl ?: "null"}")
+                append(" msg=$message")
+            }
+            appendCallbackLog("testLoadSectorBundle", detail, "api")
         }
     }
 
@@ -272,24 +289,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
 
                 val key = "${data.id}_${building.name}_${level.name}"
                 imageUrlByKey[key] = level.image
-                val imageCached = TJLabsImageCacheManager.getInstance().getBitmap(level.image) != null
-                imageSourceHint[key] = if (imageCached) "cache(memory)" else "api"
-
-                val pathPixelCached = hasPathPixelDiskCache(key)
-                pathPixelSourceHint[key] = if (pathPixelCached) "cache(disk)" else "api"
+                imageSourceHint[key] = "bundle"
+                pathPixelSourceHint[key] = "bundle"
             }
         }
-    }
-
-    private fun hasPathPixelDiskCache(key: String): Boolean {
-        val prefs = getSharedPreferences("TJLabsResourcesPref", MODE_PRIVATE)
-        val urlKey = "TJLabsPathPixelURL_$key"
-        val dirKey = "TJLabsPathPixelDir_$key"
-        val cachedUrl = prefs.getString(urlKey, null)
-        val cachedDir = prefs.getString(dirKey, null)
-        if (cachedUrl.isNullOrEmpty() || cachedDir.isNullOrEmpty()) return false
-        val file = File(cachedDir)
-        return file.exists() && file.length() > 0
     }
 
     private fun describeSize(data: Any): String {

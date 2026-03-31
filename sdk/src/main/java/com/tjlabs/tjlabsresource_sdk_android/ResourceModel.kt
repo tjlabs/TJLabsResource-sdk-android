@@ -478,8 +478,7 @@ enum class ResourceError {
 }
 
 // MARK: - Delegate (protocol → interface)
-// delegate 체인이 TJLabsBuildingsManager → TJLabsResourceManager → TJLabsResourceManagerDelegate 형태로 단일 경로
-// manager 를 따로 입력받을 필요 없음. manager 입력은 어디서 호출했는지 확인하기 위함임
+// delegate 체인은 TJLabsResourceManager → TJLabsResourceManagerDelegate 단일 경로
 
 interface TJLabsResourceManagerDelegate {
     fun onSectorData(data: SectorOutput)
