@@ -4,7 +4,7 @@ import android.util.Log
 
 object TJLogger {
     private const val DEFAULT_TAG = "TJLabsResourceManager"
-    private var isDebugOption = true
+    private var isDebugOption = false
 
     fun setDebugOption(set : Boolean) {
         isDebugOption = set

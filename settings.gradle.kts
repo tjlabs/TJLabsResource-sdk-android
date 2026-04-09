@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        maven(url = "https://jitpack.io") // JitPack plugin 지원 필요 시
         mavenLocal()
         google {
             content {
@@ -15,10 +16,11 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven(url = "https://jitpack.io") // JitPack plugin 지원 필요 시
+
         mavenLocal()
         google()
         mavenCentral()
-        maven { setUrl(uri("/Users/yuchangsoo/local-maven-repo")) }
     }
 }
 
