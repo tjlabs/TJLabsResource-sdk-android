@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.tjlabs.resource_sdk_sample_app.BuildConfig
 import com.tjlabs.resource_sdk_sample_app.R
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsresource_sdk_android.*
@@ -40,8 +41,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        val tenantId = "tjlabs"
-        val tenantPw = "TJlabs0407@"
+        val accessKey = BuildConfig.AUTH_ACCESS_KEY
+        val accessSecretKey = BuildConfig.AUTH_SECRET_ACCESS_KEY
+        val clientKey = BuildConfig.AUTH_CLIENT_SECRET
         val sectorId = 6 // covensia : 20
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
@@ -57,8 +59,18 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             insets
         }
 
-        TJLabsAuthManager.initialize(application)
-        TJLabsAuthManager.auth(tenantId, tenantPw) {
+        if (accessKey.isBlank() || accessSecretKey.isBlank() || clientKey.isBlank()) {
+            val reason = "Auth keys are empty. Check local.properties: access_key, access_secret_key, client_key"
+            Log.e("CheckToken", reason)
+            runOnUiThread {
+                authStatusText.text = reason
+                authStatusText.setTextColor(getColor(R.color.text_fail))
+            }
+            return
+        }
+
+        TJLabsAuthManager.setClientSecret(application, clientKey)
+        TJLabsAuthManager.auth(accessKey, accessSecretKey) {
                 code, success->
             Log.d("CheckToken", "code : $code // success : $success")
 

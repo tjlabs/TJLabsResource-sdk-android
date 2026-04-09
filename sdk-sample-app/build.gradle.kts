@@ -1,7 +1,27 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun String.escapeForBuildConfig(): String = this
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+
+val authClientSecret: String = providers.gradleProperty("AUTH_CLIENT_SECRET").orNull
+    ?: localProperties.getProperty("AUTH_CLIENT_SECRET", "")
+val authAccessKey: String = providers.gradleProperty("AUTH_ACCESS_KEY").orNull
+    ?: localProperties.getProperty("AUTH_ACCESS_KEY", "")
+val authSecretAccessKey: String = providers.gradleProperty("AUTH_SECRET_ACCESS_KEY").orNull
+    ?: localProperties.getProperty("AUTH_SECRET_ACCESS_KEY", "")
 
 android {
     namespace = "com.tjlabs.resource_sdk_sample_app"
@@ -13,6 +33,22 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField(
+            "String",
+            "AUTH_CLIENT_SECRET",
+            "\"${authClientSecret.escapeForBuildConfig()}\""
+        )
+        buildConfigField(
+            "String",
+            "AUTH_ACCESS_KEY",
+            "\"${authAccessKey.escapeForBuildConfig()}\""
+        )
+        buildConfigField(
+            "String",
+            "AUTH_SECRET_ACCESS_KEY",
+            "\"${authSecretAccessKey.escapeForBuildConfig()}\""
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -32,6 +68,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 

@@ -9,7 +9,7 @@ plugins {
 
 val versionMajor = 1
 val versionMinor = 0
-val versionPatch = 20
+val versionPatch = 22
 
 
 android {
@@ -20,6 +20,7 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     libraryVariants.all {
@@ -55,7 +56,7 @@ android {
 }
 
 dependencies {
-    api ("com.tjlabs:TJLabsAuth-sdk-android:1.0.9")
+    api ("com.github.tjlabs:TJLabsAuth-sdk-android:1.0.13")
     api ("androidx.security:security-crypto-ktx:1.1.0-alpha03") //auth 사용을 위해 같이 추가해야함
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
@@ -68,7 +69,7 @@ afterEvaluate {
         publications {
             create<MavenPublication>("release") {
                 from(components["release"])
-                groupId = "com.tjlabs"
+                groupId = "com.github.tjlabs"
                 artifactId = "TJLabsResource-sdk-android"
                 version = "$versionMajor.$versionMinor.$versionPatch"
             }
