@@ -79,7 +79,26 @@ data class SectorOutput(
     val id: Int,
     val name: String,
     val debug: Boolean,
-    val buildings: List<BuildingOutput>
+    val buildings: List<BuildingOutput>,
+    val default_position: DefaultPositionOutput? = null
+)
+
+data class DefaultPositionOutput(
+    val building: DefaultPositionBuildingOutput
+)
+
+data class DefaultPositionBuildingOutput(
+    val id: Int,
+    val name: String,
+    val level: DefaultPositionLevelOutput
+)
+
+data class DefaultPositionLevelOutput(
+    val id: Int,
+    val name: String,
+    val x: Int,
+    val y: Int,
+    val heading: Float
 )
 
 // MARK: - Sector Bundle
@@ -92,6 +111,7 @@ data class SectorBundleOutput(
     val id: Int,
     val name: String,
     val debug: Boolean,
+    val default_position: DefaultPositionOutput?,
     val wgs84_transform: AffineTransParamOutput?,
     val buildings: List<SectorBundleBuildingOutput>
 )

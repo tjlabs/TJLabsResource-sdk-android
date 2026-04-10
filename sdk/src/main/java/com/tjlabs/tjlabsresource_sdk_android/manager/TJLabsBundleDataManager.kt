@@ -8,6 +8,9 @@ import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.Category
 import com.tjlabs.tjlabsresource_sdk_android.CategoryData
+import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionLevelOutput
+import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionOutput
 import com.tjlabs.tjlabsresource_sdk_android.EntranceData
 import com.tjlabs.tjlabsresource_sdk_android.EntranceRouteData
 import com.tjlabs.tjlabsresource_sdk_android.GeofenceData
@@ -658,7 +661,8 @@ internal class TJLabsBundleDataManager {
                 id = root.optInt("id"),
                 name = root.optString("name"),
                 debug = root.optBoolean("debug"),
-                buildings = buildings
+                buildings = buildings,
+                default_position = parseDefaultPosition(root.optJSONObject("default_position"))
             )
 
             BundleDataSnapshot(
@@ -698,6 +702,25 @@ internal class TJLabsBundleDataManager {
             yy_scale = obj.optFloatOrDefault("yy_scale"),
             y_translation = obj.optFloatOrDefault("y_translation"),
             heading_offset = obj.optFloatOrDefault("heading_offset")
+        )
+    }
+
+    private fun parseDefaultPosition(obj: JSONObject?): DefaultPositionOutput? {
+        if (obj == null) return null
+        val buildingObj = obj.optJSONObject("building") ?: return null
+        val levelObj = buildingObj.optJSONObject("level") ?: return null
+        return DefaultPositionOutput(
+            building = DefaultPositionBuildingOutput(
+                id = buildingObj.optInt("id"),
+                name = buildingObj.optString("name"),
+                level = DefaultPositionLevelOutput(
+                    id = levelObj.optInt("id"),
+                    name = levelObj.optString("name"),
+                    x = levelObj.optInt("x"),
+                    y = levelObj.optInt("y"),
+                    heading = levelObj.optFloatOrDefault("heading")
+                )
+            )
         )
     }
 
