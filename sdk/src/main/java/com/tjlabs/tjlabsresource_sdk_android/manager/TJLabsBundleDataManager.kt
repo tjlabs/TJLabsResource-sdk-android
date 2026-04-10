@@ -30,6 +30,7 @@ import com.tjlabs.tjlabsresource_sdk_android.PeakData
 import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
+import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.UnitData
 import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
@@ -47,7 +48,6 @@ import retrofit2.Response
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 
 internal data class BundleDataSnapshot(
     val versionId: String,
@@ -437,12 +437,12 @@ internal class TJLabsBundleDataManager {
         filePrefix: String
     ) {
         try {
-            val cacheDir = File(application.cacheDir, "$CSV_DIR/$sectorId")
+            val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs()
             }
 
-            val fileName = "${md5(url)}.csv"
+            val fileName = buildCsvFileName(sectorId = sectorId, key = key)
             val csvFile = File(cacheDir, fileName)
             csvFile.writeText(content)
 
@@ -474,9 +474,38 @@ internal class TJLabsBundleDataManager {
             .apply()
     }
 
-    private fun md5(value: String): String {
-        val digest = MessageDigest.getInstance("MD5").digest(value.toByteArray())
-        return digest.joinToString("") { "%02x".format(it) }
+    private fun buildCsvFileName(sectorId: Int, key: String): String {
+        // key format: {sectorId}_{buildingName}_{levelName} or {sectorId}_{buildingName}_{levelName}_{entranceNumber}
+        // requested naming: {sectorId}_{buildingName}_{levelName}.csv
+        val normalized = key
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+            .trim()
+            .ifEmpty { "${sectorId}_unknown" }
+        return "$normalized.csv"
+    }
+
+    private fun buildSectorCacheFolderName(sectorId: Int): String {
+        val region = TJLabsFileDownloader.region
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+            .trim()
+            .ifEmpty { "Korea" }
+        return "${region}_${sectorId}"
     }
 
     private fun fetchTextFromUrl(urlString: String, source: String): String? {
