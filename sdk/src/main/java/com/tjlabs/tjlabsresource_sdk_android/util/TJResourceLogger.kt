@@ -2,7 +2,7 @@ package com.tjlabs.tjlabsresource_sdk_android.util
 
 import android.util.Log
 
-object TJLogger {
+object TJResourceLogger {
     private const val DEFAULT_TAG = "TJLabsResourceManager"
     private var isDebugOption = false
 

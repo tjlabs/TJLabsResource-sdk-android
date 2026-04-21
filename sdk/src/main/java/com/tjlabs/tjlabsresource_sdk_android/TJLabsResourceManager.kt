@@ -4,7 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import com.tjlabs.tjlabsresource_sdk_android.manager.BundleDataSnapshot
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
-import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 
 class TJLabsResourceManager {
     var delegate: TJLabsResourceManagerDelegate? = null
@@ -37,17 +37,18 @@ class TJLabsResourceManager {
 
     fun loadResource(
         application: Application,
+        provider: String,
         region: String,
         sectorId: Int,
         completion: (Boolean) -> Unit
     ) {
-        TJLogger.d("(TJLabsResource) loadResource request // region=$region // sectorId=$sectorId")
-        setRegion(region)
+        TJResourceLogger.d("(TJLabsResource) loadResource request // provider = $provider // region=$region // sectorId=$sectorId")
+        setRegion(provider, region)
 
         bundleDataManager.loadBundle(application, sectorId) { isSuccess, message, snapshot ->
-            TJLogger.d("(TJLabsResource) loadResource callback // success=$isSuccess // message=$message")
+            TJResourceLogger.d("(TJLabsResource) loadResource callback // success=$isSuccess // message=$message")
             if (!isSuccess || snapshot == null) {
-                TJLogger.d("(TJLabsResource) loadResource failed // sectorId=$sectorId // snapshotNull=${snapshot == null}")
+                TJResourceLogger.d("(TJLabsResource) loadResource failed // sectorId=$sectorId // snapshotNull=${snapshot == null}")
                 delegate?.onSectorError(ResourceError.Sector)
                 completion(false)
                 return@loadBundle
@@ -55,25 +56,26 @@ class TJLabsResourceManager {
 
             cacheSnapshot(sectorId, snapshot)
             emitSnapshot(snapshot)
-            TJLogger.d("(TJLabsResource) loadResource success // sectorId=$sectorId // versionId=${snapshot.versionId}")
+            TJResourceLogger.d("(TJLabsResource) loadResource success // sectorId=$sectorId // versionId=${snapshot.versionId}")
             completion(true)
         }
     }
 
     fun testLoadSectorBundle(
         application: Application,
+        provider: String,
         region: String,
         sectorId: Int,
         completion: (Boolean, String, String?, String?, SectorOutput?) -> Unit
     ) {
-        setRegion(region)
+        setRegion(provider, region)
         bundleDataManager.testLoadBundle(sectorId) { success, msg, meta, raw, mappedSector ->
             completion(success, msg, meta?.version_id, meta?.url, mappedSector)
         }
     }
 
-    private fun setRegion(region: String) {
-        TJLabsResourceNetworkConstants.setServerURL(region)
+    private fun setRegion(provider: String, region: String) {
+        TJLabsResourceNetworkConstants.setServerURL(provider, region)
         TJLabsFileDownloader.region = region
     }
 
@@ -174,7 +176,7 @@ class TJLabsResourceManager {
     }
 
     fun setDebugOption(set: Boolean) {
-        TJLogger.setDebugOption(set)
+        TJResourceLogger.setDebugOption(set)
     }
 
     fun getMatchedLevelId(key: String): Int? = levelIdMap[key]

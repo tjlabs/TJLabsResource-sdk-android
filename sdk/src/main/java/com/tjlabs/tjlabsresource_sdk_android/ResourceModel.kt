@@ -15,6 +15,12 @@ enum class ResourceRegion(val value: String) {
     CANADA("Canada")
 }
 
+enum class ServerProvider(val value: String) {
+    AWS("aws"),
+    GCP("gcp"),
+}
+
+
 data class PathPixelData(
     val roadType: List<Int> = listOf(),
     val nodeNumber: List<Int> = listOf(),
