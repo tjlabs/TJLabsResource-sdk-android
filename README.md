@@ -68,3 +68,28 @@ dependencies {
   6. call JitPack build log URL to warm up JitPack build
 
 > Note: Live API smoke test is intentionally excluded from automation.
+
+## Auth Release Receiver Automation
+
+- Workflow: `.github/workflows/receive-auth-release.yml`
+- Trigger:
+  - `repository_dispatch` with type `auth_release_published`
+  - `workflow_dispatch` with required input `auth_version` (`x.y.z`)
+- Required workflow permissions:
+  - `contents: write`
+  - `pull-requests: write`
+
+Flow:
+1. Read `auth_version` (dispatch payload first, then workflow input) and validate `x.y.z`.
+2. Checkout `origin/main` and apply dependency update only on `:sdk` module build file.
+3. Run validation:
+   - `./gradlew :sdk:testDebugUnitTest :sdk:testReleaseUnitTest --stacktrace --no-daemon`
+   - `./gradlew :sdk:publishToMavenLocal -x test --stacktrace --no-daemon`
+4. Create branch `chore/bump-auth-x.y.z`, commit, push, and open PR to `main`.
+
+Safety policy:
+- Base branch is fixed to `main`.
+- Existing open bump PR for the same version is detected and the workflow exits without creating a new PR.
+- If remote branch `chore/bump-auth-x.y.z` already exists, workflow exits safely (no reset/force push).
+- Ongoing feature/release branches are not modified by this workflow.
+- Live API smoke test is intentionally excluded.

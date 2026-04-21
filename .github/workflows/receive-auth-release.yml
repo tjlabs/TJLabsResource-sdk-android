@@ -1,0 +1,299 @@
+name: Receive Auth Release
+
+on:
+  repository_dispatch:
+    types: [auth_release_published]
+  workflow_dispatch:
+    inputs:
+      auth_version:
+        description: "Auth SDK version (x.y.z)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-auth-dependency:
+    runs-on: ubuntu-latest
+    env:
+      LIB_MODULE: sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Dispatch/Input Payload
+        id: payload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AUTH_VERSION="${{ github.event.client_payload.auth_version }}"
+          if [ -z "${AUTH_VERSION:-}" ]; then
+            AUTH_VERSION="${{ inputs.auth_version }}"
+          fi
+
+          AUTH_REPO="${{ github.event.client_payload.auth_repo }}"
+          TARGET_BRANCH="${{ github.event.client_payload.target_branch }}"
+          if [ -z "${TARGET_BRANCH:-}" ]; then
+            TARGET_BRANCH="main"
+          fi
+
+          if ! [[ "$AUTH_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid auth_version: $AUTH_VERSION"
+            echo "Expected format: x.y.z"
+            exit 1
+          fi
+
+          BRANCH_NAME="chore/bump-auth-${AUTH_VERSION}"
+
+          echo "auth_version=$AUTH_VERSION" >> "$GITHUB_OUTPUT"
+          echo "auth_repo=$AUTH_REPO" >> "$GITHUB_OUTPUT"
+          echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved auth_version=$AUTH_VERSION"
+          echo "Resolved auth_repo=$AUTH_REPO"
+          echo "Resolved payload target_branch=$TARGET_BRANCH"
+          echo "Policy base branch=main"
+
+      - name: Checkout Main Baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+
+      - name: Check Existing Open PR For Same Version
+        id: pr_check
+        uses: actions/github-script@v7
+        env:
+          BRANCH_NAME: ${{ steps.payload.outputs.branch_name }}
+          AUTH_VERSION: ${{ steps.payload.outputs.auth_version }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = process.env.BRANCH_NAME;
+            const version = process.env.AUTH_VERSION;
+
+            const { data: pulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              base: "main",
+              per_page: 100
+            });
+
+            const matched = pulls.find((pr) => {
+              const headRef = pr.head?.ref ?? "";
+              const title = pr.title ?? "";
+              return (
+                headRef === branch ||
+                title.trim() === `chore: bump TJLabsAuth to ${version}`
+              );
+            });
+
+            if (matched) {
+              core.info(`Open PR already exists: #${matched.number} (${matched.html_url})`);
+              core.setOutput("exists", "true");
+              core.setOutput("number", String(matched.number));
+              core.setOutput("url", matched.html_url);
+            } else {
+              core.setOutput("exists", "false");
+            }
+
+      - name: Stop If Same Version PR Already Open
+        if: steps.pr_check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          echo "Skip: open PR already exists for this auth version."
+          echo "PR #${{ steps.pr_check.outputs.number }} -> ${{ steps.pr_check.outputs.url }}"
+
+      - name: Update Auth Dependency Version
+        if: steps.pr_check.outputs.exists != 'true'
+        id: replace
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE_KTS="${LIB_MODULE}/build.gradle.kts"
+          FILE_GROOVY="${LIB_MODULE}/build.gradle"
+
+          if [ -f "$FILE_KTS" ]; then
+            TARGET_FILE="$FILE_KTS"
+          elif [ -f "$FILE_GROOVY" ]; then
+            TARGET_FILE="$FILE_GROOVY"
+          else
+            echo "Cannot find Gradle build file under module ${LIB_MODULE}"
+            exit 1
+          fi
+
+          AUTH_VERSION="${{ steps.payload.outputs.auth_version }}"
+
+          python3 - "$TARGET_FILE" "$AUTH_VERSION" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          file_path = pathlib.Path(sys.argv[1])
+          auth_version = sys.argv[2]
+          text = file_path.read_text(encoding="utf-8")
+
+          patterns = [
+              r'(com\.github\.tjlabs:TJLabsAuth-sdk-android:)([0-9]+\.[0-9]+\.[0-9]+)',
+              r'(com\.tjlabs:TJLabsAuth-sdk-android:)([0-9]+\.[0-9]+\.[0-9]+)',
+          ]
+
+          found = False
+          new_text = text
+
+          for p in patterns:
+              if re.search(p, new_text):
+                  found = True
+              new_text = re.sub(p, lambda m: f"{m.group(1)}{auth_version}", new_text)
+
+          if not found:
+              print("ERROR: Auth dependency coordinate not found in target file.")
+              sys.exit(2)
+
+          if new_text != text:
+              file_path.write_text(new_text, encoding="utf-8")
+          PY
+
+          CHANGED=$(python3 - "$TARGET_FILE" "${{ steps.payload.outputs.auth_version }}" <<'PY'
+          import pathlib
+          import re
+          import sys
+          file_path = pathlib.Path(sys.argv[1])
+          auth_version = sys.argv[2]
+          text = file_path.read_text(encoding="utf-8")
+          ok = bool(re.search(r'com\.(github\.tjlabs|tjlabs):TJLabsAuth-sdk-android:' + re.escape(auth_version), text))
+          print("true" if ok else "false")
+          PY
+          )
+
+          echo "target_file=$TARGET_FILE" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- "$TARGET_FILE"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No dependency version change needed."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dependency version updated in $TARGET_FILE"
+          fi
+
+          if [ "$CHANGED" != "true" ]; then
+            echo "Auth dependency replacement verification failed."
+            exit 1
+          fi
+
+      - name: Stop If No Change Needed
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed != 'true'
+        shell: bash
+        run: |
+          echo "Skip: target Auth version already applied. No PR created."
+
+      - name: Setup JDK 17
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Gradle
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Unit Tests
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true'
+        run: ./gradlew :${{ env.LIB_MODULE }}:testDebugUnitTest :${{ env.LIB_MODULE }}:testReleaseUnitTest --stacktrace --no-daemon
+
+      - name: Run Publish Check
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true'
+        run: ./gradlew :${{ env.LIB_MODULE }}:publishToMavenLocal -x test --stacktrace --no-daemon
+
+      - name: Check Existing Remote Branch
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true'
+        id: branch_check
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="${{ steps.payload.outputs.branch_name }}"
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Remote branch already exists: $BRANCH_NAME"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop If Remote Branch Already Exists
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true' && steps.branch_check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          echo "Skip: remote branch already exists (${{ steps.payload.outputs.branch_name }})."
+          echo "No reset/force strategy applied by policy."
+
+      - name: Create Branch And Commit
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true' && steps.branch_check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="${{ steps.payload.outputs.branch_name }}"
+          AUTH_VERSION="${{ steps.payload.outputs.auth_version }}"
+          TARGET_FILE="${{ steps.replace.outputs.target_file }}"
+
+          git checkout -b "$BRANCH_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "$TARGET_FILE"
+          git commit -m "chore: bump TJLabsAuth to ${AUTH_VERSION}"
+          git push origin "$BRANCH_NAME"
+
+      - name: Create Pull Request
+        if: steps.pr_check.outputs.exists != 'true' && steps.replace.outputs.changed == 'true' && steps.branch_check.outputs.exists != 'true'
+        uses: actions/github-script@v7
+        env:
+          AUTH_VERSION: ${{ steps.payload.outputs.auth_version }}
+          AUTH_REPO: ${{ steps.payload.outputs.auth_repo }}
+          PAYLOAD_TARGET_BRANCH: ${{ steps.payload.outputs.target_branch }}
+          HEAD_BRANCH: ${{ steps.payload.outputs.branch_name }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const version = process.env.AUTH_VERSION;
+            const authRepo = process.env.AUTH_REPO || "n/a";
+            const payloadTarget = process.env.PAYLOAD_TARGET_BRANCH || "n/a";
+            const head = process.env.HEAD_BRANCH;
+
+            const title = `chore: bump TJLabsAuth to ${version}`;
+            const body = [
+              "## Summary",
+              `- Bump Auth dependency version to \`${version}\``,
+              "- Base branch is fixed to `main` (policy)",
+              "",
+              "## Dispatch Payload",
+              `- auth_repo: \`${authRepo}\``,
+              `- auth_version: \`${version}\``,
+              `- target_branch(payload): \`${payloadTarget}\``,
+              "",
+              "## Validation",
+              "- `./gradlew :sdk:testDebugUnitTest :sdk:testReleaseUnitTest --stacktrace --no-daemon`",
+              "- `./gradlew :sdk:publishToMavenLocal -x test --stacktrace --no-daemon`",
+              "",
+              "> Live API smoke test is intentionally excluded."
+            ].join("\n");
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              head,
+              base: "main",
+              body
+            });
+
+            core.info(`Created PR: ${pr.html_url}`);
