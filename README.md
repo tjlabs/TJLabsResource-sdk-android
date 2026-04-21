@@ -44,3 +44,27 @@ dependencies {
 ```bash
 ./gradlew :sdk:publishToMavenLocal -x test --stacktrace
 ```
+
+## Release Automation (GitHub Actions)
+
+- PR Validation Workflow: `.github/workflows/pr-validate.yml`
+- Trigger:
+  - pull request to `main` or `release/*`
+  - or manual `workflow_dispatch`
+- Pipeline does:
+  1. run SDK unit tests (`:sdk:testDebugUnitTest`, `:sdk:testReleaseUnitTest`)
+  2. run publish check (`:sdk:publishToMavenLocal -x test`)
+
+- Workflow: `.github/workflows/release-jitpack.yml`
+- Trigger:
+  - push to `release/x.y.z` branch
+  - or manual `workflow_dispatch`
+- Pipeline does:
+  1. validate release version format (`x.y.z`)
+  2. verify `sdk/build.gradle.kts` version equals release version
+  3. run SDK unit tests (`:sdk:testDebugUnitTest`, `:sdk:testReleaseUnitTest`)
+  4. run publish check (`:sdk:publishToMavenLocal -x test`)
+  5. create/push tag (`x.y.z`) from the release commit
+  6. call JitPack build log URL to warm up JitPack build
+
+> Note: Live API smoke test is intentionally excluded from automation.
