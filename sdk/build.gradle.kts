@@ -9,7 +9,7 @@ plugins {
 
 val versionMajor = 1
 val versionMinor = 0
-val versionPatch = 25
+val versionPatch = 26
 
 
 android {
@@ -56,7 +56,7 @@ android {
 }
 
 dependencies {
-    api ("com.github.tjlabs:TJLabsAuth-sdk-android:1.0.14")
+    api ("com.tjlabs:TJLabsAuth-sdk-android:1.0.15")
     api ("androidx.security:security-crypto-ktx:1.1.0-alpha03") //auth 사용을 위해 같이 추가해야함
     implementation(libs.retrofit)
     implementation(libs.converter.gson)

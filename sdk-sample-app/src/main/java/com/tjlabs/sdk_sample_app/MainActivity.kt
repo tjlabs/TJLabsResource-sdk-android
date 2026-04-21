@@ -14,7 +14,7 @@ import com.tjlabs.resource_sdk_sample_app.BuildConfig
 import com.tjlabs.resource_sdk_sample_app.R
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsresource_sdk_android.*
-import com.tjlabs.tjlabsresource_sdk_android.util.TJLogger
+import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         val accessKey = BuildConfig.AUTH_ACCESS_KEY
         val accessSecretKey = BuildConfig.AUTH_SECRET_ACCESS_KEY
         val clientKey = BuildConfig.AUTH_CLIENT_SECRET
-        val sectorId = 6 // covensia : 20
+        val sectorId = 20 // covensia : 20
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
         jupiterDetailText = findViewById(R.id.textJupiterDetail)
@@ -69,6 +69,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             return
         }
 
+        TJLabsAuthManager.setServerURL(provider = ServerProvider.GCP.value)
+        TJLabsAuthManager.setLogEnabled(true)
         TJLabsAuthManager.setClientSecret(application, clientKey)
         TJLabsAuthManager.auth(accessKey, accessSecretKey) {
                 code, success->
@@ -94,9 +96,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
                 updateJupiterStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
                 updateMapStatus("Loading...", "Unified load • Sector $sectorId • ${nowText()}", null)
 
-                tjlabsResourceManager.loadResource(application, ResourceRegion.KOREA.value, sectorId) {
+                tjlabsResourceManager.loadResource(application, ServerProvider.GCP.value, ResourceRegion.KOREA.value, sectorId) {
                     isSuccess ->
-                    TJLogger.d("loadResource : $isSuccess")
+                    TJResourceLogger.d("loadResource : $isSuccess")
                     val detail = "Sector $sectorId • ${nowText()}"
                     updateJupiterStatus(
                         if (isSuccess) "Success" else "Failed",
@@ -118,6 +120,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         manager.testLoadSectorBundle(
             application = application,
             region = ResourceRegion.KOREA.value,
+            provider = ServerProvider.GCP.value,
             sectorId = sectorId
         ) { isSuccess, message, versionId, bundleUrl, mappedSector ->
             val detail = buildString {
@@ -163,36 +166,36 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onSectorData(data: SectorOutput) {
-        TJLogger.d("onSectorData : $data")
+        TJResourceLogger.d("onSectorData : $data")
         populateSourceHints(data)
         appendCallbackLog("onSectorData", "sectorId=${data.id} buildings=${data.buildings.size}", "api")
 
     }
 
     override fun onSectorError(error: ResourceError) {
-        TJLogger.d("onSectorError : $error")
+        TJResourceLogger.d("onSectorError : $error")
         appendCallbackLog("onSectorError", "error=$error", "api")
     }
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
-        TJLogger.d("onBuildingsData : $data")
+        TJResourceLogger.d("onBuildingsData : $data")
         appendCallbackLog("onBuildingsData", "count=${data.size}", "api")
     }
 
     override fun onLevelWardsData(levelKey: String, data: List<String>) {
-        TJLogger.d("onLevelWardsData : $levelKey // data : $data")
+        TJResourceLogger.d("onLevelWardsData : $levelKey // data : $data")
         appendCallbackLog("onLevelWardsData", "key=$levelKey wards=${data.size}", "api")
     }
 
     override fun onScaleOffsetData(scaleKey: String, data: List<Float>) {
-        TJLogger.d("onScaleOffsetData : $scaleKey // data : $data")
+        TJResourceLogger.d("onScaleOffsetData : $scaleKey // data : $data")
         appendCallbackLog("onScaleOffsetData", "key=$scaleKey size=${data.size}", "api")
     }
 
     override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
-        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.road}")
-        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadScale}")
-        TJLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadHeading}")
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.road}")
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadScale}")
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadHeading}")
 
         val source = pathPixelSourceHint[pathPixelKey] ?: "api"
         appendCallbackLog(
@@ -203,12 +206,12 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onGeofenceData(geofenceKey: String, data: GeofenceData) {
-        TJLogger.d("onGeofenceData : $geofenceKey // data : $data")
+        TJResourceLogger.d("onGeofenceData : $geofenceKey // data : $data")
         appendCallbackLog("onGeofenceData", "key=$geofenceKey", "api")
     }
 
     override fun onEntranceData(entranceKey: String, data: EntranceData) {
-        TJLogger.d("onEntranceData : $entranceKey // data : $data")
+        TJResourceLogger.d("onEntranceData : $entranceKey // data : $data")
         appendCallbackLog(
             "onEntranceData",
             "key=$entranceKey number=${data.number}",
@@ -217,7 +220,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData) {
-        TJLogger.d("onEntranceRouteData : $entranceKey // data : $data")
+        TJResourceLogger.d("onEntranceRouteData : $entranceKey // data : $data")
         appendCallbackLog(
             "onEntranceRouteData",
             "key=$entranceKey routeLevels=${data.routeLevel.size}",
@@ -226,17 +229,17 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onSectorParamData(data: SectorParameterOutput) {
-        TJLogger.d("onSectorParamData data $data")
+        TJResourceLogger.d("onSectorParamData data $data")
         appendCallbackLog("onSectorParamData", "min=${data.standard_min_rssi} max=${data.standard_max_rssi}", "api")
     }
 
     override fun onLevelParamData(paramKey: String, data: LevelParameterOutput) {
-        TJLogger.d("onLevelParamData type $paramKey // $data")
+        TJResourceLogger.d("onLevelParamData type $paramKey // $data")
         appendCallbackLog("onLevelParamData", "key=$paramKey", "api")
     }
 
     override fun onBuildingLevelImageData(imageKey: String, data: Bitmap?) {
-        TJLogger.d("onBuildingLevelImageData imageKey $imageKey // $data")
+        TJResourceLogger.d("onBuildingLevelImageData imageKey $imageKey // $data")
         val source = imageSourceHint[imageKey] ?: "api"
         val url = imageUrlByKey[imageKey] ?: "unknown"
         val size = if (data != null) "${data.width}x${data.height}" else "null"
@@ -250,7 +253,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onLevelUnitsData(unitKey: String, data: List<UnitData>?) {
         if (data != null) {
             for (info in data) {
-                TJLogger.d("onUnitData unitKey $unitKey // data : $info")
+                TJResourceLogger.d("onUnitData unitKey $unitKey // data : $info")
             }
         }
 
@@ -262,17 +265,17 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onAffineData(sectorId: Int, data: AffineTransParamOutput) {
-        TJLogger.d("onAffineData sectorId $sectorId // data : $data")
+        TJResourceLogger.d("onAffineData sectorId $sectorId // data : $data")
         appendCallbackLog("onAffineData", "sectorId=$sectorId", "api")
     }
 
     override fun onLandmarkData(key: String, data: Map<String, LandmarkData>) {
-        TJLogger.d("onLandmarkData key $key // data : $data")
+        TJResourceLogger.d("onLandmarkData key $key // data : $data")
         appendCallbackLog("onLandmarkData", "key=$key count=${data.size}", "asset")
     }
 
     override fun onSpotsData(key: Int, type: SpotType, data: Any) {
-        TJLogger.d("onSpotsData key $key //type : $type // data : $data")
+        TJResourceLogger.d("onSpotsData key $key //type : $type // data : $data")
         appendCallbackLog(
             "onSpotsData",
             "key=$key type=$type count=${describeSize(data)}",
@@ -281,7 +284,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onNodeLinkData(key: String, type: NodeLinkType, data: Any) {
-        TJLogger.d("onNodeLinkData key $key // type : $type // data : $data")
+        TJResourceLogger.d("onNodeLinkData key $key // type : $type // data : $data")
         appendCallbackLog(
             "onNodeLinkData",
             "key=$key type=$type count=${describeSize(data)}",
@@ -290,7 +293,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     }
 
     override fun onError(error: ResourceError, key: String) {
-        TJLogger.d("onError : $error // key : $key")
+        TJResourceLogger.d("onError : $error // key : $key")
         appendCallbackLog("onError", "error=$error key=$key", "api")
     }
 
