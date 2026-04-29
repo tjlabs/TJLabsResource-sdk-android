@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         val accessSecretKey = BuildConfig.AUTH_SECRET_ACCESS_KEY
         val clientKey = BuildConfig.AUTH_CLIENT_SECRET
         val sectorId = 20 // covensia : 20
+        val provider = ServerProvider.GCP.value
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
         jupiterDetailText = findViewById(R.id.textJupiterDetail)
@@ -69,7 +70,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             return
         }
 
-        TJLabsAuthManager.setServerURL(provider = ServerProvider.GCP.value)
+        TJLabsAuthManager.setServerURL(provider = provider)
         TJLabsAuthManager.setLogEnabled(true)
         TJLabsAuthManager.setClientSecret(application, clientKey)
         TJLabsAuthManager.auth(accessKey, accessSecretKey) {
@@ -77,7 +78,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             Log.d("CheckToken", "code : $code // success : $success")
 
             runOnUiThread {
-                authStatusText.text = if (success) "Auth: Success" else "Auth: Failed (code: $code)"
+                authStatusText.text = if (success) "Auth($provider): Success" else "Auth: Failed (code: $code)"
                 authStatusText.setTextColor(
                     getColor(if (success) R.color.text_success else R.color.text_fail)
                 )
@@ -89,14 +90,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
                 tjlabsResourceManager.delegate = this
                 tjlabsResourceManager.setDebugOption(true)
 
-                testBundleButton.setOnClickListener {
-                    runSectorBundleTest(tjlabsResourceManager, sectorId)
-                }
+//                testBundleButton.setOnClickListener {
+//                    runSectorBundleTest(tjlabsResourceManager, sectorId)
+//                }
 
                 updateJupiterStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
                 updateMapStatus("Loading...", "Unified load • Sector $sectorId • ${nowText()}", null)
 
-                tjlabsResourceManager.loadResource(application, ServerProvider.GCP.value, ResourceRegion.KOREA.value, sectorId) {
+                tjlabsResourceManager.loadResource(application, provider, ResourceRegion.KOREA.value, sectorId) {
                     isSuccess ->
                     TJResourceLogger.d("loadResource : $isSuccess")
                     val detail = "Sector $sectorId • ${nowText()}"

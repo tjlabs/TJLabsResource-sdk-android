@@ -78,6 +78,7 @@ internal class TJLabsBundleDataManager {
         private const val CSV_DIR = "tj_bundle_csv"
         private const val PREF_BUNDLE_VERSION_PREFIX = "bundle_version_"
         private const val PREF_BUNDLE_URL_PREFIX = "bundle_url_"
+        private const val PREF_BUNDLE_FILE_PREFIX = "bundle_file_"
         private const val PREF_PATH_VERSION_PREFIX = "graph_path_version_"
         private const val PREF_PATH_URL_PREFIX = "graph_path_url_"
         private const val PREF_PATH_FILE_PREFIX = "graph_path_file_"
@@ -99,13 +100,34 @@ internal class TJLabsBundleDataManager {
                 return@requestBundleMeta
             }
 
+            val savedBundleVersion = getSavedBundleVersion(application, sectorId)
             val cached = bundleCache[sectorId]
             if (cached != null && cached.versionId == meta.version_id) {
                 TJResourceLogger.d("(TJLabsResource) loadBundle cache hit // sectorId=$sectorId // version=${meta.version_id}")
                 completion(true, "(TJLabsResource) Success : use cached bundle", cached)
                 return@requestBundleMeta
             }
-            TJResourceLogger.d("(TJLabsResource) loadBundle cache miss // sectorId=$sectorId // oldVersion=${cached?.versionId} // newVersion=${meta.version_id}")
+            TJResourceLogger.d(
+                "(TJLabsResource) loadBundle cache miss // sectorId=$sectorId // oldVersion=${cached?.versionId ?: savedBundleVersion} // newVersion=${meta.version_id}"
+            )
+
+            loadBundleRawFromCache(application, sectorId, meta)?.let { cachedRaw ->
+                val parsedFromCache = parseBundleRaw(sectorId, meta, cachedRaw)
+                if (parsedFromCache != null) {
+                    TJResourceLogger.d(
+                        "(TJLabsResource) loadBundle use disk cache // sectorId=$sectorId // version=${meta.version_id}"
+                    )
+                    enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
+                        bundleCache[sectorId] = enriched
+                        completion(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched)
+                    }
+                    return@requestBundleMeta
+                } else {
+                    TJResourceLogger.d(
+                        "(TJLabsResource) loadBundle disk cache parse fail // sectorId=$sectorId // version=${meta.version_id} // fallback=network"
+                    )
+                }
+            }
 
             requestBundleRaw(meta.url) { rawStatus, rawMsg, raw ->
                 if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
@@ -123,7 +145,7 @@ internal class TJLabsBundleDataManager {
 
                 enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
                     bundleCache[sectorId] = enriched
-                    saveBundleMeta(application, sectorId, meta.version_id, meta.url)
+                    saveBundleRawCache(application, sectorId, meta.version_id, meta.url, raw)
                     TJResourceLogger.d(
                         "(TJLabsResource) loadBundle done // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
                     )
@@ -480,12 +502,85 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    private fun saveBundleMeta(application: Application, sectorId: Int, versionId: String, bundleUrl: String) {
+    private fun getSavedBundleVersion(application: Application, sectorId: Int): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("$PREF_BUNDLE_VERSION_PREFIX$sectorId", versionId)
-            .putString("$PREF_BUNDLE_URL_PREFIX$sectorId", bundleUrl)
-            .apply()
+        return prefs.getString("$PREF_BUNDLE_VERSION_PREFIX$sectorId", null)
+    }
+
+    private fun loadBundleRawFromCache(
+        application: Application,
+        sectorId: Int,
+        meta: SectorBundleMetaOutput
+    ): String? {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val versionKey = "$PREF_BUNDLE_VERSION_PREFIX$sectorId"
+        val urlKey = "$PREF_BUNDLE_URL_PREFIX$sectorId"
+        val fileKey = "$PREF_BUNDLE_FILE_PREFIX$sectorId"
+
+        val savedVersion = prefs.getString(versionKey, null)
+        val savedUrl = prefs.getString(urlKey, null)
+        val savedPath = prefs.getString(fileKey, null)
+
+        if (savedVersion != meta.version_id || savedUrl != meta.url || savedPath.isNullOrBlank()) {
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache miss // sectorId=$sectorId // savedVersion=$savedVersion // newVersion=${meta.version_id}"
+            )
+            return null
+        }
+
+        val rawFile = File(savedPath)
+        if (rawFile.exists().not() || rawFile.length() <= 0) {
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache stale // sectorId=$sectorId // path=$savedPath"
+            )
+            return null
+        }
+
+        return try {
+            val cachedRaw = rawFile.readText()
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache hit // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${cachedRaw.length}"
+            )
+            cachedRaw
+        } catch (e: Exception) {
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache read fail // sectorId=$sectorId // path=${rawFile.absolutePath} // error=${e.localizedMessage}"
+            )
+            null
+        }
+    }
+
+    private fun saveBundleRawCache(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        bundleUrl: String,
+        raw: String
+    ) {
+        try {
+            val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+            }
+
+            val rawFile = File(cacheDir, "bundle_${sectorId}.json")
+            rawFile.writeText(raw)
+
+            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("$PREF_BUNDLE_VERSION_PREFIX$sectorId", versionId)
+                .putString("$PREF_BUNDLE_URL_PREFIX$sectorId", bundleUrl)
+                .putString("$PREF_BUNDLE_FILE_PREFIX$sectorId", rawFile.absolutePath)
+                .apply()
+
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache save // sectorId=$sectorId // version=$versionId // path=${rawFile.absolutePath} // bytes=${raw.length}"
+            )
+        } catch (e: Exception) {
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache save fail // sectorId=$sectorId // error=${e.localizedMessage}"
+            )
+        }
     }
 
     private fun buildCsvFileName(sectorId: Int, key: String): String {
