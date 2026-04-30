@@ -12,7 +12,8 @@ import kotlinx.serialization.encoding.Encoder
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
     US_EAST("US_EAST"),
-    CANADA("Canada")
+    CANADA("Canada"),
+    SAUDI("SAUDI")
 }
 
 enum class ServerProvider(val value: String) {
