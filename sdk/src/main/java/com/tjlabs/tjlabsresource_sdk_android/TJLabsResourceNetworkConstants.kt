@@ -1,5 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
+import com.tjlabs.tjlabsauth_sdk_android.AuthRegion
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsauth_sdk_android.TokenResult
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
@@ -83,6 +84,7 @@ internal object TJLabsResourceNetworkConstants {
 
             ResourceRegion.CANADA.value -> "ca-central-1."
             ResourceRegion.US_EAST.value -> "us-east-1."
+            ResourceRegion.SAUDI.value -> "me-central2."
 
             else -> "ap-northeast-2."
         }

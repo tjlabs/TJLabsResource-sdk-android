@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             return
         }
 
-        TJLabsAuthManager.setServerURL(provider = provider)
+        TJLabsAuthManager.setServerURL(provider = provider, region=ResourceRegion.SAUDI.value)
         TJLabsAuthManager.setLogEnabled(true)
         TJLabsAuthManager.setClientSecret(application, clientKey)
         TJLabsAuthManager.auth(accessKey, accessSecretKey) {
