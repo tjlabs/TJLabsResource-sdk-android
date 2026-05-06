@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -19,14 +20,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
+class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsWarpResourceManagerDelegate, TJLabsVenusResourceManagerDelegate {
     private lateinit var authStatusText: TextView
     private lateinit var jupiterStatusText: TextView
     private lateinit var jupiterDetailText: TextView
-    private lateinit var mapStatusText: TextView
-    private lateinit var mapDetailText: TextView
+    private lateinit var venusStatusText: TextView
+    private lateinit var venusDetailText: TextView
+    private lateinit var warpStatusText: TextView
+    private lateinit var warpDetailText: TextView
     private lateinit var callbackContainer: LinearLayout
-    private lateinit var testBundleButton: Button
+    private lateinit var providerGroup: RadioGroup
+    private lateinit var testJupiterBundleButton: Button
+    private lateinit var testVenusBundleButton: Button
+    private lateinit var testWardBundleButton: Button
 
     private val pathPixelSourceHint = mutableMapOf<String, String>()
     private val imageSourceHint = mutableMapOf<String, String>()
@@ -35,24 +41,31 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     private val maxLogCount = 200
 
     private var resourceManager: TJLabsResourceManager? = null
+    private lateinit var accessKey: String
+    private lateinit var accessSecretKey: String
+    private lateinit var clientKey: String
+    private val sectorId = 1 // covensia : 20 // tips : 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        val accessKey = BuildConfig.AUTH_ACCESS_KEY
-        val accessSecretKey = BuildConfig.AUTH_SECRET_ACCESS_KEY
-        val clientKey = BuildConfig.AUTH_CLIENT_SECRET
-        val sectorId = 20 // covensia : 20
-        val provider = ServerProvider.GCP.value
+        accessKey = BuildConfig.AUTH_ACCESS_KEY
+        accessSecretKey = BuildConfig.AUTH_SECRET_ACCESS_KEY
+        clientKey = BuildConfig.AUTH_CLIENT_SECRET
         authStatusText = findViewById(R.id.textAuthStatus)
         jupiterStatusText = findViewById(R.id.textJupiterStatus)
         jupiterDetailText = findViewById(R.id.textJupiterDetail)
-        mapStatusText = findViewById(R.id.textMapStatus)
-        mapDetailText = findViewById(R.id.textMapDetail)
+        venusStatusText = findViewById(R.id.textVenusStatus)
+        venusDetailText = findViewById(R.id.textVenusDetail)
+        warpStatusText = findViewById(R.id.textWarpStatus)
+        warpDetailText = findViewById(R.id.textWarpDetail)
         callbackContainer = findViewById(R.id.callbackContainer)
-        testBundleButton = findViewById(R.id.buttonTestBundle)
+        providerGroup = findViewById(R.id.radioGroupProvider)
+        testJupiterBundleButton = findViewById(R.id.buttonTestJupiterBundle)
+        testVenusBundleButton = findViewById(R.id.buttonTestVenusBundle)
+        testWardBundleButton = findViewById(R.id.buttonTestWardBundle)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -70,68 +83,96 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
             return
         }
 
-        TJLabsAuthManager.setServerURL(provider = provider, region=ResourceRegion.SAUDI.value)
-        TJLabsAuthManager.setLogEnabled(true)
-        TJLabsAuthManager.setClientSecret(application, clientKey)
-        TJLabsAuthManager.auth(accessKey, accessSecretKey) {
-                code, success->
-            Log.d("CheckToken", "code : $code // success : $success")
+        val manager = TJLabsResourceManager()
+        resourceManager = manager
+        manager.delegate = this
+        manager.warpDelegate = this
+        manager.venusDelegate = this
+        manager.setDebugOption(true)
 
-            runOnUiThread {
-                authStatusText.text = if (success) "Auth($provider): Success" else "Auth: Failed (code: $code)"
-                authStatusText.setTextColor(
-                    getColor(if (success) R.color.text_success else R.color.text_fail)
-                )
+        testJupiterBundleButton.setOnClickListener {
+            runJupiterBundleTest(manager, getSelectedProvider(), sectorId)
+        }
+        testVenusBundleButton.setOnClickListener {
+            runVenusBundleTest(manager, getSelectedProvider(), sectorId)
+        }
+        testWardBundleButton.setOnClickListener {
+            runWardBundleTest(manager, getSelectedProvider(), sectorId)
+        }
+    }
+
+    private fun runJupiterBundleTest(manager: TJLabsResourceManager, provider: String, sectorId: Int) {
+        updateJupiterStatus("Loading...", "provider=$provider sectorId=$sectorId • ${nowText()}", null)
+        appendCallbackLog("loadJupiterResource", "start sectorId=$sectorId", "api")
+        authenticate(provider) { authSuccess ->
+            if (!authSuccess) {
+                updateJupiterStatus("Failed", "auth failed • ${nowText()}", false)
+                appendCallbackLog("loadJupiterResource", "auth failed provider=$provider", "api")
+                return@authenticate
             }
-
-            if (success) {
-                val tjlabsResourceManager = TJLabsResourceManager()
-                resourceManager = tjlabsResourceManager
-                tjlabsResourceManager.delegate = this
-                tjlabsResourceManager.setDebugOption(true)
-
-//                testBundleButton.setOnClickListener {
-//                    runSectorBundleTest(tjlabsResourceManager, sectorId)
-//                }
-
-                updateJupiterStatus("Loading...", "Sector $sectorId • ${nowText()}", null)
-                updateMapStatus("Loading...", "Unified load • Sector $sectorId • ${nowText()}", null)
-
-                tjlabsResourceManager.loadResource(application, provider, ResourceRegion.KOREA.value, sectorId) {
-                    isSuccess ->
-                    TJResourceLogger.d("loadResource : $isSuccess")
-                    val detail = "Sector $sectorId • ${nowText()}"
-                    updateJupiterStatus(
-                        if (isSuccess) "Success" else "Failed",
-                        detail,
-                        isSuccess
-                    )
-                    updateMapStatus(
-                        if (isSuccess) "Success" else "Failed",
-                        "Unified load • $detail",
-                        isSuccess
-                    )
-                }
+            manager.loadJupiterResource(
+                application = application,
+                provider = provider,
+                region = ResourceRegion.KOREA.value,
+                sectorId = sectorId
+            ) { isSuccess ->
+                appendCallbackLog("loadJupiterResource", "success=$isSuccess sectorId=$sectorId", "api")
+                updateJupiterStatus(
+                    if (isSuccess) "Success" else "Failed",
+                    "provider=$provider sectorId=$sectorId • ${nowText()}",
+                    isSuccess
+                )
             }
         }
     }
 
-    private fun runSectorBundleTest(manager: TJLabsResourceManager, sectorId: Int) {
-        appendCallbackLog("testLoadSectorBundle", "start sectorId=$sectorId", "api")
-        manager.testLoadSectorBundle(
-            application = application,
-            region = ResourceRegion.KOREA.value,
-            provider = ServerProvider.GCP.value,
-            sectorId = sectorId
-        ) { isSuccess, message, versionId, bundleUrl, mappedSector ->
-            val detail = buildString {
-                append("success=$isSuccess")
-                append(" version=$versionId")
-                append(" buildings=${mappedSector?.buildings?.size ?: 0}")
-                append(" url=${bundleUrl ?: "null"}")
-                append(" msg=$message")
+    private fun runVenusBundleTest(manager: TJLabsResourceManager, provider: String, sectorId: Int) {
+        updateVenusStatus("Loading...", "provider=$provider sectorId=$sectorId • ${nowText()}", null)
+        appendCallbackLog("loadVenusResource", "start sectorId=$sectorId", "api")
+        authenticate(provider) { authSuccess ->
+            if (!authSuccess) {
+                updateVenusStatus("Failed", "auth failed • ${nowText()}", false)
+                appendCallbackLog("loadVenusResource", "auth failed provider=$provider", "api")
+                return@authenticate
             }
-            appendCallbackLog("testLoadSectorBundle", detail, "api")
+            manager.loadVenusResource(
+                application = application,
+                provider = provider,
+                region = ResourceRegion.KOREA.value,
+                sectorId = sectorId
+            ) { isSuccess ->
+                appendCallbackLog("loadVenusResource", "success=$isSuccess sectorId=$sectorId", "api")
+                updateVenusStatus(
+                    if (isSuccess) "Success" else "Failed",
+                    "provider=$provider sectorId=$sectorId • ${nowText()}",
+                    isSuccess
+                )
+            }
+        }
+    }
+
+    private fun runWardBundleTest(manager: TJLabsResourceManager, provider: String, sectorId: Int) {
+        updateWarpStatus("Loading...", "provider=$provider sectorId=$sectorId • ${nowText()}", null)
+        appendCallbackLog("loadWarpResource", "start sectorId=$sectorId", "api")
+        authenticate(provider) { authSuccess ->
+            if (!authSuccess) {
+                updateWarpStatus("Failed", "auth failed • ${nowText()}", false)
+                appendCallbackLog("loadWarpResource", "auth failed provider=$provider", "api")
+                return@authenticate
+            }
+            manager.loadWarpResource(
+                application = application,
+                provider = provider,
+                region = ResourceRegion.KOREA.value,
+                sectorId = sectorId
+            ) { isSuccess ->
+                appendCallbackLog("loadWarpResource", "success=$isSuccess sectorId=$sectorId", "api")
+                updateWarpStatus(
+                    if (isSuccess) "Success" else "Failed",
+                    "provider=$provider sectorId=$sectorId • ${nowText()}",
+                    isSuccess
+                )
+            }
         }
     }
 
@@ -153,16 +194,52 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         }
     }
 
-    private fun updateMapStatus(status: String, detail: String, success: Boolean?) {
+    private fun updateVenusStatus(status: String, detail: String, success: Boolean?) {
         runOnUiThread {
-            mapStatusText.text = status
-            mapDetailText.text = detail
+            venusStatusText.text = status
+            venusDetailText.text = detail
             val colorRes = when (success) {
                 true -> R.color.text_success
                 false -> R.color.text_fail
                 null -> R.color.text_pending
             }
-            mapStatusText.setTextColor(getColor(colorRes))
+            venusStatusText.setTextColor(getColor(colorRes))
+        }
+    }
+
+    private fun updateWarpStatus(status: String, detail: String, success: Boolean?) {
+        runOnUiThread {
+            warpStatusText.text = status
+            warpDetailText.text = detail
+            val colorRes = when (success) {
+                true -> R.color.text_success
+                false -> R.color.text_fail
+                null -> R.color.text_pending
+            }
+            warpStatusText.setTextColor(getColor(colorRes))
+        }
+    }
+
+    private fun getSelectedProvider(): String {
+        return when (providerGroup.checkedRadioButtonId) {
+            R.id.radioGcp -> ServerProvider.GCP.value
+            else -> ServerProvider.AWS.value
+        }
+    }
+
+    private fun authenticate(provider: String, completion: (Boolean) -> Unit) {
+        TJLabsAuthManager.setServerURL(provider = provider, region = ResourceRegion.KOREA.value)
+        TJLabsAuthManager.setLogEnabled(true)
+        TJLabsAuthManager.setClientSecret(application, clientKey)
+        TJLabsAuthManager.auth(accessKey, accessSecretKey) { code, success ->
+            Log.d("CheckToken", "code : $code // success : $success")
+            runOnUiThread {
+                authStatusText.text = if (success) "Auth($provider): Success" else "Auth($provider): Failed (code: $code)"
+                authStatusText.setTextColor(
+                    getColor(if (success) R.color.text_success else R.color.text_fail)
+                )
+            }
+            completion(success)
         }
     }
 
@@ -170,12 +247,13 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
         TJResourceLogger.d("onSectorData : $data")
         populateSourceHints(data)
         appendCallbackLog("onSectorData", "sectorId=${data.id} buildings=${data.buildings.size}", "api")
-
+        updateJupiterStatus("Success", "sectorId=${data.id} buildings=${data.buildings.size} • ${nowText()}", true)
     }
 
     override fun onSectorError(error: ResourceError) {
         TJResourceLogger.d("onSectorError : $error")
         appendCallbackLog("onSectorError", "error=$error", "api")
+        updateJupiterStatus("Failed", "error=$error • ${nowText()}", false)
     }
 
     override fun onBuildingsData(data: List<BuildingOutput>) {
@@ -296,6 +374,40 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate {
     override fun onError(error: ResourceError, key: String) {
         TJResourceLogger.d("onError : $error // key : $key")
         appendCallbackLog("onError", "error=$error key=$key", "api")
+    }
+
+    override fun onWarpSectorData(data: WarpSectorOutput) {
+        val buildings = data.buildings.size
+        val levels = data.buildings.sumOf { it.levels.size }
+        val wards = data.buildings.sumOf { building -> building.levels.sumOf { it.wards.size } }
+        appendCallbackLog(
+            "onWarpSectorData",
+            "sectorId=${data.id} buildings=$buildings levels=$levels wards=$wards os=${data.operating_system}",
+            "api"
+        )
+        updateWarpStatus("Success", "sectorId=${data.id} buildings=$buildings wards=$wards • ${nowText()}", true)
+    }
+
+    override fun onWarpError(error: ResourceError) {
+        appendCallbackLog("onWarpError", "error=$error", "api")
+        updateWarpStatus("Failed", "error=$error • ${nowText()}", false)
+    }
+
+    override fun onVenusSectorData(data: VenusSectorOutput) {
+        val buildings = data.buildings.size
+        val levels = data.buildings.sumOf { it.levels.size }
+        val wards = data.buildings.sumOf { building -> building.levels.sumOf { it.wards.size } }
+        appendCallbackLog(
+            "onVenusSectorData",
+            "sectorId=${data.id} buildings=$buildings levels=$levels wards=$wards os=${data.operating_system}",
+            "api"
+        )
+        updateVenusStatus("Success", "sectorId=${data.id} buildings=$buildings wards=$wards • ${nowText()}", true)
+    }
+
+    override fun onVenusError(error: ResourceError) {
+        appendCallbackLog("onVenusError", "error=$error", "api")
+        updateVenusStatus("Failed", "error=$error • ${nowText()}", false)
     }
 
     private fun populateSourceHints(data: SectorOutput) {

@@ -38,12 +38,55 @@
                 android:text="Auth: Waiting"
                 android:textColor="@color/text_muted" />
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Provider"
+                android:textStyle="bold" />
+
+            <RadioGroup
+                android:id="@+id/radioGroupProvider"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/radioAws"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="AWS" />
+
+                <RadioButton
+                    android:id="@+id/radioGcp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:text="GCP" />
+            </RadioGroup>
+
             <Button
-                android:id="@+id/buttonTestBundle"
+                android:id="@+id/buttonTestJupiterBundle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Test Sector Bundle" />
+                android:text="Load Jupiter Resource" />
+
+            <Button
+                android:id="@+id/buttonTestVenusBundle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Load Venus Resource" />
+
+            <Button
+                android:id="@+id/buttonTestWardBundle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Load Warp Resource" />
 
             <LinearLayout
                 android:id="@+id/cardJupiter"
@@ -80,7 +123,7 @@
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/cardMap"
+                android:id="@+id/cardVenus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
@@ -91,12 +134,12 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Map Resource"
+                    android:text="Venus Resource"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <TextView
-                    android:id="@+id/textMapStatus"
+                    android:id="@+id/textVenusStatus"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -105,7 +148,41 @@
                     android:textSize="15sp" />
 
                 <TextView
-                    android:id="@+id/textMapDetail"
+                    android:id="@+id/textVenusDetail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="—"
+                    android:textColor="@color/text_muted" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/cardWarp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@color/card_map_bg"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Warp Resource"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/textWarpStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Not started"
+                    android:textColor="@color/text_pending"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/textWarpDetail"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
