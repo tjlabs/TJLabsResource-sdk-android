@@ -21,6 +21,13 @@ internal interface PostInput {
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
+    @GET("/{server_version}/sectors/{pk}/bundle/lite")
+    fun getSectorLiteBundle(
+        @Path("server_version") serverVersion: String,
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
     @GET
     fun getSectorBundleJsonRaw(
         @Url url: String

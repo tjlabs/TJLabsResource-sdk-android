@@ -21,6 +21,12 @@ enum class ServerProvider(val value: String) {
     GCP("gcp"),
 }
 
+enum class ResourceBundleType {
+    JUPITER,
+    VENUS,
+    WARP
+}
+
 
 data class PathPixelData(
     val roadType: List<Int> = listOf(),
@@ -170,6 +176,70 @@ data class SectorBundleGraphOutput(
 
 data class SectorBundleGraphPathOutput(
     val url: String
+)
+
+// MARK: - Warp / Venus Bundle
+data class WarpSectorOutput(
+    val id: Int,
+    val name: String,
+    val operating_system: String,
+    val buildings: List<WarpBuildingOutput>
+)
+
+data class WarpBuildingOutput(
+    val id: Int,
+    val name: String,
+    val levels: List<WarpLevelOutput>
+)
+
+data class WarpLevelOutput(
+    val id: Int,
+    val name: String,
+    val map_image: SectorBundleMapImageOutput?,
+    val wards: List<WarpWardOutput>
+)
+
+data class WarpWardOutput(
+    val id: Int,
+    val name: String,
+    val x: Int,
+    val y: Int,
+    val content: WarpWardContentOutput?
+)
+
+data class WarpWardContentOutput(
+    val number: Int,
+    val description: String,
+    val url: String,
+    val rssi: Float?
+)
+
+data class VenusSectorOutput(
+    val id: Int,
+    val name: String,
+    val operating_system: String,
+    val buildings: List<VenusBuildingOutput>
+)
+
+data class VenusBuildingOutput(
+    val id: Int,
+    val name: String,
+    val levels: List<VenusLevelOutput>
+)
+
+data class VenusLevelOutput(
+    val id: Int,
+    val name: String,
+    val map_image: SectorBundleMapImageOutput?,
+    val wards: List<VenusWardOutput>
+)
+
+data class VenusWardOutput(
+    val id: Int,
+    val name: String,
+    val x: Int,
+    val y: Int,
+    val rssi: Float?
 )
 
 data class BuildingOutput(
@@ -549,4 +619,14 @@ interface TJLabsResourceManagerDelegate {
     fun onSpotsData(key: Int, type: SpotType, data: Any)
     fun onNodeLinkData(key: String, type: NodeLinkType, data: Any)
     fun onError(error: ResourceError, key: String)
+}
+
+interface TJLabsWarpResourceManagerDelegate {
+    fun onWarpSectorData(data: WarpSectorOutput)
+    fun onWarpError(error: ResourceError)
+}
+
+interface TJLabsVenusResourceManagerDelegate {
+    fun onVenusSectorData(data: VenusSectorOutput)
+    fun onVenusError(error: ResourceError)
 }

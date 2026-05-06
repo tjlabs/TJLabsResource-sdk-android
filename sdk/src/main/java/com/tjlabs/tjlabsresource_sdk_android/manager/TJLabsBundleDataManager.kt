@@ -30,9 +30,20 @@ import com.tjlabs.tjlabsresource_sdk_android.PeakData
 import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
+import com.tjlabs.tjlabsresource_sdk_android.ResourceBundleType
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.UnitData
+import com.tjlabs.tjlabsresource_sdk_android.VenusBuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.VenusLevelOutput
+import com.tjlabs.tjlabsresource_sdk_android.VenusSectorOutput
+import com.tjlabs.tjlabsresource_sdk_android.VenusWardOutput
+import com.tjlabs.tjlabsresource_sdk_android.WarpBuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.WarpLevelOutput
+import com.tjlabs.tjlabsresource_sdk_android.WarpSectorOutput
+import com.tjlabs.tjlabsresource_sdk_android.WarpWardContentOutput
+import com.tjlabs.tjlabsresource_sdk_android.WarpWardOutput
+import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMapImageOutput
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +61,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 internal data class BundleDataSnapshot(
+    val bundleType: ResourceBundleType,
     val versionId: String,
     val bundleUrl: String,
     val sectorData: SectorOutput,
@@ -68,12 +80,14 @@ internal data class BundleDataSnapshot(
     val imageDataMap: Map<String, Bitmap>,
     val affineParam: AffineTransParamOutput?,
     val graphPathUrlsByKey: Map<String, String>,
-    val entranceRouteUrlsByKey: Map<String, String>
+    val entranceRouteUrlsByKey: Map<String, String>,
+    val warpSectorData: WarpSectorOutput?,
+    val venusSectorData: VenusSectorOutput?
 )
 
 internal class TJLabsBundleDataManager {
     companion object {
-        private val bundleCache: MutableMap<Int, BundleDataSnapshot> = mutableMapOf()
+        private val bundleCache: MutableMap<String, BundleDataSnapshot> = mutableMapOf()
         private const val PREF_NAME = "TJLabsResourcesPref"
         private const val CSV_DIR = "tj_bundle_csv"
         private const val PREF_BUNDLE_VERSION_PREFIX = "bundle_version_"
@@ -87,67 +101,73 @@ internal class TJLabsBundleDataManager {
         private const val PREF_ENTRANCE_FILE_PREFIX = "entrance_route_file_"
     }
 
+    private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
+        return "${bundleType.name}_$sectorId"
+    }
+
     fun loadBundle(
         application: Application,
+        bundleType: ResourceBundleType,
         sectorId: Int,
         completion: (Boolean, String, BundleDataSnapshot?) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadBundle start // sectorId=$sectorId")
-        requestBundleMeta(sectorId) { metaStatus, metaMsg, meta ->
+        TJResourceLogger.d("(TJLabsResource) loadBundle start // type=$bundleType // sectorId=$sectorId")
+        requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
             if ((metaStatus in 200 until 300) == false || meta == null) {
-                TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
+                TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // type=$bundleType // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
                 completion(false, metaMsg, null)
                 return@requestBundleMeta
             }
 
-            val savedBundleVersion = getSavedBundleVersion(application, sectorId)
-            val cached = bundleCache[sectorId]
+            val savedBundleVersion = getSavedBundleVersion(application, bundleType, sectorId)
+            val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
+            val cached = bundleCache[cacheKey]
             if (cached != null && cached.versionId == meta.version_id) {
-                TJResourceLogger.d("(TJLabsResource) loadBundle cache hit // sectorId=$sectorId // version=${meta.version_id}")
+                TJResourceLogger.d("(TJLabsResource) loadBundle cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}")
                 completion(true, "(TJLabsResource) Success : use cached bundle", cached)
                 return@requestBundleMeta
             }
             TJResourceLogger.d(
-                "(TJLabsResource) loadBundle cache miss // sectorId=$sectorId // oldVersion=${cached?.versionId ?: savedBundleVersion} // newVersion=${meta.version_id}"
+                "(TJLabsResource) loadBundle cache miss // type=$bundleType // sectorId=$sectorId // oldVersion=${cached?.versionId ?: savedBundleVersion} // newVersion=${meta.version_id}"
             )
 
-            loadBundleRawFromCache(application, sectorId, meta)?.let { cachedRaw ->
-                val parsedFromCache = parseBundleRaw(sectorId, meta, cachedRaw)
+            loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedRaw ->
+                val parsedFromCache = parseBundleRaw(bundleType, sectorId, meta, cachedRaw)
                 if (parsedFromCache != null) {
                     TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle use disk cache // sectorId=$sectorId // version=${meta.version_id}"
+                        "(TJLabsResource) loadBundle use disk cache // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}"
                     )
                     enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
-                        bundleCache[sectorId] = enriched
+                        bundleCache[cacheKey] = enriched
                         completion(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched)
                     }
                     return@requestBundleMeta
                 } else {
                     TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle disk cache parse fail // sectorId=$sectorId // version=${meta.version_id} // fallback=network"
+                        "(TJLabsResource) loadBundle disk cache parse fail // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // fallback=network"
                     )
                 }
             }
 
-            requestBundleRaw(meta.url) { rawStatus, rawMsg, raw ->
+            requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
                 if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
-                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@bundleRaw // status=$rawStatus // msg=$rawMsg // url=${meta.url}")
+                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@bundleRaw // type=$bundleType // status=$rawStatus // msg=$rawMsg // url=${meta.url}")
                     completion(false, rawMsg, null)
                     return@requestBundleRaw
                 }
 
-                val parsed = parseBundleRaw(sectorId, meta, raw)
+                val parsed = parseBundleRaw(bundleType, sectorId, meta, raw)
                 if (parsed == null) {
-                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@parseBundleRaw // sectorId=$sectorId // version=${meta.version_id} // url=${meta.url}")
+                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@parseBundleRaw // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // url=${meta.url}")
                     completion(false, "(TJLabsResource) Error : parse bundle raw", null)
                     return@requestBundleRaw
                 }
 
                 enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
-                    bundleCache[sectorId] = enriched
-                    saveBundleRawCache(application, sectorId, meta.version_id, meta.url, raw)
+                    bundleCache[cacheKey] = enriched
+                    saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
                     TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle done // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
+                        "(TJLabsResource) loadBundle done // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
                     )
                     completion(csvSuccess, "(TJLabsResource) Success : load bundle", enriched)
                 }
@@ -155,57 +175,33 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    fun testLoadBundle(
-        sectorId: Int,
-        completion: (Boolean, String, SectorBundleMetaOutput?, String?, SectorOutput?) -> Unit
-    ) {
-        requestBundleMeta(sectorId) { metaStatus, metaMsg, meta ->
-            if ((metaStatus in 200 until 300) == false || meta == null) {
-                completion(false, metaMsg, meta, null, null)
-                return@requestBundleMeta
-            }
-
-            requestBundleRaw(meta.url) { rawStatus, rawMsg, raw ->
-                if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
-                    completion(false, rawMsg, meta, raw, null)
-                    return@requestBundleRaw
-                }
-
-                val parsed = parseBundleRaw(sectorId, meta, raw)
-                completion(
-                    parsed != null,
-                    if (parsed != null) "(TJLabsResource) Success : testLoadBundle" else "(TJLabsResource) Error : parse bundle raw",
-                    meta,
-                    raw,
-                    parsed?.sectorData
-                )
-            }
-        }
-    }
-
     private fun requestBundleMeta(
+        bundleType: ResourceBundleType,
         sectorId: Int,
         completion: (Int, String, SectorBundleMetaOutput?) -> Unit
     ) {
+        val baseUrl = TJLabsResourceNetworkConstants.getBaseUrl(bundleType)
+        val serverVersion = TJLabsResourceNetworkConstants.getBundleServerVersion(bundleType)
         TJResourceLogger.d(
-            "(TJLabsResource) request bundle meta // baseUrl=${TJLabsResourceNetworkConstants.getUserBaseURL()} // version=${TJLabsResourceNetworkConstants.getUserSectorBundleVersion()} // sectorId=$sectorId"
+            "(TJLabsResource) request bundle meta // type=$bundleType // baseUrl=$baseUrl // version=$serverVersion // sectorId=$sectorId"
         )
-        TJLabsResourceNetworkConstants.genRetrofit(TJLabsResourceNetworkConstants.getUserBaseURL()) { retrofit, authStatus, authMessage ->
+        TJLabsResourceNetworkConstants.genRetrofit(baseUrl) { retrofit, authStatus, authMessage ->
             if (retrofit == null) {
                 TJResourceLogger.d(
-                    "(TJLabsResource) request bundle meta auth fail // sectorId=$sectorId // status=$authStatus // message=$authMessage"
+                    "(TJLabsResource) request bundle meta auth fail // type=$bundleType // sectorId=$sectorId // status=$authStatus // message=$authMessage"
                 )
                 completion(authStatus, "(TJLabsResource) Failure : getSectorBundleMeta(auth)", null)
                 return@genRetrofit
             }
 
             val api = retrofit.create(PostInput::class.java)
-            api.getSectorBundle(
-                TJLabsResourceNetworkConstants.getUserSectorBundleVersion(),
-                sectorId
-            ).enqueue(object : Callback<SectorBundleMetaOutput> {
+            val call = when (bundleType) {
+                ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
+                ResourceBundleType.JUPITER, ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+            }
+            call.enqueue(object : Callback<SectorBundleMetaOutput> {
                 override fun onFailure(call: Call<SectorBundleMetaOutput>, t: Throwable) {
-                    TJResourceLogger.d("(TJLabsResource) request bundle meta fail // sectorId=$sectorId // error=${t.localizedMessage}")
+                    TJResourceLogger.d("(TJLabsResource) request bundle meta fail // type=$bundleType // sectorId=$sectorId // error=${t.localizedMessage}")
                     completion(500, "(TJLabsResource) Failure : getSectorBundleMeta", null)
                 }
 
@@ -214,13 +210,13 @@ internal class TJLabsBundleDataManager {
                     if (status in 200 until 300) {
                         val body = response.body()
                         TJResourceLogger.d(
-                            "(TJLabsResource) request bundle meta success // sectorId=$sectorId // status=$status // versionId=${body?.version_id} // url=${body?.url}"
+                            "(TJLabsResource) request bundle meta success // type=$bundleType // sectorId=$sectorId // status=$status // versionId=${body?.version_id} // url=${body?.url}"
                         )
                         completion(status, "(TJLabsResource) Success : getSectorBundleMeta", body)
                     } else {
                         val errorBody = try { response.errorBody()?.string() } catch (_: Exception) { "read_error" }
                         TJResourceLogger.d(
-                            "(TJLabsResource) request bundle meta error // sectorId=$sectorId // status=$status // errorBody=$errorBody"
+                            "(TJLabsResource) request bundle meta error // type=$bundleType // sectorId=$sectorId // status=$status // errorBody=$errorBody"
                         )
                         completion(status, "(TJLabsResource) Error : getSectorBundleMeta", null)
                     }
@@ -230,11 +226,12 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun requestBundleRaw(
+        bundleType: ResourceBundleType,
         bundleUrl: String,
         completion: (Int, String, String?) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) request bundle raw // url=$bundleUrl")
-        val retrofit = TJLabsResourceNetworkConstants.genPlainRetrofit(TJLabsResourceNetworkConstants.getUserBaseURL())
+        TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // url=$bundleUrl")
+        val retrofit = TJLabsResourceNetworkConstants.genPlainRetrofit(TJLabsResourceNetworkConstants.getBaseUrl(bundleType))
         val api = retrofit.create(PostInput::class.java)
         api.getSectorBundleJsonRaw(bundleUrl).enqueue(object : Callback<okhttp3.ResponseBody> {
             override fun onFailure(call: Call<okhttp3.ResponseBody>, t: Throwable) {
@@ -502,20 +499,22 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    private fun getSavedBundleVersion(application: Application, sectorId: Int): String? {
+    private fun getSavedBundleVersion(application: Application, bundleType: ResourceBundleType, sectorId: Int): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        return prefs.getString("$PREF_BUNDLE_VERSION_PREFIX$sectorId", null)
+        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
+        return prefs.getString(versionKey, null)
     }
 
     private fun loadBundleRawFromCache(
         application: Application,
+        bundleType: ResourceBundleType,
         sectorId: Int,
         meta: SectorBundleMetaOutput
     ): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = "$PREF_BUNDLE_VERSION_PREFIX$sectorId"
-        val urlKey = "$PREF_BUNDLE_URL_PREFIX$sectorId"
-        val fileKey = "$PREF_BUNDLE_FILE_PREFIX$sectorId"
+        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
+        val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
+        val fileKey = getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId)
 
         val savedVersion = prefs.getString(versionKey, null)
         val savedUrl = prefs.getString(urlKey, null)
@@ -523,7 +522,7 @@ internal class TJLabsBundleDataManager {
 
         if (savedVersion != meta.version_id || savedUrl != meta.url || savedPath.isNullOrBlank()) {
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache miss // sectorId=$sectorId // savedVersion=$savedVersion // newVersion=${meta.version_id}"
+                "(TJLabsResource) bundle raw cache miss // type=$bundleType // sectorId=$sectorId // savedVersion=$savedVersion // newVersion=${meta.version_id}"
             )
             return null
         }
@@ -531,7 +530,7 @@ internal class TJLabsBundleDataManager {
         val rawFile = File(savedPath)
         if (rawFile.exists().not() || rawFile.length() <= 0) {
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache stale // sectorId=$sectorId // path=$savedPath"
+                "(TJLabsResource) bundle raw cache stale // type=$bundleType // sectorId=$sectorId // path=$savedPath"
             )
             return null
         }
@@ -539,12 +538,12 @@ internal class TJLabsBundleDataManager {
         return try {
             val cachedRaw = rawFile.readText()
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache hit // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${cachedRaw.length}"
+                "(TJLabsResource) bundle raw cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${cachedRaw.length}"
             )
             cachedRaw
         } catch (e: Exception) {
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache read fail // sectorId=$sectorId // path=${rawFile.absolutePath} // error=${e.localizedMessage}"
+                "(TJLabsResource) bundle raw cache read fail // type=$bundleType // sectorId=$sectorId // path=${rawFile.absolutePath} // error=${e.localizedMessage}"
             )
             null
         }
@@ -552,6 +551,7 @@ internal class TJLabsBundleDataManager {
 
     private fun saveBundleRawCache(
         application: Application,
+        bundleType: ResourceBundleType,
         sectorId: Int,
         versionId: String,
         bundleUrl: String,
@@ -563,23 +563,42 @@ internal class TJLabsBundleDataManager {
                 cacheDir.mkdirs()
             }
 
-            val rawFile = File(cacheDir, "bundle_${sectorId}.json")
+            val rawFile = File(cacheDir, buildBundleRawFileName(bundleType, sectorId))
             rawFile.writeText(raw)
 
             val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
+            val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
+            val fileKey = getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId)
             prefs.edit()
-                .putString("$PREF_BUNDLE_VERSION_PREFIX$sectorId", versionId)
-                .putString("$PREF_BUNDLE_URL_PREFIX$sectorId", bundleUrl)
-                .putString("$PREF_BUNDLE_FILE_PREFIX$sectorId", rawFile.absolutePath)
+                .putString(versionKey, versionId)
+                .putString(urlKey, bundleUrl)
+                .putString(fileKey, rawFile.absolutePath)
                 .apply()
 
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache save // sectorId=$sectorId // version=$versionId // path=${rawFile.absolutePath} // bytes=${raw.length}"
+                "(TJLabsResource) bundle raw cache save // type=$bundleType // sectorId=$sectorId // version=$versionId // path=${rawFile.absolutePath} // bytes=${raw.length}"
             )
         } catch (e: Exception) {
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache save fail // sectorId=$sectorId // error=${e.localizedMessage}"
+                "(TJLabsResource) bundle raw cache save fail // type=$bundleType // sectorId=$sectorId // error=${e.localizedMessage}"
             )
+        }
+    }
+
+    private fun getBundleMetaKey(bundleType: ResourceBundleType, prefix: String, sectorId: Int): String {
+        return if (bundleType == ResourceBundleType.JUPITER) {
+            "$prefix$sectorId"
+        } else {
+            "${prefix}${bundleType.name.lowercase()}_$sectorId"
+        }
+    }
+
+    private fun buildBundleRawFileName(bundleType: ResourceBundleType, sectorId: Int): String {
+        return when (bundleType) {
+            ResourceBundleType.JUPITER -> "bundle_${sectorId}.json"
+            ResourceBundleType.VENUS -> "bundle_venus_${sectorId}.json"
+            ResourceBundleType.WARP -> "bundle_warp_${sectorId}.json"
         }
     }
 
@@ -688,6 +707,7 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun parseBundleRaw(
+        bundleType: ResourceBundleType,
         sectorId: Int,
         meta: SectorBundleMetaOutput,
         raw: String
@@ -804,6 +824,7 @@ internal class TJLabsBundleDataManager {
             )
 
             BundleDataSnapshot(
+                bundleType = bundleType,
                 versionId = meta.version_id,
                 bundleUrl = meta.url,
                 sectorData = sectorData,
@@ -822,10 +843,12 @@ internal class TJLabsBundleDataManager {
                 imageDataMap = emptyMap(),
                 affineParam = parseAffine(root.optJSONObject("wgs84_transform")),
                 graphPathUrlsByKey = graphPathUrls,
-                entranceRouteUrlsByKey = entranceRouteUrls
+                entranceRouteUrlsByKey = entranceRouteUrls,
+                warpSectorData = if (bundleType == ResourceBundleType.WARP) parseWarpSector(root) else null,
+                venusSectorData = if (bundleType == ResourceBundleType.VENUS) parseVenusSector(root) else null
             )
         } catch (e: Exception) {
-            TJResourceLogger.d("(TJLabsResource) parseBundleRaw failed // sectorId=$sectorId // error=${e.localizedMessage}")
+            TJResourceLogger.d("(TJLabsResource) parseBundleRaw failed // type=$bundleType // sectorId=$sectorId // error=${e.localizedMessage}")
             null
         }
     }
@@ -859,6 +882,126 @@ internal class TJLabsBundleDataManager {
                     heading = levelObj.optFloatOrDefault("heading")
                 )
             )
+        )
+    }
+
+    private fun parseWarpSector(root: JSONObject): WarpSectorOutput {
+        val buildings = mutableListOf<WarpBuildingOutput>()
+        val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
+        for (i in 0 until buildingsJson.length()) {
+            val buildingObj = buildingsJson.optJSONObject(i) ?: continue
+            val levels = mutableListOf<WarpLevelOutput>()
+            val levelsJson = buildingObj.optJSONArray("levels") ?: JSONArray()
+            for (j in 0 until levelsJson.length()) {
+                val levelObj = levelsJson.optJSONObject(j) ?: continue
+                val wards = mutableListOf<WarpWardOutput>()
+                val wardsJson = levelObj.optJSONArray("wards") ?: JSONArray()
+                for (k in 0 until wardsJson.length()) {
+                    val wardObj = wardsJson.optJSONObject(k) ?: continue
+                    val contentObj = wardObj.optJSONObject("content")
+                    val content = contentObj?.let {
+                        WarpWardContentOutput(
+                            number = it.optInt("number"),
+                            description = it.optString("description"),
+                            url = it.optString("url"),
+                            rssi = it.optFloatOrNull("rssi")
+                        )
+                    }
+                    wards.add(
+                        WarpWardOutput(
+                            id = wardObj.optInt("id"),
+                            name = wardObj.optString("name"),
+                            x = wardObj.optInt("x"),
+                            y = wardObj.optInt("y"),
+                            content = content
+                        )
+                    )
+                }
+                levels.add(
+                    WarpLevelOutput(
+                        id = levelObj.optInt("id"),
+                        name = levelObj.optString("name"),
+                        map_image = parseMapImage(levelObj.optJSONObject("map_image")),
+                        wards = wards
+                    )
+                )
+            }
+            buildings.add(
+                WarpBuildingOutput(
+                    id = buildingObj.optInt("id"),
+                    name = buildingObj.optString("name"),
+                    levels = levels
+                )
+            )
+        }
+
+        return WarpSectorOutput(
+            id = root.optInt("id"),
+            name = root.optString("name"),
+            operating_system = root.optString("operating_system"),
+            buildings = buildings
+        )
+    }
+
+    private fun parseVenusSector(root: JSONObject): VenusSectorOutput {
+        val buildings = mutableListOf<VenusBuildingOutput>()
+        val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
+        for (i in 0 until buildingsJson.length()) {
+            val buildingObj = buildingsJson.optJSONObject(i) ?: continue
+            val levels = mutableListOf<VenusLevelOutput>()
+            val levelsJson = buildingObj.optJSONArray("levels") ?: JSONArray()
+            for (j in 0 until levelsJson.length()) {
+                val levelObj = levelsJson.optJSONObject(j) ?: continue
+                val wards = mutableListOf<VenusWardOutput>()
+                val wardsJson = levelObj.optJSONArray("wards") ?: JSONArray()
+                for (k in 0 until wardsJson.length()) {
+                    val wardObj = wardsJson.optJSONObject(k) ?: continue
+                    wards.add(
+                        VenusWardOutput(
+                            id = wardObj.optInt("id"),
+                            name = wardObj.optString("name"),
+                            x = wardObj.optInt("x"),
+                            y = wardObj.optInt("y"),
+                            rssi = wardObj.optFloatOrNull("rssi")
+                        )
+                    )
+                }
+                levels.add(
+                    VenusLevelOutput(
+                        id = levelObj.optInt("id"),
+                        name = levelObj.optString("name"),
+                        map_image = parseMapImage(levelObj.optJSONObject("map_image")),
+                        wards = wards
+                    )
+                )
+            }
+            buildings.add(
+                VenusBuildingOutput(
+                    id = buildingObj.optInt("id"),
+                    name = buildingObj.optString("name"),
+                    levels = levels
+                )
+            )
+        }
+
+        return VenusSectorOutput(
+            id = root.optInt("id"),
+            name = root.optString("name"),
+            operating_system = root.optString("operating_system"),
+            buildings = buildings
+        )
+    }
+
+    private fun parseMapImage(obj: JSONObject?): SectorBundleMapImageOutput? {
+        if (obj == null) return null
+        return SectorBundleMapImageOutput(
+            url = obj.optString("url"),
+            image_width = obj.optIntOrNull("image_width"),
+            image_height = obj.optIntOrNull("image_height"),
+            scale_x = obj.optFloatOrNull("scale_x"),
+            scale_y = obj.optFloatOrNull("scale_y"),
+            offset_x = obj.optFloatOrNull("offset_x"),
+            offset_y = obj.optFloatOrNull("offset_y")
         )
     }
 
@@ -1271,6 +1414,16 @@ internal class TJLabsBundleDataManager {
         return when (value) {
             is Number -> value.toFloat()
             is String -> value.toFloatOrNull()
+            else -> null
+        }
+    }
+
+    private fun JSONObject.optIntOrNull(key: String): Int? {
+        if (has(key) == false || isNull(key)) return null
+        val value = opt(key)
+        return when (value) {
+            is Number -> value.toInt()
+            is String -> value.toIntOrNull()
             else -> null
         }
     }
