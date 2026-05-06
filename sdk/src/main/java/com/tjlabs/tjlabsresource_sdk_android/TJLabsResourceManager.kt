@@ -8,6 +8,8 @@ import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 
 class TJLabsResourceManager {
     var delegate: TJLabsResourceManagerDelegate? = null
+    var warpDelegate: TJLabsWarpResourceManagerDelegate? = null
+    var venusDelegate: TJLabsVenusResourceManagerDelegate? = null
 
     companion object {
         private val sectorDataMap: MutableMap<Int, SectorOutput> = mutableMapOf()
@@ -35,6 +37,70 @@ class TJLabsResourceManager {
 
     private val bundleDataManager = TJLabsBundleDataManager()
 
+    private fun loadResourceByType(
+        bundleType: ResourceBundleType,
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        setRegion(provider, region)
+        bundleDataManager.loadBundle(application, bundleType, sectorId) { isSuccess, message, snapshot ->
+            TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message")
+            if (!isSuccess || snapshot == null) {
+                when (bundleType) {
+                    ResourceBundleType.JUPITER -> delegate?.onSectorError(ResourceError.Sector)
+                    ResourceBundleType.WARP -> warpDelegate?.onWarpError(ResourceError.Sector)
+                    ResourceBundleType.VENUS -> venusDelegate?.onVenusError(ResourceError.Sector)
+                }
+                completion(false)
+                return@loadBundle
+            }
+
+            cacheSnapshot(sectorId, snapshot)
+            when (bundleType) {
+                ResourceBundleType.JUPITER -> emitSnapshot(snapshot)
+                ResourceBundleType.WARP -> emitWarpSnapshot(snapshot)
+                ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
+            }
+            completion(true)
+        }
+    }
+
+    fun loadJupiterResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId")
+        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, completion)
+    }
+
+    fun loadVenusResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId")
+        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, completion)
+    }
+
+    fun loadWarpResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, completion)
+    }
+
     fun loadResource(
         application: Application,
         provider: String,
@@ -42,36 +108,7 @@ class TJLabsResourceManager {
         sectorId: Int,
         completion: (Boolean) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadResource request // provider = $provider // region=$region // sectorId=$sectorId")
-        setRegion(provider, region)
-
-        bundleDataManager.loadBundle(application, sectorId) { isSuccess, message, snapshot ->
-            TJResourceLogger.d("(TJLabsResource) loadResource callback // success=$isSuccess // message=$message")
-            if (!isSuccess || snapshot == null) {
-                TJResourceLogger.d("(TJLabsResource) loadResource failed // sectorId=$sectorId // snapshotNull=${snapshot == null}")
-                delegate?.onSectorError(ResourceError.Sector)
-                completion(false)
-                return@loadBundle
-            }
-
-            cacheSnapshot(sectorId, snapshot)
-            emitSnapshot(snapshot)
-            TJResourceLogger.d("(TJLabsResource) loadResource success // sectorId=$sectorId // versionId=${snapshot.versionId}")
-            completion(true)
-        }
-    }
-
-    fun testLoadSectorBundle(
-        application: Application,
-        provider: String,
-        region: String,
-        sectorId: Int,
-        completion: (Boolean, String, String?, String?, SectorOutput?) -> Unit
-    ) {
-        setRegion(provider, region)
-        bundleDataManager.testLoadBundle(sectorId) { success, msg, meta, raw, mappedSector ->
-            completion(success, msg, meta?.version_id, meta?.url, mappedSector)
-        }
+        loadJupiterResource(application, provider, region, sectorId, completion)
     }
 
     private fun setRegion(provider: String, region: String) {
@@ -168,10 +205,28 @@ class TJLabsResourceManager {
             delegate?.onBuildingLevelImageData(key, snapshot.imageDataMap[key])
         }
 
-        val sectorId = snapshot.sectorData.id
+        val loadedSectorId = snapshot.sectorData.id
         val affine = snapshot.affineParam
         if (affine != null) {
-            delegate?.onAffineData(sectorId, affine)
+            delegate?.onAffineData(loadedSectorId, affine)
+        }
+    }
+
+    private fun emitWarpSnapshot(snapshot: BundleDataSnapshot) {
+        val data = snapshot.warpSectorData
+        if (data != null) {
+            warpDelegate?.onWarpSectorData(data)
+        } else {
+            warpDelegate?.onWarpError(ResourceError.Sector)
+        }
+    }
+
+    private fun emitVenusSnapshot(snapshot: BundleDataSnapshot) {
+        val data = snapshot.venusSectorData
+        if (data != null) {
+            venusDelegate?.onVenusSectorData(data)
+        } else {
+            venusDelegate?.onVenusError(ResourceError.Sector)
         }
     }
 

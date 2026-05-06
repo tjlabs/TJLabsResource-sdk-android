@@ -1,6 +1,5 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
-import com.tjlabs.tjlabsauth_sdk_android.AuthRegion
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsauth_sdk_android.TokenResult
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
@@ -61,14 +60,18 @@ internal object TJLabsResourceNetworkConstants {
         return buildRetrofit(url)
     }
 
-    private const val USER_SECTOR_BUNDLE_SERVER_VERSION = "2026-03-30"
+    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
+    private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
+    private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
     private const val OLYMPUS_SUFFIX = ".jupiter.tjlabs.dev"
+    private const val WARP_SUFFIX = ".warp.tjlabs.dev"
     private var currentProvider : String = ServerProvider.AWS.value
 
     private var USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
+    private var WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
 
 
     fun setServerURL(provider: String, region: String) {
@@ -90,14 +93,26 @@ internal object TJLabsResourceNetworkConstants {
         }
 
         USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
+        WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
     }
 
-    fun getUserBaseURL() : String{
+    fun getUserBaseURL(): String {
         return USER_URL
     }
 
-    fun getUserSectorBundleVersion() : String {
-        return USER_SECTOR_BUNDLE_SERVER_VERSION
+    fun getBaseUrl(bundleType: ResourceBundleType): String {
+        return when (bundleType) {
+            ResourceBundleType.JUPITER, ResourceBundleType.VENUS -> USER_URL
+            ResourceBundleType.WARP -> WARP_USER_URL
+        }
+    }
+
+    fun getBundleServerVersion(bundleType: ResourceBundleType): String {
+        return when (bundleType) {
+            ResourceBundleType.JUPITER -> JUPITER_SECTOR_BUNDLE_SERVER_VERSION
+            ResourceBundleType.VENUS -> VENUS_SECTOR_BUNDLE_SERVER_VERSION
+            ResourceBundleType.WARP -> WARP_SECTOR_BUNDLE_SERVER_VERSION
+        }
     }
 
     class HeaderInterceptor(private val token: String) : Interceptor {
