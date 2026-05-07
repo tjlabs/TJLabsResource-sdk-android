@@ -898,13 +898,30 @@ internal class TJLabsBundleDataManager {
                 val wardsJson = levelObj.optJSONArray("wards") ?: JSONArray()
                 for (k in 0 until wardsJson.length()) {
                     val wardObj = wardsJson.optJSONObject(k) ?: continue
-                    val contentObj = wardObj.optJSONObject("content")
-                    val content = contentObj?.let {
-                        WarpWardContentOutput(
-                            number = it.optInt("number"),
-                            description = it.optString("description"),
-                            url = it.optString("url"),
-                            rssi = it.optFloatOrNull("rssi")
+                    val contents = mutableListOf<WarpWardContentOutput>()
+
+                    val contentsJson = wardObj.optJSONArray("contents")
+                    if (contentsJson != null) {
+                        for (contentIndex in 0 until contentsJson.length()) {
+                            val contentObj = contentsJson.optJSONObject(contentIndex) ?: continue
+                            contents.add(
+                                WarpWardContentOutput(
+                                    number = contentObj.optInt("number"),
+                                    description = contentObj.optString("description"),
+                                    url = contentObj.optString("url")
+                                )
+                            )
+                        }
+                    }
+
+                    val legacyContentObj = wardObj.optJSONObject("content")
+                    if (legacyContentObj != null && contents.isEmpty()) {
+                        contents.add(
+                            WarpWardContentOutput(
+                                number = legacyContentObj.optInt("number"),
+                                description = legacyContentObj.optString("description"),
+                                url = legacyContentObj.optString("url")
+                            )
                         )
                     }
                     wards.add(
@@ -913,7 +930,10 @@ internal class TJLabsBundleDataManager {
                             name = wardObj.optString("name"),
                             x = wardObj.optInt("x"),
                             y = wardObj.optInt("y"),
-                            content = content
+                            rssi = wardObj.optFloatOrNull("rssi")
+                                ?: legacyContentObj?.optFloatOrNull("rssi")
+                                ?: -99f,
+                            contents = contents
                         )
                     )
                 }

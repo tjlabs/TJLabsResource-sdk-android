@@ -204,14 +204,14 @@ data class WarpWardOutput(
     val name: String,
     val x: Int,
     val y: Int,
-    val content: WarpWardContentOutput?
+    val rssi: Float,
+    val contents: List<WarpWardContentOutput>
 )
 
 data class WarpWardContentOutput(
     val number: Int,
     val description: String,
     val url: String,
-    val rssi: Float?
 )
 
 data class VenusSectorOutput(
