@@ -99,6 +99,7 @@ internal class TJLabsBundleDataManager {
         private const val PREF_ENTRANCE_VERSION_PREFIX = "entrance_route_version_"
         private const val PREF_ENTRANCE_URL_PREFIX = "entrance_route_url_"
         private const val PREF_ENTRANCE_FILE_PREFIX = "entrance_route_file_"
+        private const val PDR_LEVEL_KEY_SUFFIX = "_PDR"
     }
 
     private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
@@ -281,6 +282,9 @@ internal class TJLabsBundleDataManager {
             TJResourceLogger.d(
                 "(TJLabsResource) enrichCsvData start // pathCsvCount=${snapshot.graphPathUrlsByKey.size} // entranceCsvCount=${snapshot.entranceRouteUrlsByKey.size}"
             )
+            snapshot.graphPathUrlsByKey.forEach { (k, v) ->
+                TJResourceLogger.d("(TJLabsResource) enrichCsvData path target // key=$k // url=$v")
+            }
             var isAllSuccess = true
             val pathPixelData = snapshot.pathPixelDataMap.toMutableMap()
             val entranceRouteData = snapshot.entranceRouteDataMap.toMutableMap()
@@ -301,9 +305,19 @@ internal class TJLabsBundleDataManager {
             for ((key, parsed) in pathResults) {
                 if (parsed != null) {
                     pathPixelData[key] = parsed
+                    TJResourceLogger.d("(TJLabsResource) enrichCsvData path parsed // key=$key")
                 } else {
-                    isAllSuccess = false
-                    TJResourceLogger.d("(TJLabsResource) enrichCsvData failed@PathPixelCsv // key=$key // url=${snapshot.graphPathUrlsByKey[key]}")
+                    val isPdrPath = key.endsWith(PDR_LEVEL_KEY_SUFFIX)
+                    if (isPdrPath) {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) enrichCsvData optional fail@PathPixelCsv(PDR) // key=$key // url=${snapshot.graphPathUrlsByKey[key]}"
+                        )
+                    } else {
+                        isAllSuccess = false
+                        TJResourceLogger.d(
+                            "(TJLabsResource) enrichCsvData failed@PathPixelCsv(DR) // key=$key // url=${snapshot.graphPathUrlsByKey[key]}"
+                        )
+                    }
                 }
             }
 
@@ -773,20 +787,72 @@ internal class TJLabsBundleDataManager {
                         landmarkMap[levelKey] = parseLandmarks(wardsJson)
                     }
 
-                    val graphObj = levelObj.optJSONObject("graph")
-                    if (isDebugLevel.not() && graphObj != null) {
-                        val nodes = parseGraphNodes(graphObj.optJSONArray("nodes"))
-                        val links = parseGraphLinks(graphObj.optJSONArray("links"))
-                        val linkGroups = parseGraphLinkGroups(graphObj.optJSONArray("link_groups"))
+                    if (isDebugLevel.not()) {
+                        val graphsArray = levelObj.optJSONArray("graphs")
+                        if (graphsArray == null) {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw graphs missing // levelKey=$levelKey"
+                            )
+                        } else {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw graphs count // levelKey=$levelKey // count=${graphsArray.length()}"
+                            )
+                            for (graphIndex in 0 until graphsArray.length()) {
+                                val graphItem = graphsArray.optJSONObject(graphIndex) ?: continue
+                                val drType = graphItem.optString("dead_reckoning")
+                                val pathUrl = graphItem.optJSONObject("path")?.optString("url").orEmpty()
+                                val nodeCount = graphItem.optJSONArray("nodes")?.length() ?: 0
+                                val linkCount = graphItem.optJSONArray("links")?.length() ?: 0
+                                TJResourceLogger.d(
+                                    "(TJLabsResource) parseBundleRaw graph item // levelKey=$levelKey // idx=$graphIndex // dr=$drType // nodes=$nodeCount // links=$linkCount // pathUrl=$pathUrl"
+                                )
+                            }
+                        }
+                    }
+
+                    val drGraphObj = resolveDrGraphObject(levelObj)
+                    if (isDebugLevel.not() && drGraphObj != null) {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) parseBundleRaw DR graph selected // levelKey=$levelKey // dead_reckoning=${drGraphObj.optString("dead_reckoning")}"
+                        )
+                        val nodes = parseGraphNodes(drGraphObj.optJSONArray("nodes"))
+                        val links = parseGraphLinks(drGraphObj.optJSONArray("links"))
+                        val linkGroups = parseGraphLinkGroups(drGraphObj.optJSONArray("link_groups"))
 
                         if (nodes != null && links != null) {
                             nodeMap[levelKey] = buildNodeDict(nodes)
                             linkMap[levelKey] = buildLinkDict(links, linkGroups ?: emptyList())
                         }
 
-                        val pathUrl = graphObj.optJSONObject("path")?.optString("url").orEmpty()
+                        val pathUrl = drGraphObj.optJSONObject("path")?.optString("url").orEmpty()
                         if (pathUrl.isNotBlank()) {
                             graphPathUrls[levelKey] = pathUrl
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw DR path mapped // levelKey=$levelKey // url=$pathUrl"
+                            )
+                        } else {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw DR path missing // levelKey=$levelKey"
+                            )
+                        }
+                    } else if (isDebugLevel.not()) {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) parseBundleRaw DR graph not found // levelKey=$levelKey"
+                        )
+                    }
+
+                    if (isDebugLevel.not()) {
+                        val pdrPathUrl = resolvePdrPathUrl(levelObj)
+                        if (pdrPathUrl.isNotBlank()) {
+                            val pdrLevelKey = "${levelKey}${PDR_LEVEL_KEY_SUFFIX}"
+                            graphPathUrls[pdrLevelKey] = pdrPathUrl
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw PDR path mapped // levelKey=$pdrLevelKey // url=$pdrPathUrl"
+                            )
+                        } else {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw PDR path missing // levelKey=$levelKey"
+                            )
                         }
                     }
 
@@ -883,6 +949,68 @@ internal class TJLabsBundleDataManager {
                 )
             )
         )
+    }
+
+    private fun resolveDrGraphObject(levelObj: JSONObject): JSONObject? {
+        // Current format only: "graphs": [ { dead_reckoning: "DR", ... }, { dead_reckoning: "PDR", ... } ]
+        val graphsArray = levelObj.optJSONArray("graphs") ?: return null
+        for (i in 0 until graphsArray.length()) {
+            val graphObj = graphsArray.optJSONObject(i) ?: continue
+            val drType = resolveDeadReckoningType(graphObj)
+            if (drType.equals("DR", ignoreCase = true)) {
+                return graphObj
+            }
+        }
+
+        // Fallback: if dead_reckoning field is missing/empty, infer DR by path URL.
+        for (i in 0 until graphsArray.length()) {
+            val graphObj = graphsArray.optJSONObject(i) ?: continue
+            val pathUrl = graphObj.optJSONObject("path")?.optString("url").orEmpty()
+            if (pathUrl.contains("/paths/dr/", ignoreCase = true)) {
+                return graphObj
+            }
+        }
+
+        return graphsArray.optJSONObject(0)
+    }
+
+    private fun resolvePdrPathUrl(levelObj: JSONObject): String {
+        val graphsArray = levelObj.optJSONArray("graphs") ?: return ""
+        for (i in 0 until graphsArray.length()) {
+            val graphObj = graphsArray.optJSONObject(i) ?: continue
+            val drType = resolveDeadReckoningType(graphObj)
+            if (drType.equals("PDR", ignoreCase = true)) {
+                return graphObj.optJSONObject("path")?.optString("url").orEmpty()
+            }
+        }
+
+        // Fallback: infer PDR by path URL when dead_reckoning is blank.
+        for (i in 0 until graphsArray.length()) {
+            val graphObj = graphsArray.optJSONObject(i) ?: continue
+            val pathUrl = graphObj.optJSONObject("path")?.optString("url").orEmpty()
+            if (pathUrl.contains("/paths/pdr/", ignoreCase = true)) {
+                return pathUrl
+            }
+        }
+        return ""
+    }
+
+    private fun resolveDeadReckoningType(graphObj: JSONObject): String {
+        // Current schema rule:
+        // is_vehicle == true  -> DR
+        // otherwise           -> PDR
+        val isVehicleRaw = when {
+            graphObj.has("is_vehicle") -> graphObj.opt("is_vehicle")
+            graphObj.has("isVehicle") -> graphObj.opt("isVehicle")
+            else -> null
+        }
+        val isVehicle = when (isVehicleRaw) {
+            is Boolean -> isVehicleRaw
+            is Number -> isVehicleRaw.toInt() != 0
+            is String -> isVehicleRaw.equals("true", ignoreCase = true) || isVehicleRaw == "1"
+            else -> null
+        }
+        return if (isVehicle == true) "DR" else "PDR"
     }
 
     private fun parseWarpSector(root: JSONObject): WarpSectorOutput {
