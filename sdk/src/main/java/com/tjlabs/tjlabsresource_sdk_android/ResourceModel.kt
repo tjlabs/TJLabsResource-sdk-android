@@ -242,6 +242,17 @@ data class VenusWardOutput(
     val rssi: Float?
 )
 
+// MARK: - Simulations
+data class SimulationItemOutput(
+    val name: String,
+    val url: String
+)
+
+data class SimulationBundleOutput(
+    val vehicle: List<SimulationItemOutput>,
+    val pdr: List<SimulationItemOutput>
+)
+
 data class BuildingOutput(
     val id: Int,
     val name: String,
@@ -629,4 +640,8 @@ interface TJLabsWarpResourceManagerDelegate {
 interface TJLabsVenusResourceManagerDelegate {
     fun onVenusSectorData(data: VenusSectorOutput)
     fun onVenusError(error: ResourceError)
+}
+
+interface TJLabsSimulationResourceManagerDelegate {
+    fun onSimulationData(sectorId: Int, data: SimulationBundleOutput)
 }
