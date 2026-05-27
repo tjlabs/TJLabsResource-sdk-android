@@ -20,7 +20,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsWarpResourceManagerDelegate, TJLabsVenusResourceManagerDelegate {
+class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsWarpResourceManagerDelegate, TJLabsVenusResourceManagerDelegate, TJLabsSimulationResourceManagerDelegate {
     private lateinit var authStatusText: TextView
     private lateinit var jupiterStatusText: TextView
     private lateinit var jupiterDetailText: TextView
@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var testJupiterBundleButton: Button
     private lateinit var testVenusBundleButton: Button
     private lateinit var testWardBundleButton: Button
+    private lateinit var loadSimulationDataButton: Button
 
     private val pathPixelSourceHint = mutableMapOf<String, String>()
     private val imageSourceHint = mutableMapOf<String, String>()
@@ -44,7 +45,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var accessKey: String
     private lateinit var accessSecretKey: String
     private lateinit var clientKey: String
-    private val sectorId = 1 // covensia : 20 // tips : 1
+    private val sectorId = 20 // covensia : 20 // tips : 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +67,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         testJupiterBundleButton = findViewById(R.id.buttonTestJupiterBundle)
         testVenusBundleButton = findViewById(R.id.buttonTestVenusBundle)
         testWardBundleButton = findViewById(R.id.buttonTestWardBundle)
+        loadSimulationDataButton = findViewById(R.id.buttonLoadSimulationData)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -88,6 +90,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         manager.delegate = this
         manager.warpDelegate = this
         manager.venusDelegate = this
+        manager.simulationDelegate = this
         manager.setDebugOption(true)
 
         testJupiterBundleButton.setOnClickListener {
@@ -98,6 +101,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         }
         testWardBundleButton.setOnClickListener {
             runWardBundleTest(manager, getSelectedProvider(), sectorId)
+        }
+        loadSimulationDataButton.setOnClickListener {
+            runSimulationDataLoad(manager, getSelectedProvider(), sectorId)
         }
     }
 
@@ -172,6 +178,24 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                     "provider=$provider sectorId=$sectorId • ${nowText()}",
                     isSuccess
                 )
+            }
+        }
+    }
+
+    private fun runSimulationDataLoad(manager: TJLabsResourceManager, provider: String, sectorId: Int) {
+        appendCallbackLog("loadSimulationData", "start sectorId=$sectorId", "api")
+        authenticate(provider) { authSuccess ->
+            if (!authSuccess) {
+                appendCallbackLog("loadSimulationData", "auth failed provider=$provider", "api")
+                return@authenticate
+            }
+            manager.loadSimulationData(
+                application = application,
+                provider = provider,
+                region = ResourceRegion.KOREA.value,
+                sectorId = sectorId
+            ) { isSuccess ->
+                appendCallbackLog("loadSimulationData", "success=$isSuccess sectorId=$sectorId", "api")
             }
         }
     }
@@ -408,6 +432,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     override fun onVenusError(error: ResourceError) {
         appendCallbackLog("onVenusError", "error=$error", "api")
         updateVenusStatus("Failed", "error=$error • ${nowText()}", false)
+    }
+
+    override fun onSimulationData(sectorId: Int, data: SimulationBundleOutput) {
+        appendCallbackLog(
+            "onSimulationData",
+            "sectorId=$sectorId vehicle=${data.vehicle.size} pdr=${data.pdr.size}",
+            "api"
+        )
     }
 
     private fun populateSourceHints(data: SectorOutput) {

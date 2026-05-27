@@ -31,6 +31,8 @@ import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.ResourceBundleType
+import com.tjlabs.tjlabsresource_sdk_android.SimulationBundleOutput
+import com.tjlabs.tjlabsresource_sdk_android.SimulationItemOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.UnitData
@@ -99,6 +101,9 @@ internal class TJLabsBundleDataManager {
         private const val PREF_ENTRANCE_VERSION_PREFIX = "entrance_route_version_"
         private const val PREF_ENTRANCE_URL_PREFIX = "entrance_route_url_"
         private const val PREF_ENTRANCE_FILE_PREFIX = "entrance_route_file_"
+        private const val PREF_SIM_VERSION_PREFIX = "simulation_version_"
+        private const val PREF_SIM_URL_PREFIX = "simulation_url_"
+        private const val PREF_SIM_FILE_PREFIX = "simulation_file_"
         private const val PDR_LEVEL_KEY_SUFFIX = "_PDR"
     }
 
@@ -171,6 +176,63 @@ internal class TJLabsBundleDataManager {
                         "(TJLabsResource) loadBundle done // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
                     )
                     completion(csvSuccess, "(TJLabsResource) Success : load bundle", enriched)
+                }
+            }
+        }
+    }
+
+    fun loadSimulationData(
+        application: Application,
+        sectorId: Int,
+        completion: (Boolean, String, SimulationBundleOutput?) -> Unit
+    ) {
+        val bundleType = ResourceBundleType.JUPITER
+        requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
+            if ((metaStatus in 200 until 300) == false || meta == null) {
+                completion(false, metaMsg, null)
+                return@requestBundleMeta
+            }
+
+            loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedRaw ->
+                val parsed = parseSimulationsFromRaw(cachedRaw)
+                if (parsed != null) {
+                    downloadSimulationFiles(application, sectorId, meta.version_id, parsed) { downloadSuccess ->
+                        completion(
+                            downloadSuccess,
+                            if (downloadSuccess) {
+                                "(TJLabsResource) Success : load simulation from cache"
+                            } else {
+                                "(TJLabsResource) Failure : download simulation files from cache"
+                            },
+                            parsed
+                        )
+                    }
+                    return@requestBundleMeta
+                }
+            }
+
+            requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
+                if ((rawStatus in 200 until 300) == false || raw.isNullOrBlank()) {
+                    completion(false, rawMsg, null)
+                    return@requestBundleRaw
+                }
+
+                saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
+                val parsed = parseSimulationsFromRaw(raw)
+                if (parsed != null) {
+                    downloadSimulationFiles(application, sectorId, meta.version_id, parsed) { downloadSuccess ->
+                        completion(
+                            downloadSuccess,
+                            if (downloadSuccess) {
+                                "(TJLabsResource) Success : load simulation"
+                            } else {
+                                "(TJLabsResource) Failure : download simulation files"
+                            },
+                            parsed
+                        )
+                    }
+                } else {
+                    completion(false, "(TJLabsResource) Error : simulations not found", null)
                 }
             }
         }
@@ -949,6 +1011,241 @@ internal class TJLabsBundleDataManager {
                 )
             )
         )
+    }
+
+    private fun parseSimulations(arr: JSONArray?): SimulationBundleOutput? {
+        if (arr == null) return null
+
+        val vehicleItems = mutableListOf<SimulationItemOutput>()
+        val pdrItems = mutableListOf<SimulationItemOutput>()
+
+        for (i in 0 until arr.length()) {
+            val simulationObj = arr.optJSONObject(i) ?: continue
+            val isVehicle = when (val raw = simulationObj.opt("is_vehicle")) {
+                is Boolean -> raw
+                is Number -> raw.toInt() != 0
+                is String -> raw.equals("true", ignoreCase = true) || raw == "1"
+                else -> false
+            }
+
+            val itemsJson = simulationObj.optJSONArray("items") ?: JSONArray()
+            for (j in 0 until itemsJson.length()) {
+                val itemObj = itemsJson.optJSONObject(j) ?: continue
+                val name = itemObj.optString("name").trim()
+                val url = itemObj.optString("url").trim()
+                if (name.isBlank() || url.isBlank()) continue
+
+                val item = SimulationItemOutput(name = name, url = url)
+                if (isVehicle) {
+                    vehicleItems.add(item)
+                } else {
+                    pdrItems.add(item)
+                }
+            }
+        }
+
+        return SimulationBundleOutput(
+            vehicle = vehicleItems,
+            pdr = pdrItems
+        ).also {
+            TJResourceLogger.d(
+                "(TJLabsResource) parseSimulations // vehicle=${it.vehicle.size} // pdr=${it.pdr.size}"
+            )
+        }
+    }
+
+    private fun parseSimulationsFromRaw(raw: String): SimulationBundleOutput? {
+        return try {
+            val root = JSONObject(raw)
+            parseSimulations(root.optJSONArray("simulations"))
+        } catch (e: Exception) {
+            TJResourceLogger.d("(TJLabsResource) parseSimulationsFromRaw failed // error=${e.localizedMessage}")
+            null
+        }
+    }
+
+    private fun downloadSimulationFiles(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        simulationData: SimulationBundleOutput,
+        completion: (Boolean) -> Unit
+    ) {
+        CoroutineScope(Dispatchers.IO).launch {
+            var allSuccess = true
+
+            val vehicleResults = simulationData.vehicle.map { item ->
+                async {
+                    val key = "vehicle_${sanitizeSimulationName(item.name)}"
+                    val saved = cacheSimulationJson(
+                        application = application,
+                        sectorId = sectorId,
+                        versionId = versionId,
+                        key = key,
+                        url = item.url
+                    )
+                    if (!saved) {
+                        TJResourceLogger.d("(TJLabsResource) simulation download fail // type=vehicle // name=${item.name} // url=${item.url}")
+                    } else {
+                        TJResourceLogger.d("(TJLabsResource) simulation download success // type=vehicle // name=${item.name} // url=${item.url}")
+                    }
+                    saved
+                }
+            }
+
+            val pdrResults = simulationData.pdr.map { item ->
+                async {
+                    val key = "pdr_${sanitizeSimulationName(item.name)}"
+                    val saved = cacheSimulationJson(
+                        application = application,
+                        sectorId = sectorId,
+                        versionId = versionId,
+                        key = key,
+                        url = item.url
+                    )
+                    if (!saved) {
+                        TJResourceLogger.d("(TJLabsResource) simulation download fail // type=pdr // name=${item.name} // url=${item.url}")
+                    } else {
+                        TJResourceLogger.d("(TJLabsResource) simulation download success // type=pdr // name=${item.name} // url=${item.url}")
+                    }
+                    saved
+                }
+            }
+
+            val results = (vehicleResults + pdrResults).awaitAll()
+            if (results.any { it.not() }) {
+                allSuccess = false
+            }
+
+            withContext(Dispatchers.Main) {
+                completion(allSuccess)
+            }
+        }
+    }
+
+    private fun cacheSimulationJson(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        key: String,
+        url: String
+    ): Boolean {
+        val text = getCachedContentIfValid(
+            application = application,
+            sectorId = sectorId,
+            versionId = versionId,
+            key = key,
+            url = url,
+            source = "simulation:$key",
+            versionPrefix = PREF_SIM_VERSION_PREFIX,
+            urlPrefix = PREF_SIM_URL_PREFIX,
+            filePrefix = PREF_SIM_FILE_PREFIX
+        ) ?: run {
+            val downloaded = fetchTextFromUrl(url, "simulation:$key") ?: return false
+            saveSimulationCache(
+                application = application,
+                sectorId = sectorId,
+                versionId = versionId,
+                key = key,
+                url = url,
+                content = downloaded
+            )
+            downloaded
+        }
+
+        return text.isNotBlank()
+    }
+
+    private fun getCachedContentIfValid(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        key: String,
+        url: String,
+        source: String,
+        versionPrefix: String,
+        urlPrefix: String,
+        filePrefix: String
+    ): String? {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val versionKey = "${versionPrefix}${sectorId}_$key"
+        val urlKey = "${urlPrefix}${sectorId}_$key"
+        val fileKey = "${filePrefix}${sectorId}_$key"
+
+        val savedVersion = prefs.getString(versionKey, null)
+        val savedUrl = prefs.getString(urlKey, null)
+        val savedPath = prefs.getString(fileKey, null)
+        if (savedVersion == versionId && savedUrl == url && savedPath.isNullOrBlank().not()) {
+            val cachedFile = File(savedPath!!)
+            if (cachedFile.exists() && cachedFile.length() > 0) {
+                return try {
+                    cachedFile.readText().also {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) simulation cache hit // source=$source // key=$key // version=$versionId // path=${cachedFile.absolutePath} // bytes=${it.length}"
+                        )
+                    }
+                } catch (e: Exception) {
+                    TJResourceLogger.d(
+                        "(TJLabsResource) simulation cache read fail // source=$source // key=$key // error=${e.localizedMessage}"
+                    )
+                    null
+                }
+            }
+        }
+        return null
+    }
+
+    private fun saveSimulationCache(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        key: String,
+        url: String,
+        content: String
+    ) {
+        try {
+            val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+            }
+
+            val fileName = "${sanitizeSimulationName(key)}.json"
+            val jsonFile = File(cacheDir, fileName)
+            jsonFile.writeText(content)
+
+            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val versionKey = "${PREF_SIM_VERSION_PREFIX}${sectorId}_$key"
+            val urlKey = "${PREF_SIM_URL_PREFIX}${sectorId}_$key"
+            val fileKey = "${PREF_SIM_FILE_PREFIX}${sectorId}_$key"
+            prefs.edit()
+                .putString(versionKey, versionId)
+                .putString(urlKey, url)
+                .putString(fileKey, jsonFile.absolutePath)
+                .apply()
+
+            TJResourceLogger.d(
+                "(TJLabsResource) simulation cache save // key=$key // version=$versionId // path=${jsonFile.absolutePath} // bytes=${content.length}"
+            )
+        } catch (e: Exception) {
+            TJResourceLogger.d(
+                "(TJLabsResource) simulation cache save fail // key=$key // error=${e.localizedMessage}"
+            )
+        }
+    }
+
+    private fun sanitizeSimulationName(name: String): String {
+        return name
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("?", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+            .trim()
+            .ifEmpty { "unknown" }
     }
 
     private fun resolveDrGraphObject(levelObj: JSONObject): JSONObject? {

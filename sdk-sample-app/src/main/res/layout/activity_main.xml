@@ -88,6 +88,13 @@
                 android:layout_marginTop="8dp"
                 android:text="Load Warp Resource" />
 
+            <Button
+                android:id="@+id/buttonLoadSimulationData"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Load Simulation Data" />
+
             <LinearLayout
                 android:id="@+id/cardJupiter"
                 android:layout_width="match_parent"

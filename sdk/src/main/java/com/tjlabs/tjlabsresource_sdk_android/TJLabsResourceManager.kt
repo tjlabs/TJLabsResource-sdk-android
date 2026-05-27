@@ -10,6 +10,7 @@ class TJLabsResourceManager {
     var delegate: TJLabsResourceManagerDelegate? = null
     var warpDelegate: TJLabsWarpResourceManagerDelegate? = null
     var venusDelegate: TJLabsVenusResourceManagerDelegate? = null
+    var simulationDelegate: TJLabsSimulationResourceManagerDelegate? = null
 
     companion object {
         private val sectorDataMap: MutableMap<Int, SectorOutput> = mutableMapOf()
@@ -29,6 +30,7 @@ class TJLabsResourceManager {
         private val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
         private val linkDataMap: MutableMap<String, Map<Int, LinkData>> = mutableMapOf()
         private val affineParamMap: MutableMap<Int, AffineTransParamOutput?> = mutableMapOf()
+        private val simulationDataMap: MutableMap<Int, SimulationBundleOutput> = mutableMapOf()
 
         private val imageDataMap: MutableMap<String, Bitmap> = mutableMapOf()
         private val sectorParamData: MutableMap<Int, SectorParameterOutput> = mutableMapOf()
@@ -263,6 +265,30 @@ class TJLabsResourceManager {
     fun getLevelParamData(): Map<String, LevelParameterOutput> = levelParamData
 
     fun getAffineParamData(): Map<Int, AffineTransParamOutput?> = affineParamMap
+
+    fun getSimulationData(sectorId: Int): SimulationBundleOutput? = simulationDataMap[sectorId]
+
+    fun loadSimulationData(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        completion: (Boolean) -> Unit
+    ) {
+        setRegion(provider, region)
+        bundleDataManager.loadSimulationData(application, sectorId) { isSuccess, message, simulationData ->
+            TJResourceLogger.d(
+                "(TJLabsResource) loadSimulationData callback // success=$isSuccess // message=$message // sectorId=$sectorId"
+            )
+            if (isSuccess && simulationData != null) {
+                simulationDataMap[sectorId] = simulationData
+                simulationDelegate?.onSimulationData(sectorId, simulationData)
+                completion(true)
+            } else {
+                completion(false)
+            }
+        }
+    }
 
     fun updateScaleOffsetData(key: String, completion: (Boolean) -> Unit) {
         val cached = scaleOffsetDataMap[key]
