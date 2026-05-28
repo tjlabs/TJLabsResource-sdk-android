@@ -338,13 +338,13 @@ data class LevelWardsOutput(
 )
 
 data class AffineTransParamOutput(
-    val xx_scale: Float = 0f,
-    val xy_shear: Float = 0f,
-    val x_translation: Float = 0f,
-    val yx_shear: Float = 0f,
-    val yy_scale: Float = 0f,
-    val y_translation: Float = 0f,
-    val heading_offset : Float = 0f
+    val xx_scale: Double = 0.0,
+    val xy_shear: Double = 0.0,
+    val x_translation: Double = 0.0,
+    val yx_shear: Double = 0.0,
+    val yy_scale: Double = 0.0,
+    val y_translation: Double = 0.0,
+    val heading_offset : Double = 0.0
 )
 
 data class Ward (
