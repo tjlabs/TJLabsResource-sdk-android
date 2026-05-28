@@ -117,8 +117,13 @@ internal class TJLabsBundleDataManager {
         sectorId: Int,
         completion: (Boolean, String, BundleDataSnapshot?) -> Unit
     ) {
+        val loadStartMs = nowMs()
+        val metaStartMs = nowMs()
         TJResourceLogger.d("(TJLabsResource) loadBundle start // type=$bundleType // sectorId=$sectorId")
         requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
+            TJResourceLogger.d(
+                "(TJLabsResource) perf loadBundle meta done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(metaStartMs)} // status=$metaStatus"
+            )
             if ((metaStatus in 200 until 300) == false || meta == null) {
                 TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // type=$bundleType // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
                 completion(false, metaMsg, null)
@@ -138,13 +143,24 @@ internal class TJLabsBundleDataManager {
             )
 
             loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedRaw ->
+                val parseCacheStartMs = nowMs()
                 val parsedFromCache = parseBundleRaw(bundleType, sectorId, meta, cachedRaw)
+                TJResourceLogger.d(
+                    "(TJLabsResource) perf loadBundle parse cached raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(parseCacheStartMs)} // parsed=${parsedFromCache != null}"
+                )
                 if (parsedFromCache != null) {
                     TJResourceLogger.d(
                         "(TJLabsResource) loadBundle use disk cache // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}"
                     )
+                    val enrichStartMs = nowMs()
                     enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
                         bundleCache[cacheKey] = enriched
+                        TJResourceLogger.d(
+                            "(TJLabsResource) perf loadBundle enrich cached raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
+                        )
+                        TJResourceLogger.d(
+                            "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=disk_cache_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
+                        )
                         completion(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched)
                     }
                     return@requestBundleMeta
@@ -155,23 +171,38 @@ internal class TJLabsBundleDataManager {
                 }
             }
 
+            val rawStartMs = nowMs()
             requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
+                TJResourceLogger.d(
+                    "(TJLabsResource) perf loadBundle raw done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(rawStartMs)} // status=$rawStatus // hasBody=${raw.isNullOrBlank().not()}"
+                )
                 if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
                     TJResourceLogger.d("(TJLabsResource) loadBundle failed@bundleRaw // type=$bundleType // status=$rawStatus // msg=$rawMsg // url=${meta.url}")
                     completion(false, rawMsg, null)
                     return@requestBundleRaw
                 }
 
+                val parseRawStartMs = nowMs()
                 val parsed = parseBundleRaw(bundleType, sectorId, meta, raw)
+                TJResourceLogger.d(
+                    "(TJLabsResource) perf loadBundle parse raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(parseRawStartMs)} // parsed=${parsed != null}"
+                )
                 if (parsed == null) {
                     TJResourceLogger.d("(TJLabsResource) loadBundle failed@parseBundleRaw // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // url=${meta.url}")
                     completion(false, "(TJLabsResource) Error : parse bundle raw", null)
                     return@requestBundleRaw
                 }
 
+                val enrichStartMs = nowMs()
                 enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
                     bundleCache[cacheKey] = enriched
                     saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
+                    TJResourceLogger.d(
+                        "(TJLabsResource) perf loadBundle enrich raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
+                    )
+                    TJResourceLogger.d(
+                        "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=network_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
+                    )
                     TJResourceLogger.d(
                         "(TJLabsResource) loadBundle done // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
                     )
@@ -332,6 +363,7 @@ internal class TJLabsBundleDataManager {
         snapshot: BundleDataSnapshot,
         completion: (Boolean, BundleDataSnapshot) -> Unit
     ) {
+        val enrichTotalStartMs = nowMs()
         val hasPathUrls = snapshot.graphPathUrlsByKey.isNotEmpty()
         val hasEntranceUrls = snapshot.entranceRouteUrlsByKey.isNotEmpty()
         if (hasPathUrls == false && hasEntranceUrls == false) {
@@ -360,6 +392,7 @@ internal class TJLabsBundleDataManager {
                 shouldLoad
             }
 
+            val pathStageStartMs = nowMs()
             val pathResults = pathTargets.map { (key, url) ->
                 async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, url) }
             }.awaitAll()
@@ -382,7 +415,11 @@ internal class TJLabsBundleDataManager {
                     }
                 }
             }
+            TJResourceLogger.d(
+                "(TJLabsResource) perf enrichCsvData path stage // sectorId=$sectorId // targetCount=${pathTargets.size} // elapsedMs=${elapsedMs(pathStageStartMs)}"
+            )
 
+            val entranceStageStartMs = nowMs()
             val entranceResults = snapshot.entranceRouteUrlsByKey.map { (key, url) ->
                 async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url) }
             }.awaitAll()
@@ -395,7 +432,11 @@ internal class TJLabsBundleDataManager {
                     TJResourceLogger.d("(TJLabsResource) enrichCsvData failed@EntranceCsv // key=$key // url=${snapshot.entranceRouteUrlsByKey[key]}")
                 }
             }
+            TJResourceLogger.d(
+                "(TJLabsResource) perf enrichCsvData entrance stage // sectorId=$sectorId // targetCount=${snapshot.entranceRouteUrlsByKey.size} // elapsedMs=${elapsedMs(entranceStageStartMs)}"
+            )
 
+            val imageStageStartMs = nowMs()
             val imageResults = snapshot.imageUrlsByKey.map { (key, url) ->
                 async { key to fetchImageFromUrl(key, url) }
             }.awaitAll()
@@ -407,6 +448,9 @@ internal class TJLabsBundleDataManager {
                     TJResourceLogger.d("(TJLabsResource) enrichCsvData failed@Image // key=$key // url=${snapshot.imageUrlsByKey[key]}")
                 }
             }
+            TJResourceLogger.d(
+                "(TJLabsResource) perf enrichCsvData image stage // sectorId=$sectorId // targetCount=${snapshot.imageUrlsByKey.size} // elapsedMs=${elapsedMs(imageStageStartMs)}"
+            )
 
             val enriched = snapshot.copy(
                 pathPixelDataMap = pathPixelData,
@@ -415,7 +459,9 @@ internal class TJLabsBundleDataManager {
             )
 
             withContext(Dispatchers.Main) {
-                TJResourceLogger.d("(TJLabsResource) enrichCsvData done // success=$isAllSuccess")
+                TJResourceLogger.d(
+                    "(TJLabsResource) enrichCsvData done // success=$isAllSuccess // elapsedMs=${elapsedMs(enrichTotalStartMs)}"
+                )
                 completion(isAllSuccess, enriched)
             }
         }
@@ -428,6 +474,7 @@ internal class TJLabsBundleDataManager {
         key: String,
         url: String
     ): PathPixelData? {
+        val startMs = nowMs()
         TJResourceLogger.d("(TJLabsResource) fetchPathPixelData start // key=$key // url=$url")
         val text = getCsvTextWithCache(
             application = application,
@@ -439,10 +486,13 @@ internal class TJLabsBundleDataManager {
             versionPrefix = PREF_PATH_VERSION_PREFIX,
             urlPrefix = PREF_PATH_URL_PREFIX,
             filePrefix = PREF_PATH_FILE_PREFIX
-        ) ?: return null
+        ) ?: run {
+            TJResourceLogger.d("(TJLabsResource) perf fetchPathPixelData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
+            return null
+        }
         val parsed = parsePathPixelData(text)
         TJResourceLogger.d(
-            "(TJLabsResource) fetchPathPixelData success // key=$key // points=${parsed.road.firstOrNull()?.size ?: 0}"
+            "(TJLabsResource) fetchPathPixelData success // key=$key // points=${parsed.road.firstOrNull()?.size ?: 0} // elapsedMs=${elapsedMs(startMs)}"
         )
         return parsed
     }
@@ -454,6 +504,7 @@ internal class TJLabsBundleDataManager {
         key: String,
         url: String
     ): EntranceRouteData? {
+        val startMs = nowMs()
         TJResourceLogger.d("(TJLabsResource) fetchEntranceRouteData start // key=$key // url=$url")
         val text = getCsvTextWithCache(
             application = application,
@@ -465,10 +516,13 @@ internal class TJLabsBundleDataManager {
             versionPrefix = PREF_ENTRANCE_VERSION_PREFIX,
             urlPrefix = PREF_ENTRANCE_URL_PREFIX,
             filePrefix = PREF_ENTRANCE_FILE_PREFIX
-        ) ?: return null
+        ) ?: run {
+            TJResourceLogger.d("(TJLabsResource) perf fetchEntranceRouteData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
+            return null
+        }
         val parsed = parseEntranceRouteData(text)
         TJResourceLogger.d(
-            "(TJLabsResource) fetchEntranceRouteData success // key=$key // routes=${parsed.route.size}"
+            "(TJLabsResource) fetchEntranceRouteData success // key=$key // routes=${parsed.route.size} // elapsedMs=${elapsedMs(startMs)}"
         )
         return parsed
     }
@@ -984,13 +1038,13 @@ internal class TJLabsBundleDataManager {
     private fun parseAffine(obj: JSONObject?): AffineTransParamOutput? {
         if (obj == null) return null
         return AffineTransParamOutput(
-            xx_scale = obj.optFloatOrDefault("xx_scale"),
-            xy_shear = obj.optFloatOrDefault("xy_shear"),
-            x_translation = obj.optFloatOrDefault("x_translation"),
-            yx_shear = obj.optFloatOrDefault("yx_shear"),
-            yy_scale = obj.optFloatOrDefault("yy_scale"),
-            y_translation = obj.optFloatOrDefault("y_translation"),
-            heading_offset = obj.optFloatOrDefault("heading_offset")
+            xx_scale = obj.optDoubleOrDefault("xx_scale"),
+            xy_shear = obj.optDoubleOrDefault("xy_shear"),
+            x_translation = obj.optDoubleOrDefault("x_translation"),
+            yx_shear = obj.optDoubleOrDefault("yx_shear"),
+            yy_scale = obj.optDoubleOrDefault("yy_scale"),
+            y_translation = obj.optDoubleOrDefault("y_translation"),
+            heading_offset = obj.optDoubleOrDefault("heading_offset")
         )
     }
 
@@ -1853,6 +1907,15 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    private fun JSONObject.optDoubleOrDefault(key: String, defaultValue: Double = 0.0): Double {
+        val value = opt(key)
+        return when (value) {
+            is Number -> value.toDouble()
+            is String -> value.toDoubleOrNull() ?: defaultValue
+            else -> defaultValue
+        }
+    }
+
     private fun JSONObject.optFloatOrNull(key: String): Float? {
         if (has(key) == false || isNull(key)) return null
         val value = opt(key)
@@ -1872,4 +1935,8 @@ internal class TJLabsBundleDataManager {
             else -> null
         }
     }
+
+    private fun nowMs(): Long = System.currentTimeMillis()
+
+    private fun elapsedMs(startMs: Long): Long = nowMs() - startMs
 }

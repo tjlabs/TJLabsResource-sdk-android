@@ -39,6 +39,50 @@ dependencies {
 - Artifact: `TJLabsResource-sdk-android`
 - Group: `com.github.tjlabs`
 
+## Usage
+
+### Manager
+
+Use a single manager:
+
+```kotlin
+val manager = TJLabsResourceManager()
+```
+
+### Resource Load APIs
+
+- `loadJupiterResource(...)`
+- `loadVenusResource(...)`
+- `loadWarpResource(...)`
+- `loadSimulationData(...)`
+
+### Delegates
+
+Set only the delegates you need.
+
+- `delegate: TJLabsResourceManagerDelegate` (Jupiter core data)
+- `venusDelegate: TJLabsVenusResourceManagerDelegate`
+- `warpDelegate: TJLabsWarpResourceManagerDelegate`
+- `simulationDelegate: TJLabsSimulationResourceManagerDelegate`
+
+Simulation callback:
+
+```kotlin
+override fun onSimulationData(sectorId: Int, data: SimulationBundleOutput) {
+    // data.vehicle: List<SimulationItemOutput(name, url)>
+    // data.pdr: List<SimulationItemOutput(name, url)>
+}
+```
+
+`loadSimulationData(...)` downloads simulation JSON files and caches them with names like:
+
+- `vehicle_<name>.json`
+- `pdr_<name>.json`
+
+### Affine Type
+
+`AffineTransParamOutput` fields are `Double`.
+
 ## Local publish check
 
 ```bash
