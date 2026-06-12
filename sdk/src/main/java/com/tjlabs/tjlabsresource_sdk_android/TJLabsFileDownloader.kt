@@ -13,6 +13,7 @@ import java.net.URL
 
 internal object TJLabsFileDownloader {
     var region : String = ResourceRegion.KOREA.value
+    var provider: String = ServerProvider.AWS.value
 
     suspend fun downloadCSVFile(application: Application, url: URL, sectorId: Int, fileName: String): Triple<File?, String, Exception?> =
         withContext(
@@ -27,7 +28,8 @@ internal object TJLabsFileDownloader {
                 connection.requestMethod = "GET"
                 val input: InputStream = connection.inputStream
 
-                val subFolder = File(application.cacheDir, "${region}_$sectorId")
+                val subFolderName = "${provider}_${region}_$sectorId"
+                val subFolder = File(application.cacheDir, subFolderName)
                 if (!subFolder.exists()) {
                     subFolder.mkdirs() // 하위 폴더 생성
                 }
@@ -40,7 +42,7 @@ internal object TJLabsFileDownloader {
                         input.copyTo(output)
                     }
                 }
-                Triple(outputFile, "${application.cacheDir}/${region}_$sectorId/$fileName", null)
+                Triple(outputFile, "${application.cacheDir}/$subFolderName/$fileName", null)
             } catch (e: IOException) {
                 exception = e
                 Triple(null, "", exception)

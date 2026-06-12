@@ -115,6 +115,7 @@ class TJLabsResourceManager {
 
     private fun setRegion(provider: String, region: String) {
         TJLabsResourceNetworkConstants.setServerURL(provider, region)
+        TJLabsFileDownloader.provider = provider
         TJLabsFileDownloader.region = region
     }
 
