@@ -31,6 +31,8 @@ import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.ResourceBundleType
+import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
+import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
 import com.tjlabs.tjlabsresource_sdk_android.SimulationBundleOutput
 import com.tjlabs.tjlabsresource_sdk_android.SimulationItemOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
@@ -95,6 +97,7 @@ internal class TJLabsBundleDataManager {
         private const val PREF_BUNDLE_VERSION_PREFIX = "bundle_version_"
         private const val PREF_BUNDLE_URL_PREFIX = "bundle_url_"
         private const val PREF_BUNDLE_FILE_PREFIX = "bundle_file_"
+        private const val PREF_BUNDLE_META_TS_PREFIX = "bundle_meta_ts_"
         private const val PREF_PATH_VERSION_PREFIX = "graph_path_version_"
         private const val PREF_PATH_URL_PREFIX = "graph_path_url_"
         private const val PREF_PATH_FILE_PREFIX = "graph_path_file_"
@@ -108,7 +111,7 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
-        return "${bundleType.name}_$sectorId"
+        return "${buildCacheNamespace()}_${bundleType.name}_$sectorId"
     }
 
     fun loadBundle(
@@ -118,25 +121,17 @@ internal class TJLabsBundleDataManager {
         completion: (Boolean, String, BundleDataSnapshot?) -> Unit
     ) {
         val loadStartMs = nowMs()
-        val metaStartMs = nowMs()
-        TJResourceLogger.d("(TJLabsResource) loadBundle start // type=$bundleType // sectorId=$sectorId")
-        requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
-            TJResourceLogger.d(
-                "(TJLabsResource) perf loadBundle meta done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(metaStartMs)} // status=$metaStatus"
-            )
-            if ((metaStatus in 200 until 300) == false || meta == null) {
-                TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // type=$bundleType // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
-                completion(false, metaMsg, null)
-                return@requestBundleMeta
-            }
-
+        fun proceedWithMeta(meta: SectorBundleMetaOutput, metaSource: String) {
             val savedBundleVersion = getSavedBundleVersion(application, bundleType, sectorId)
             val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
             val cached = bundleCache[cacheKey]
             if (cached != null && cached.versionId == meta.version_id) {
                 TJResourceLogger.d("(TJLabsResource) loadBundle cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}")
+                TJResourceLogger.d(
+                    "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=memory_cache // elapsedMs=${elapsedMs(loadStartMs)} // success=true"
+                )
                 completion(true, "(TJLabsResource) Success : use cached bundle", cached)
-                return@requestBundleMeta
+                return
             }
             TJResourceLogger.d(
                 "(TJLabsResource) loadBundle cache miss // type=$bundleType // sectorId=$sectorId // oldVersion=${cached?.versionId ?: savedBundleVersion} // newVersion=${meta.version_id}"
@@ -159,11 +154,11 @@ internal class TJLabsBundleDataManager {
                             "(TJLabsResource) perf loadBundle enrich cached raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
                         )
                         TJResourceLogger.d(
-                            "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=disk_cache_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
+                            "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=${metaSource}_disk_cache_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
                         )
                         completion(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched)
                     }
-                    return@requestBundleMeta
+                    return
                 } else {
                     TJResourceLogger.d(
                         "(TJLabsResource) loadBundle disk cache parse fail // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // fallback=network"
@@ -201,7 +196,7 @@ internal class TJLabsBundleDataManager {
                         "(TJLabsResource) perf loadBundle enrich raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
                     )
                     TJResourceLogger.d(
-                        "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=network_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
+                        "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=${metaSource}_network_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
                     )
                     TJResourceLogger.d(
                         "(TJLabsResource) loadBundle done // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
@@ -209,6 +204,30 @@ internal class TJLabsBundleDataManager {
                     completion(csvSuccess, "(TJLabsResource) Success : load bundle", enriched)
                 }
             }
+        }
+
+        val cachedMeta = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
+        if (cachedMeta != null) {
+            TJResourceLogger.d(
+                "(TJLabsResource) perf loadBundle meta shortcut // type=$bundleType // sectorId=$sectorId // source=fresh_pref"
+            )
+            proceedWithMeta(cachedMeta, "pref_meta")
+            return
+        }
+
+        val metaStartMs = nowMs()
+        TJResourceLogger.d("(TJLabsResource) loadBundle start // type=$bundleType // sectorId=$sectorId")
+        requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
+            TJResourceLogger.d(
+                "(TJLabsResource) perf loadBundle meta done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(metaStartMs)} // status=$metaStatus"
+            )
+            if ((metaStatus in 200 until 300) == false || meta == null) {
+                TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // type=$bundleType // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
+                completion(false, metaMsg, null)
+                return@requestBundleMeta
+            }
+            saveBundleMetaTimestamp(application, bundleType, sectorId, nowMs())
+            proceedWithMeta(meta, "network_meta")
         }
     }
 
@@ -539,9 +558,9 @@ internal class TJLabsBundleDataManager {
         filePrefix: String
     ): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = "${versionPrefix}${sectorId}_$key"
-        val urlKey = "${urlPrefix}${sectorId}_$key"
-        val fileKey = "${filePrefix}${sectorId}_$key"
+        val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
+        val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
+        val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
 
         val savedVersion = prefs.getString(versionKey, null)
         val savedUrl = prefs.getString(urlKey, null)
@@ -610,9 +629,9 @@ internal class TJLabsBundleDataManager {
             csvFile.writeText(content)
 
             val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            val versionKey = "${versionPrefix}${sectorId}_$key"
-            val urlKey = "${urlPrefix}${sectorId}_$key"
-            val fileKey = "${filePrefix}${sectorId}_$key"
+            val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
+            val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
+            val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
             prefs.edit()
                 .putString(versionKey, versionId)
                 .putString(urlKey, url)
@@ -633,6 +652,47 @@ internal class TJLabsBundleDataManager {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
         return prefs.getString(versionKey, null)
+    }
+
+    private fun getSavedBundleMetaIfFresh(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int
+    ): SectorBundleMetaOutput? {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
+        val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
+        val tsKey = getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId)
+        val savedVersion = prefs.getString(versionKey, null)
+        val savedUrl = prefs.getString(urlKey, null)
+        val savedTs = prefs.getLong(tsKey, 0L)
+        if (savedVersion.isNullOrBlank() || savedUrl.isNullOrBlank() || savedTs <= 0L) {
+            return null
+        }
+
+        val ageMs = nowMs() - savedTs
+        val freshWindowMs = 5 * 60 * 1000L
+        if (ageMs > freshWindowMs) {
+            TJResourceLogger.d(
+                "(TJLabsResource) perf loadBundle meta shortcut miss // type=$bundleType // sectorId=$sectorId // reason=stale // ageMs=$ageMs"
+            )
+            return null
+        }
+        TJResourceLogger.d(
+            "(TJLabsResource) perf loadBundle meta shortcut hit // type=$bundleType // sectorId=$sectorId // ageMs=$ageMs"
+        )
+        return SectorBundleMetaOutput(url = savedUrl, version_id = savedVersion)
+    }
+
+    private fun saveBundleMetaTimestamp(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        timestampMs: Long
+    ) {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val tsKey = getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId)
+        prefs.edit().putLong(tsKey, timestampMs).apply()
     }
 
     private fun loadBundleRawFromCache(
@@ -704,6 +764,7 @@ internal class TJLabsBundleDataManager {
                 .putString(versionKey, versionId)
                 .putString(urlKey, bundleUrl)
                 .putString(fileKey, rawFile.absolutePath)
+                .putLong(getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId), nowMs())
                 .apply()
 
             TJResourceLogger.d(
@@ -717,11 +778,8 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun getBundleMetaKey(bundleType: ResourceBundleType, prefix: String, sectorId: Int): String {
-        return if (bundleType == ResourceBundleType.JUPITER) {
-            "$prefix$sectorId"
-        } else {
-            "${prefix}${bundleType.name.lowercase()}_$sectorId"
-        }
+        val bundleTypeKey = bundleType.name.lowercase()
+        return "${prefix}${buildCacheNamespace()}_${bundleTypeKey}_$sectorId"
     }
 
     private fun buildBundleRawFileName(bundleType: ResourceBundleType, sectorId: Int): String {
@@ -751,7 +809,21 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun buildSectorCacheFolderName(sectorId: Int): String {
-        val region = TJLabsFileDownloader.region
+        return "${buildCacheNamespace()}_${sectorId}"
+    }
+
+    private fun buildCacheNamespace(): String {
+        val provider = sanitizeStorageSegment(TJLabsFileDownloader.provider, ServerProvider.AWS.value)
+        val region = sanitizeStorageSegment(TJLabsFileDownloader.region, ResourceRegion.KOREA.value)
+        return "${provider}_${region}"
+    }
+
+    private fun buildScopedPrefKey(prefix: String, sectorId: Int, key: String): String {
+        return "${prefix}${buildCacheNamespace()}_${sectorId}_$key"
+    }
+
+    private fun sanitizeStorageSegment(value: String, fallback: String): String {
+        return value
             .replace("/", "_")
             .replace("\\", "_")
             .replace(":", "_")
@@ -762,8 +834,7 @@ internal class TJLabsBundleDataManager {
             .replace(">", "_")
             .replace("|", "_")
             .trim()
-            .ifEmpty { "Korea" }
-        return "${region}_${sectorId}"
+            .ifEmpty { fallback }
     }
 
     private fun fetchTextFromUrl(urlString: String, source: String): String? {
@@ -1222,9 +1293,9 @@ internal class TJLabsBundleDataManager {
         filePrefix: String
     ): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = "${versionPrefix}${sectorId}_$key"
-        val urlKey = "${urlPrefix}${sectorId}_$key"
-        val fileKey = "${filePrefix}${sectorId}_$key"
+        val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
+        val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
+        val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
 
         val savedVersion = prefs.getString(versionKey, null)
         val savedUrl = prefs.getString(urlKey, null)
@@ -1268,9 +1339,9 @@ internal class TJLabsBundleDataManager {
             jsonFile.writeText(content)
 
             val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            val versionKey = "${PREF_SIM_VERSION_PREFIX}${sectorId}_$key"
-            val urlKey = "${PREF_SIM_URL_PREFIX}${sectorId}_$key"
-            val fileKey = "${PREF_SIM_FILE_PREFIX}${sectorId}_$key"
+            val versionKey = buildScopedPrefKey(PREF_SIM_VERSION_PREFIX, sectorId, key)
+            val urlKey = buildScopedPrefKey(PREF_SIM_URL_PREFIX, sectorId, key)
+            val fileKey = buildScopedPrefKey(PREF_SIM_FILE_PREFIX, sectorId, key)
             prefs.edit()
                 .putString(versionKey, versionId)
                 .putString(urlKey, url)

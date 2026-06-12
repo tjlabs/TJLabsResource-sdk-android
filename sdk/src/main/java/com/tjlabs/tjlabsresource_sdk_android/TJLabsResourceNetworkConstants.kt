@@ -75,6 +75,8 @@ internal object TJLabsResourceNetworkConstants {
 
 
     fun setServerURL(provider: String, region: String) {
+        TJResourceLogger.d("(TJLabsResource) setServerURL provider : $provider // region : $region")
+
         currentProvider = provider
         REGION_PREFIX = when (region) {
             ResourceRegion.KOREA.value -> {
@@ -94,6 +96,10 @@ internal object TJLabsResourceNetworkConstants {
 
         USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
         WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
+        TJResourceLogger.d("(TJLabsResource) USER_URL : $USER_URL")
+        TJResourceLogger.d("(TJLabsResource) WARP_USER_URL : $WARP_USER_URL")
+
+
     }
 
     fun getUserBaseURL(): String {
