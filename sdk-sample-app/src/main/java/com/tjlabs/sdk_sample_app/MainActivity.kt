@@ -14,6 +14,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.resource_sdk_sample_app.BuildConfig
 import com.tjlabs.resource_sdk_sample_app.R
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
+import com.tjlabs.tjlabsauth_sdk_android.TokenResult
 import com.tjlabs.tjlabsresource_sdk_android.*
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 import java.text.SimpleDateFormat
@@ -34,6 +35,13 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var testVenusBundleButton: Button
     private lateinit var testWardBundleButton: Button
     private lateinit var loadSimulationDataButton: Button
+    private lateinit var clearCacheButton: Button
+    private lateinit var benchmarkJupiterButton: Button
+    private lateinit var benchmarkResultText: TextView
+
+    private var jupiterLoadStartMs: Long = 0L
+    // 같은 provider 에 대해 auth() 풀 로그인은 1회만 — getAccessToken 이 토큰 캐시로 동작하기 때문
+    private val authenticatedProviders = mutableSetOf<String>()
 
     private val pathPixelSourceHint = mutableMapOf<String, String>()
     private val imageSourceHint = mutableMapOf<String, String>()
@@ -68,6 +76,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         testVenusBundleButton = findViewById(R.id.buttonTestVenusBundle)
         testWardBundleButton = findViewById(R.id.buttonTestWardBundle)
         loadSimulationDataButton = findViewById(R.id.buttonLoadSimulationData)
+        clearCacheButton = findViewById(R.id.buttonClearCache)
+        benchmarkJupiterButton = findViewById(R.id.buttonBenchmarkJupiter)
+        benchmarkResultText = findViewById(R.id.textBenchmarkResult)
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -105,9 +116,90 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         loadSimulationDataButton.setOnClickListener {
             runSimulationDataLoad(manager, getSelectedProvider(), sectorId)
         }
+        clearCacheButton.setOnClickListener {
+            manager.clearCache(application, sectorId)
+            appendCallbackLog("clearCache", "sectorId=$sectorId", "api")
+            updateBenchmarkResult("cache cleared • ${nowText()}")
+        }
+        benchmarkJupiterButton.setOnClickListener {
+            runJupiterColdWarmBenchmark(manager, getSelectedProvider(), sectorId)
+        }
+    }
+
+    private fun runJupiterColdWarmBenchmark(
+        manager: TJLabsResourceManager,
+        provider: String,
+        sectorId: Int
+    ) {
+        updateBenchmarkResult("benchmark: starting • ${nowText()}")
+        appendCallbackLog("benchmark", "start provider=$provider sectorId=$sectorId", "api")
+
+        // 1. 캐시 초기화
+        manager.clearCache(application, sectorId)
+        appendCallbackLog("benchmark", "cache cleared", "api")
+
+        // 2. Auth 시간 측정
+        val authStart = System.currentTimeMillis()
+        authenticate(provider) { authSuccess ->
+            val authElapsed = System.currentTimeMillis() - authStart
+            Log.d("BENCH", "auth elapsedMs=$authElapsed success=$authSuccess provider=$provider")
+            appendCallbackLog("benchmark", "auth elapsed=${authElapsed}ms success=$authSuccess", "api")
+            if (!authSuccess) {
+                updateBenchmarkResult("benchmark: auth failed (${authElapsed}ms) • ${nowText()}")
+                return@authenticate
+            }
+
+            // 3. Cold load
+            val coldStart = System.currentTimeMillis()
+            updateJupiterStatus("Loading (cold)...", "provider=$provider sectorId=$sectorId • ${nowText()}", null)
+            manager.loadJupiterResource(
+                application = application,
+                provider = provider,
+                region = ResourceRegion.KOREA.value,
+                sectorId = sectorId
+            ) { coldSuccess ->
+                val coldElapsed = System.currentTimeMillis() - coldStart
+
+                // 4. Warm load (캐시 적중 기대)
+                val warmStart = System.currentTimeMillis()
+                manager.loadJupiterResource(
+                    application = application,
+                    provider = provider,
+                    region = ResourceRegion.KOREA.value,
+                    sectorId = sectorId
+                ) { warmSuccess ->
+                    val warmElapsed = System.currentTimeMillis() - warmStart
+                    val saved = (coldElapsed - warmElapsed).coerceAtLeast(0)
+                    val pct = if (coldElapsed > 0) 100.0 * saved / coldElapsed else 0.0
+                    Log.i(
+                        "TJLabsResource_BENCH",
+                        "[$provider/$sectorId] auth=%4dms | cold=%4dms warm=%4dms saved=%4dms (%.1f%%↓) | ok=%s/%s"
+                            .format(authElapsed, coldElapsed, warmElapsed, saved, pct, coldSuccess, warmSuccess)
+                    )
+                    appendCallbackLog(
+                        "benchmark",
+                        "auth=${authElapsed} cold=${coldElapsed} warm=${warmElapsed} saved=${saved}",
+                        "api"
+                    )
+                    updateBenchmarkResult(
+                        "Jupiter[$provider/$sectorId] auth=${authElapsed}ms cold=${coldElapsed}ms warm=${warmElapsed}ms saved=${saved}ms (${"%.1f".format(pct)}%↓) • ${nowText()}"
+                    )
+                    updateJupiterStatus(
+                        if (warmSuccess) "Cold+Warm OK" else "Warm Fail",
+                        "auth=${authElapsed}ms cold=${coldElapsed}ms warm=${warmElapsed}ms • ${nowText()}",
+                        warmSuccess
+                    )
+                }
+            }
+        }
+    }
+
+    private fun updateBenchmarkResult(text: String) {
+        runOnUiThread { benchmarkResultText.text = text }
     }
 
     private fun runJupiterBundleTest(manager: TJLabsResourceManager, provider: String, sectorId: Int) {
+        jupiterLoadStartMs = System.currentTimeMillis()
         updateJupiterStatus("Loading...", "provider=$provider sectorId=$sectorId • ${nowText()}", null)
         appendCallbackLog("loadJupiterResource", "start sectorId=$sectorId", "api")
         authenticate(provider) { authSuccess ->
@@ -116,16 +208,29 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 appendCallbackLog("loadJupiterResource", "auth failed provider=$provider", "api")
                 return@authenticate
             }
+            val loadCallStartMs = System.currentTimeMillis()
+            val authElapsed = loadCallStartMs - jupiterLoadStartMs
             manager.loadJupiterResource(
                 application = application,
                 provider = provider,
                 region = ResourceRegion.KOREA.value,
                 sectorId = sectorId
             ) { isSuccess ->
-                appendCallbackLog("loadJupiterResource", "success=$isSuccess sectorId=$sectorId", "api")
+                val totalElapsed = System.currentTimeMillis() - jupiterLoadStartMs
+                val sdkElapsed = System.currentTimeMillis() - loadCallStartMs
+                Log.i(
+                    "TJLabsResource_BENCH",
+                    "[$provider/$sectorId] total=%4dms = auth %4dms + sdk %4dms | ok=%s"
+                        .format(totalElapsed, authElapsed, sdkElapsed, isSuccess)
+                )
+                appendCallbackLog(
+                    "loadJupiterResource",
+                    "ok=$isSuccess total=${totalElapsed}ms (auth=${authElapsed} sdk=${sdkElapsed})",
+                    "api"
+                )
                 updateJupiterStatus(
                     if (isSuccess) "Success" else "Failed",
-                    "provider=$provider sectorId=$sectorId • ${nowText()}",
+                    "provider=$provider sectorId=$sectorId • total=${totalElapsed}ms (auth=${authElapsed} sdk=${sdkElapsed}) • ${nowText()}",
                     isSuccess
                 )
             }
@@ -252,18 +357,67 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     }
 
     private fun authenticate(provider: String, completion: (Boolean) -> Unit) {
+        val authPhaseStart = System.currentTimeMillis()
+
+        if (provider in authenticatedProviders) {
+            val mem = System.currentTimeMillis() - authPhaseStart
+            Log.i("TJLabsResource_AUTH", "[$provider] in-mem cache hit (${mem}ms) — both probe and auth() skipped")
+            runOnUiThread {
+                authStatusText.text = "Auth($provider): Success (in-mem cached)"
+                authStatusText.setTextColor(getColor(R.color.text_success))
+            }
+            completion(true)
+            return
+        }
+
         TJLabsAuthManager.setServerURL(provider = provider, region = ResourceRegion.KOREA.value)
         TJLabsAuthManager.setLogEnabled(true)
         TJLabsAuthManager.setClientSecret(application, clientKey)
-        TJLabsAuthManager.auth(accessKey, accessSecretKey) { code, success ->
-            Log.d("CheckToken", "code : $code // success : $success")
-            runOnUiThread {
-                authStatusText.text = if (success) "Auth($provider): Success" else "Auth($provider): Failed (code: $code)"
-                authStatusText.setTextColor(
-                    getColor(if (success) R.color.text_success else R.color.text_fail)
-                )
+
+        // Phase 1) 디스크에 영속된 토큰 lookup (=getAccessToken). 네트워크 없이 끝나면 ms 단위.
+        val probeStart = System.currentTimeMillis()
+        TJLabsAuthManager.getAccessToken { tokenResult ->
+            val probeMs = System.currentTimeMillis() - probeStart
+            when (tokenResult) {
+                is TokenResult.Success -> {
+                    val total = System.currentTimeMillis() - authPhaseStart
+                    Log.i(
+                        "TJLabsResource_AUTH",
+                        "[$provider] probe=%4dms → token reused, auth() SKIPPED | total=%4dms"
+                            .format(probeMs, total)
+                    )
+                    authenticatedProviders.add(provider)
+                    runOnUiThread {
+                        authStatusText.text = "Auth($provider): Success (token reused, ${probeMs}ms)"
+                        authStatusText.setTextColor(getColor(R.color.text_success))
+                    }
+                    completion(true)
+                }
+                is TokenResult.Failure -> {
+                    // Phase 2) 캐시된 토큰 없음/만료 → 풀 auth() 네트워크 호출.
+                    val authNetStart = System.currentTimeMillis()
+                    TJLabsAuthManager.auth(accessKey, accessSecretKey) { code, success ->
+                        val authNetMs = System.currentTimeMillis() - authNetStart
+                        val total = System.currentTimeMillis() - authPhaseStart
+                        Log.i(
+                            "TJLabsResource_AUTH",
+                            "[$provider] probe=%4dms (miss) + auth()=%4dms | total=%4dms ok=%s code=%s"
+                                .format(probeMs, authNetMs, total, success, code)
+                        )
+                        if (success) authenticatedProviders.add(provider)
+                        runOnUiThread {
+                            authStatusText.text = if (success)
+                                "Auth($provider): Success (probe=${probeMs} + auth=${authNetMs}ms)"
+                            else
+                                "Auth($provider): Failed (code: $code)"
+                            authStatusText.setTextColor(
+                                getColor(if (success) R.color.text_success else R.color.text_fail)
+                            )
+                        }
+                        completion(success)
+                    }
+                }
             }
-            completion(success)
         }
     }
 

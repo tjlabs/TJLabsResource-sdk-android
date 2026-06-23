@@ -237,6 +237,59 @@ class TJLabsResourceManager {
         TJResourceLogger.setDebugOption(set)
     }
 
+    /**
+     * 메모리 + 디스크 캐시 전부 비움. sectorId = null 이면 전체.
+     * cold-start 측정/디버깅 용도.
+     */
+    fun clearCache(application: Application, sectorId: Int? = null) {
+        if (sectorId == null) {
+            sectorDataMap.clear()
+            buildingsDataMap.clear()
+            levelIdMap.clear()
+            levelImageUrlMap.clear()
+            levelWardsDataMap.clear()
+            scaleOffsetDataMap.clear()
+            pathPixelDataMap.clear()
+            geofenceDataMap.clear()
+            entranceDataMap.clear()
+            entranceItemDataMap.clear()
+            entranceRouteDataMap.clear()
+            levelUnitsDataMap.clear()
+            landmarkDataMap.clear()
+            nodeDataMap.clear()
+            linkDataMap.clear()
+            affineParamMap.clear()
+            simulationDataMap.clear()
+            imageDataMap.clear()
+            sectorParamData.clear()
+            levelParamData.clear()
+        } else {
+            sectorDataMap.remove(sectorId)
+            buildingsDataMap.remove(sectorId)
+            affineParamMap.remove(sectorId)
+            simulationDataMap.remove(sectorId)
+            sectorParamData.remove(sectorId)
+            val prefix = "${sectorId}_"
+            levelIdMap.keys.removeAll { it.startsWith(prefix) }
+            levelImageUrlMap.keys.removeAll { it.startsWith(prefix) }
+            levelWardsDataMap.keys.removeAll { it.startsWith(prefix) }
+            scaleOffsetDataMap.keys.removeAll { it.startsWith(prefix) }
+            pathPixelDataMap.keys.removeAll { it.startsWith(prefix) }
+            geofenceDataMap.keys.removeAll { it.startsWith(prefix) }
+            entranceDataMap.keys.removeAll { it.startsWith(prefix) }
+            entranceItemDataMap.keys.removeAll { it.startsWith(prefix) }
+            entranceRouteDataMap.keys.removeAll { it.startsWith(prefix) }
+            levelUnitsDataMap.keys.removeAll { it.startsWith(prefix) }
+            landmarkDataMap.keys.removeAll { it.startsWith(prefix) }
+            nodeDataMap.keys.removeAll { it.startsWith(prefix) }
+            linkDataMap.keys.removeAll { it.startsWith(prefix) }
+            imageDataMap.keys.removeAll { it.startsWith(prefix) }
+            levelParamData.keys.removeAll { it.startsWith(prefix) }
+        }
+        bundleDataManager.clearCache(application, sectorId)
+        TJResourceLogger.d { "(TJLabsResource) TJLabsResourceManager.clearCache done // sectorId=${sectorId ?: "ALL"}" }
+    }
+
     fun getMatchedLevelId(key: String): Int? = levelIdMap[key]
 
     fun getMatchedLevelImageUrl(key: String): String? = levelImageUrlMap[key]

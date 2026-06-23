@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FileOutputStream
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -107,11 +108,69 @@ internal class TJLabsBundleDataManager {
         private const val PREF_SIM_VERSION_PREFIX = "simulation_version_"
         private const val PREF_SIM_URL_PREFIX = "simulation_url_"
         private const val PREF_SIM_FILE_PREFIX = "simulation_file_"
+        private const val PREF_IMAGE_VERSION_PREFIX = "image_version_"
+        private const val PREF_IMAGE_URL_PREFIX = "image_url_"
+        private const val PREF_IMAGE_FILE_PREFIX = "image_file_"
         private const val PDR_LEVEL_KEY_SUFFIX = "_PDR"
+        private const val IMG_DIR = "tj_bundle_img"
+
+        private val bitmapMemoryCache: MutableMap<String, Bitmap> = mutableMapOf()
     }
 
     private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
         return "${buildCacheNamespace()}_${bundleType.name}_$sectorId"
+    }
+
+    /**
+     * 메모리 + 디스크 캐시(번들 raw json, csv, image, prefs)를 모두 비웁니다.
+     * sectorId 가 null 이면 모든 sector 데이터를 비웁니다.
+     */
+    fun clearCache(application: Application, sectorId: Int? = null) {
+        // 1) 메모리 캐시
+        if (sectorId == null) {
+            bundleCache.clear()
+            bitmapMemoryCache.clear()
+        } else {
+            val suffix = "_$sectorId"
+            bundleCache.keys.removeAll { it.endsWith(suffix) }
+            bitmapMemoryCache.keys.removeAll { it.startsWith("${sectorId}_") }
+        }
+
+        // 2) 디스크 파일 (cacheDir/$CSV_DIR, cacheDir/$IMG_DIR)
+        runCatching {
+            val csvRoot = File(application.cacheDir, CSV_DIR)
+            val imgRoot = File(application.cacheDir, IMG_DIR)
+            if (sectorId == null) {
+                csvRoot.deleteRecursivelyQuietly()
+                imgRoot.deleteRecursivelyQuietly()
+            } else {
+                File(csvRoot, buildSectorCacheFolderName(sectorId)).deleteRecursivelyQuietly()
+                File(imgRoot, buildSectorCacheFolderName(sectorId)).deleteRecursivelyQuietly()
+            }
+        }
+
+        // 3) SharedPreferences — sector 단위로 키를 prefix-match 해서 삭제
+        runCatching {
+            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            val all = prefs.all
+            if (sectorId == null) {
+                for (k in all.keys) editor.remove(k)
+            } else {
+                val sectorTokens = listOf("_${sectorId}_", "_${sectorId}.", "_$sectorId")
+                for (k in all.keys) {
+                    if (sectorTokens.any { token -> k.contains(token) }) {
+                        editor.remove(k)
+                    }
+                }
+            }
+            editor.apply()
+        }
+        TJResourceLogger.d { "(TJLabsResource) clearCache done // sectorId=${sectorId ?: "ALL"}" }
+    }
+
+    private fun File.deleteRecursivelyQuietly() {
+        runCatching { if (exists()) deleteRecursively() }
     }
 
     fun loadBundle(
@@ -121,109 +180,132 @@ internal class TJLabsBundleDataManager {
         completion: (Boolean, String, BundleDataSnapshot?) -> Unit
     ) {
         val loadStartMs = nowMs()
+
+        // ---- per-load phase timing ----
+        var metaMs: Long = -1L
+        var rawFetchMs: Long = -1L
+        var parseMs: Long = -1L
+        var enrichMs: Long = -1L
+        var pathCount = 0
+        var entCount = 0
+        var imgCount = 0
+
+        fun emitSummary(source: String, success: Boolean) {
+            val total = elapsedMs(loadStartMs)
+            fun fmt(v: Long) = if (v < 0L) "  -  " else "%5dms".format(v)
+            android.util.Log.i(
+                "TJLabsResource_PERF",
+                "[${bundleType.name}/$sectorId] total=%5dms src=%-26s ok=%-5s | meta=%s raw=%s parse=%s enrich=%s | path=%2d ent=%2d img=%2d"
+                    .format(total, source, success.toString(), fmt(metaMs), fmt(rawFetchMs), fmt(parseMs), fmt(enrichMs), pathCount, entCount, imgCount)
+            )
+        }
+
+        fun finish(success: Boolean, message: String, snapshot: BundleDataSnapshot?, source: String) {
+            emitSummary(source, success)
+            completion(success, message, snapshot)
+        }
+        fun finishOnMain(success: Boolean, message: String, snapshot: BundleDataSnapshot?, source: String) {
+            emitSummary(source, success)
+            CoroutineScope(Dispatchers.Main).launch {
+                completion(success, message, snapshot)
+            }
+        }
+
+        fun applyCounts(s: BundleDataSnapshot) {
+            pathCount = s.pathPixelDataMap.size
+            entCount = s.entranceRouteDataMap.size
+            imgCount = s.imageDataMap.size
+        }
+
         fun proceedWithMeta(meta: SectorBundleMetaOutput, metaSource: String) {
-            val savedBundleVersion = getSavedBundleVersion(application, bundleType, sectorId)
             val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
             val cached = bundleCache[cacheKey]
             if (cached != null && cached.versionId == meta.version_id) {
-                TJResourceLogger.d("(TJLabsResource) loadBundle cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}")
-                TJResourceLogger.d(
-                    "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=memory_cache // elapsedMs=${elapsedMs(loadStartMs)} // success=true"
-                )
-                completion(true, "(TJLabsResource) Success : use cached bundle", cached)
+                applyCounts(cached)
+                finish(true, "(TJLabsResource) Success : use cached bundle", cached, "${metaSource}+memory_cache")
                 return
             }
-            TJResourceLogger.d(
-                "(TJLabsResource) loadBundle cache miss // type=$bundleType // sectorId=$sectorId // oldVersion=${cached?.versionId ?: savedBundleVersion} // newVersion=${meta.version_id}"
-            )
 
-            loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedRaw ->
-                val parseCacheStartMs = nowMs()
-                val parsedFromCache = parseBundleRaw(bundleType, sectorId, meta, cachedRaw)
-                TJResourceLogger.d(
-                    "(TJLabsResource) perf loadBundle parse cached raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(parseCacheStartMs)} // parsed=${parsedFromCache != null}"
-                )
-                if (parsedFromCache != null) {
-                    TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle use disk cache // type=$bundleType // sectorId=$sectorId // version=${meta.version_id}"
-                    )
-                    val enrichStartMs = nowMs()
-                    enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
-                        bundleCache[cacheKey] = enriched
-                        TJResourceLogger.d(
-                            "(TJLabsResource) perf loadBundle enrich cached raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
-                        )
-                        TJResourceLogger.d(
-                            "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=${metaSource}_disk_cache_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
-                        )
-                        completion(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched)
+            // 디스크 캐시 읽기 + JSON 파싱은 IO 스레드에서 수행, 메인 스레드 점유 제거
+            CoroutineScope(Dispatchers.IO).launch {
+                val cachedRaw = loadBundleRawFromCache(application, bundleType, sectorId, meta)
+                if (cachedRaw != null) {
+                    val parseCacheStartMs = nowMs()
+                    val parsedFromCache = parseBundleRaw(bundleType, sectorId, meta, cachedRaw)
+                    parseMs = elapsedMs(parseCacheStartMs)
+                    if (parsedFromCache != null) {
+                        val enrichStartMs = nowMs()
+                        enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
+                            enrichMs = elapsedMs(enrichStartMs)
+                            bundleCache[cacheKey] = enriched
+                            applyCounts(enriched)
+                            finish(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched, "${metaSource}+disk_raw")
+                        }
+                        return@launch
                     }
-                    return
-                } else {
-                    TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle disk cache parse fail // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // fallback=network"
-                    )
+                }
+
+                // 디스크 캐시 미스 → 네트워크 fetch (Retrofit 콜백은 Main 스레드에서 옴)
+                val rawStartMs = nowMs()
+                requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
+                    rawFetchMs = elapsedMs(rawStartMs)
+                    if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
+                        finish(false, rawMsg, null, "${metaSource}+raw_fail")
+                        return@requestBundleRaw
+                    }
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val parseRawStartMs = nowMs()
+                        val parsed = parseBundleRaw(bundleType, sectorId, meta, raw)
+                        parseMs = elapsedMs(parseRawStartMs)
+                        if (parsed == null) {
+                            finishOnMain(false, "(TJLabsResource) Error : parse bundle raw", null, "${metaSource}+parse_fail")
+                            return@launch
+                        }
+
+                        val enrichStartMs = nowMs()
+                        enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
+                            enrichMs = elapsedMs(enrichStartMs)
+                            bundleCache[cacheKey] = enriched
+                            applyCounts(enriched)
+                            // 1) prefs 는 동기로 즉시 기록 → 다음 호출이 freshness shortcut 적중
+                            saveBundleMetaPrefs(application, bundleType, sectorId, meta.version_id, meta.url, null)
+                            // 2) raw json 파일 디스크 쓰기는 비동기 (큰 IO, 메인 콜백 블로킹 회피)
+                            CoroutineScope(Dispatchers.IO).launch {
+                                saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
+                            }
+                            finish(csvSuccess, "(TJLabsResource) Success : load bundle", enriched, "${metaSource}+network_raw")
+                        }
+                    }
                 }
             }
+        }
 
-            val rawStartMs = nowMs()
-            requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
-                TJResourceLogger.d(
-                    "(TJLabsResource) perf loadBundle raw done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(rawStartMs)} // status=$rawStatus // hasBody=${raw.isNullOrBlank().not()}"
-                )
-                if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
-                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@bundleRaw // type=$bundleType // status=$rawStatus // msg=$rawMsg // url=${meta.url}")
-                    completion(false, rawMsg, null)
-                    return@requestBundleRaw
-                }
-
-                val parseRawStartMs = nowMs()
-                val parsed = parseBundleRaw(bundleType, sectorId, meta, raw)
-                TJResourceLogger.d(
-                    "(TJLabsResource) perf loadBundle parse raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(parseRawStartMs)} // parsed=${parsed != null}"
-                )
-                if (parsed == null) {
-                    TJResourceLogger.d("(TJLabsResource) loadBundle failed@parseBundleRaw // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // url=${meta.url}")
-                    completion(false, "(TJLabsResource) Error : parse bundle raw", null)
-                    return@requestBundleRaw
-                }
-
-                val enrichStartMs = nowMs()
-                enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
-                    bundleCache[cacheKey] = enriched
-                    saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
-                    TJResourceLogger.d(
-                        "(TJLabsResource) perf loadBundle enrich raw // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(enrichStartMs)} // success=$csvSuccess"
-                    )
-                    TJResourceLogger.d(
-                        "(TJLabsResource) perf loadBundle total // type=$bundleType // sectorId=$sectorId // source=${metaSource}_network_raw // elapsedMs=${elapsedMs(loadStartMs)} // success=$csvSuccess"
-                    )
-                    TJResourceLogger.d(
-                        "(TJLabsResource) loadBundle done // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // csvSuccess=$csvSuccess"
-                    )
-                    completion(csvSuccess, "(TJLabsResource) Success : load bundle", enriched)
-                }
+        // Fast-path: 메모리 스냅샷 + freshness window 적중 시, meta HTTP 와 디스크 IO 모두 스킵
+        val cacheKeyForFastPath = buildSnapshotCacheKey(bundleType, sectorId)
+        val inMemorySnapshot = bundleCache[cacheKeyForFastPath]
+        if (inMemorySnapshot != null) {
+            val cachedMetaFast = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
+            if (cachedMetaFast != null && cachedMetaFast.version_id == inMemorySnapshot.versionId) {
+                applyCounts(inMemorySnapshot)
+                finish(true, "(TJLabsResource) Success : use cached bundle (fastpath)", inMemorySnapshot, "memory_fastpath")
+                return
             }
         }
 
         val cachedMeta = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
         if (cachedMeta != null) {
-            TJResourceLogger.d(
-                "(TJLabsResource) perf loadBundle meta shortcut // type=$bundleType // sectorId=$sectorId // source=fresh_pref"
-            )
+            // metaMs 는 0 (네트워크 호출 없음) — prefs hit
+            metaMs = 0L
             proceedWithMeta(cachedMeta, "pref_meta")
             return
         }
 
         val metaStartMs = nowMs()
-        TJResourceLogger.d("(TJLabsResource) loadBundle start // type=$bundleType // sectorId=$sectorId")
         requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
-            TJResourceLogger.d(
-                "(TJLabsResource) perf loadBundle meta done // type=$bundleType // sectorId=$sectorId // elapsedMs=${elapsedMs(metaStartMs)} // status=$metaStatus"
-            )
+            metaMs = elapsedMs(metaStartMs)
             if ((metaStatus in 200 until 300) == false || meta == null) {
-                TJResourceLogger.d("(TJLabsResource) loadBundle failed@meta // type=$bundleType // status=$metaStatus // msg=$metaMsg // sectorId=$sectorId")
-                completion(false, metaMsg, null)
+                finish(false, metaMsg, null, "meta_fail")
                 return@requestBundleMeta
             }
             saveBundleMetaTimestamp(application, bundleType, sectorId, nowMs())
@@ -385,91 +467,67 @@ internal class TJLabsBundleDataManager {
         val enrichTotalStartMs = nowMs()
         val hasPathUrls = snapshot.graphPathUrlsByKey.isNotEmpty()
         val hasEntranceUrls = snapshot.entranceRouteUrlsByKey.isNotEmpty()
-        if (hasPathUrls == false && hasEntranceUrls == false) {
-            TJResourceLogger.d("(TJLabsResource) enrichCsvData skip // no csv urls")
+        val hasImageUrls = snapshot.imageUrlsByKey.isNotEmpty()
+        if (!hasPathUrls && !hasEntranceUrls && !hasImageUrls) {
+            TJResourceLogger.d("(TJLabsResource) enrichCsvData skip // no enrich urls")
             completion(true, snapshot)
             return
         }
 
         CoroutineScope(Dispatchers.IO).launch {
-            TJResourceLogger.d(
-                "(TJLabsResource) enrichCsvData start // pathCsvCount=${snapshot.graphPathUrlsByKey.size} // entranceCsvCount=${snapshot.entranceRouteUrlsByKey.size}"
-            )
-            snapshot.graphPathUrlsByKey.forEach { (k, v) ->
-                TJResourceLogger.d("(TJLabsResource) enrichCsvData path target // key=$k // url=$v")
+            TJResourceLogger.d {
+                "(TJLabsResource) enrichCsvData start // pathCsvCount=${snapshot.graphPathUrlsByKey.size} // entranceCsvCount=${snapshot.entranceRouteUrlsByKey.size} // imageCount=${snapshot.imageUrlsByKey.size}"
             }
+
+            val pathTargets = snapshot.graphPathUrlsByKey.filterKeys { it.contains("_D").not() }
+            val entranceTargets = snapshot.entranceRouteUrlsByKey
+            val imageTargets = snapshot.imageUrlsByKey
+
+            // path / entrance / image 세 단계를 모두 한 번에 fan-out 시켜 병렬 처리
+            val parallelStart = nowMs()
+            val pathDeferred = pathTargets.map { (key, url) ->
+                async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, url) }
+            }
+            val entranceDeferred = entranceTargets.map { (key, url) ->
+                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url) }
+            }
+            val imageDeferred = imageTargets.map { (key, url) ->
+                async { key to loadImageWithCache(application, sectorId, snapshot.versionId, key, url) }
+            }
+
+            val pathResults = pathDeferred.awaitAll()
+            val entranceResults = entranceDeferred.awaitAll()
+            val imageResults = imageDeferred.awaitAll()
+            TJResourceLogger.d {
+                "(TJLabsResource) perf enrichCsvData parallel stage // sectorId=$sectorId // pathCount=${pathTargets.size} // entranceCount=${entranceTargets.size} // imageCount=${imageTargets.size} // elapsedMs=${elapsedMs(parallelStart)}"
+            }
+
             var isAllSuccess = true
             val pathPixelData = snapshot.pathPixelDataMap.toMutableMap()
             val entranceRouteData = snapshot.entranceRouteDataMap.toMutableMap()
             val imageData = snapshot.imageDataMap.toMutableMap()
 
-            val pathTargets = snapshot.graphPathUrlsByKey.filterKeys { key ->
-                val shouldLoad = key.contains("_D").not()
-                if (!shouldLoad) {
-                    TJResourceLogger.d("(TJLabsResource) enrichCsvData skip@PathPixelCsv // key=$key // reason=level_name_contains__D")
-                }
-                shouldLoad
-            }
-
-            val pathStageStartMs = nowMs()
-            val pathResults = pathTargets.map { (key, url) ->
-                async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, url) }
-            }.awaitAll()
-
             for ((key, parsed) in pathResults) {
                 if (parsed != null) {
                     pathPixelData[key] = parsed
-                    TJResourceLogger.d("(TJLabsResource) enrichCsvData path parsed // key=$key")
-                } else {
-                    val isPdrPath = key.endsWith(PDR_LEVEL_KEY_SUFFIX)
-                    if (isPdrPath) {
-                        TJResourceLogger.d(
-                            "(TJLabsResource) enrichCsvData optional fail@PathPixelCsv(PDR) // key=$key // url=${snapshot.graphPathUrlsByKey[key]}"
-                        )
-                    } else {
-                        isAllSuccess = false
-                        TJResourceLogger.d(
-                            "(TJLabsResource) enrichCsvData failed@PathPixelCsv(DR) // key=$key // url=${snapshot.graphPathUrlsByKey[key]}"
-                        )
-                    }
-                }
-            }
-            TJResourceLogger.d(
-                "(TJLabsResource) perf enrichCsvData path stage // sectorId=$sectorId // targetCount=${pathTargets.size} // elapsedMs=${elapsedMs(pathStageStartMs)}"
-            )
-
-            val entranceStageStartMs = nowMs()
-            val entranceResults = snapshot.entranceRouteUrlsByKey.map { (key, url) ->
-                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url) }
-            }.awaitAll()
-
-            for ((key, parsed) in entranceResults) {
-                if (parsed != null) {
-                    entranceRouteData[key] = parsed
+                } else if (key.endsWith(PDR_LEVEL_KEY_SUFFIX)) {
+                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData optional fail@PathPixelCsv(PDR) // key=$key" }
                 } else {
                     isAllSuccess = false
-                    TJResourceLogger.d("(TJLabsResource) enrichCsvData failed@EntranceCsv // key=$key // url=${snapshot.entranceRouteUrlsByKey[key]}")
+                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@PathPixelCsv(DR) // key=$key" }
                 }
             }
-            TJResourceLogger.d(
-                "(TJLabsResource) perf enrichCsvData entrance stage // sectorId=$sectorId // targetCount=${snapshot.entranceRouteUrlsByKey.size} // elapsedMs=${elapsedMs(entranceStageStartMs)}"
-            )
-
-            val imageStageStartMs = nowMs()
-            val imageResults = snapshot.imageUrlsByKey.map { (key, url) ->
-                async { key to fetchImageFromUrl(key, url) }
-            }.awaitAll()
-
+            for ((key, parsed) in entranceResults) {
+                if (parsed != null) entranceRouteData[key] = parsed
+                else {
+                    isAllSuccess = false
+                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@EntranceCsv // key=$key" }
+                }
+            }
             for ((key, image) in imageResults) {
-                if (image != null) {
-                    imageData[key] = image
-                } else {
-                    TJResourceLogger.d("(TJLabsResource) enrichCsvData failed@Image // key=$key // url=${snapshot.imageUrlsByKey[key]}")
-                }
+                if (image != null) imageData[key] = image
+                else TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@Image // key=$key" }
             }
-            TJResourceLogger.d(
-                "(TJLabsResource) perf enrichCsvData image stage // sectorId=$sectorId // targetCount=${snapshot.imageUrlsByKey.size} // elapsedMs=${elapsedMs(imageStageStartMs)}"
-            )
 
             val enriched = snapshot.copy(
                 pathPixelDataMap = pathPixelData,
@@ -478,12 +536,76 @@ internal class TJLabsBundleDataManager {
             )
 
             withContext(Dispatchers.Main) {
-                TJResourceLogger.d(
+                TJResourceLogger.d {
                     "(TJLabsResource) enrichCsvData done // success=$isAllSuccess // elapsedMs=${elapsedMs(enrichTotalStartMs)}"
-                )
+                }
                 completion(isAllSuccess, enriched)
             }
         }
+    }
+
+    private fun loadImageWithCache(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        key: String,
+        url: String
+    ): Bitmap? {
+        bitmapMemoryCache[key]?.let { return it }
+
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val versionKey = buildScopedPrefKey(PREF_IMAGE_VERSION_PREFIX, sectorId, key)
+        val urlKey = buildScopedPrefKey(PREF_IMAGE_URL_PREFIX, sectorId, key)
+        val fileKey = buildScopedPrefKey(PREF_IMAGE_FILE_PREFIX, sectorId, key)
+        val savedVersion = prefs.getString(versionKey, null)
+        val savedUrl = prefs.getString(urlKey, null)
+        val savedPath = prefs.getString(fileKey, null)
+
+        if (savedVersion == versionId && savedUrl == url && !savedPath.isNullOrBlank()) {
+            val cachedFile = File(savedPath)
+            if (cachedFile.exists() && cachedFile.length() > 0) {
+                try {
+                    val bitmap = BitmapFactory.decodeFile(cachedFile.absolutePath)
+                    if (bitmap != null) {
+                        bitmapMemoryCache[key] = bitmap
+                        TJResourceLogger.d { "(TJLabsResource) image cache hit // key=$key // path=${cachedFile.absolutePath}" }
+                        return bitmap
+                    }
+                } catch (e: Exception) {
+                    TJResourceLogger.d { "(TJLabsResource) image cache read fail // key=$key // error=${e.localizedMessage}" }
+                }
+            }
+        }
+
+        val downloaded = fetchImageFromUrl(key, url) ?: return null
+        try {
+            val imgDir = File(application.cacheDir, "$IMG_DIR/${buildSectorCacheFolderName(sectorId)}")
+            if (!imgDir.exists()) imgDir.mkdirs()
+            val outFile = File(imgDir, buildImageFileName(sectorId, key))
+            FileOutputStream(outFile).use { out ->
+                downloaded.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            prefs.edit()
+                .putString(versionKey, versionId)
+                .putString(urlKey, url)
+                .putString(fileKey, outFile.absolutePath)
+                .apply()
+            TJResourceLogger.d { "(TJLabsResource) image cache save // key=$key // path=${outFile.absolutePath}" }
+        } catch (e: Exception) {
+            TJResourceLogger.d { "(TJLabsResource) image cache save fail // key=$key // error=${e.localizedMessage}" }
+        }
+        bitmapMemoryCache[key] = downloaded
+        return downloaded
+    }
+
+    private fun buildImageFileName(sectorId: Int, key: String): String {
+        val normalized = key
+            .replace("/", "_").replace("\\", "_").replace(":", "_")
+            .replace("*", "_").replace("?", "_").replace("\"", "_")
+            .replace("<", "_").replace(">", "_").replace("|", "_")
+            .trim()
+            .ifEmpty { "${sectorId}_unknown" }
+        return "$normalized.png"
     }
 
     private fun fetchPathPixelData(
@@ -648,12 +770,6 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    private fun getSavedBundleVersion(application: Application, bundleType: ResourceBundleType, sectorId: Int): String? {
-        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
-        return prefs.getString(versionKey, null)
-    }
-
     private fun getSavedBundleMetaIfFresh(
         application: Application,
         bundleType: ResourceBundleType,
@@ -739,6 +855,31 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    /**
+     * meta 정보(version/url/ts) 를 prefs 에 동기 저장.
+     * - prefs.apply() 자체는 비동기 디스크 flush 지만 in-memory 캐시는 즉시 갱신되므로
+     *   곧바로 다시 호출되는 getSavedBundleMetaIfFresh() 가 적중 가능.
+     * - raw 파일 디스크 쓰기는 별도로 비동기에서 처리.
+     */
+    private fun saveBundleMetaPrefs(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        versionId: String,
+        bundleUrl: String,
+        rawFilePath: String?
+    ) {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+            .putString(getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId), versionId)
+            .putString(getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId), bundleUrl)
+            .putLong(getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId), nowMs())
+        if (rawFilePath != null) {
+            editor.putString(getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId), rawFilePath)
+        }
+        editor.apply()
+    }
+
     private fun saveBundleRawCache(
         application: Application,
         bundleType: ResourceBundleType,
@@ -756,24 +897,15 @@ internal class TJLabsBundleDataManager {
             val rawFile = File(cacheDir, buildBundleRawFileName(bundleType, sectorId))
             rawFile.writeText(raw)
 
-            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
-            val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
-            val fileKey = getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId)
-            prefs.edit()
-                .putString(versionKey, versionId)
-                .putString(urlKey, bundleUrl)
-                .putString(fileKey, rawFile.absolutePath)
-                .putLong(getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId), nowMs())
-                .apply()
+            saveBundleMetaPrefs(application, bundleType, sectorId, versionId, bundleUrl, rawFile.absolutePath)
 
-            TJResourceLogger.d(
+            TJResourceLogger.d {
                 "(TJLabsResource) bundle raw cache save // type=$bundleType // sectorId=$sectorId // version=$versionId // path=${rawFile.absolutePath} // bytes=${raw.length}"
-            )
+            }
         } catch (e: Exception) {
-            TJResourceLogger.d(
+            TJResourceLogger.d {
                 "(TJLabsResource) bundle raw cache save fail // type=$bundleType // sectorId=$sectorId // error=${e.localizedMessage}"
-            )
+            }
         }
     }
 
@@ -974,7 +1106,7 @@ internal class TJLabsBundleDataManager {
                         landmarkMap[levelKey] = parseLandmarks(wardsJson)
                     }
 
-                    if (isDebugLevel.not()) {
+                    if (isDebugLevel.not() && TJResourceLogger.isDebugEnabled()) {
                         val graphsArray = levelObj.optJSONArray("graphs")
                         if (graphsArray == null) {
                             TJResourceLogger.d(
