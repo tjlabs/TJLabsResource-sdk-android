@@ -36,11 +36,12 @@ internal object TJLabsResourceNetworkConstants {
         url: String,
         completion: (retrofit: Retrofit?, statusCode: Int, message: String) -> Unit
     ) {
+        val authStartMs = System.currentTimeMillis()
         TJLabsAuthManager.getAccessToken { tokenResult ->
-
-            TJResourceLogger.d(
-                "(TJLabsResource) tokenResult : $tokenResult"
-            )
+            val authElapsed = System.currentTimeMillis() - authStartMs
+            TJResourceLogger.d {
+                "(TJLabsResource) perf getAccessToken // elapsedMs=$authElapsed // result=${tokenResult::class.simpleName}"
+            }
 
             when (tokenResult) {
                 is TokenResult.Success -> {
