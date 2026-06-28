@@ -1,0 +1,33 @@
+name: Verify Branch and Version Consistency
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Branch name must match sdk version
+        run: |
+          BRANCH_VERSION="${GITHUB_HEAD_REF#release/}"
+          MAJOR=$(grep -E '^val versionMajor = ' sdk/build.gradle.kts | awk '{print $4}')
+          MINOR=$(grep -E '^val versionMinor = ' sdk/build.gradle.kts | awk '{print $4}')
+          PATCH=$(grep -E '^val versionPatch = ' sdk/build.gradle.kts | awk '{print $4}')
+          FILE_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "branch=$BRANCH_VERSION  file=$FILE_VERSION"
+          if [ "$BRANCH_VERSION" != "$FILE_VERSION" ]; then
+            echo "::error::Branch is release/$BRANCH_VERSION but sdk/build.gradle.kts is $FILE_VERSION. Bump the three val versionMajor/Minor/Patch lines to match."
+            exit 1
+          fi
