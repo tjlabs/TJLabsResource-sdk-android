@@ -67,6 +67,43 @@
                     android:text="GCP" />
             </RadioGroup>
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Server Environment (Jupiter/OLYMPUS 도메인만 적용, WARP 는 무관)"
+                android:textStyle="bold" />
+
+            <RadioGroup
+                android:id="@+id/radioGroupEnv"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/radioEnvProd"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="PROD (실운영)" />
+
+                <RadioButton
+                    android:id="@+id/radioEnvDev"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="18dp"
+                    android:text="DEV (테스트)" />
+            </RadioGroup>
+
+            <TextView
+                android:id="@+id/textCurrentEnv"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textSize="12sp"
+                android:textStyle="italic" />
+
             <Button
                 android:id="@+id/buttonTestJupiterBundle"
                 android:layout_width="wrap_content"

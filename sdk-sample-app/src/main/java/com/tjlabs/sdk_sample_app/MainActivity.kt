@@ -13,6 +13,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.tjlabs.resource_sdk_sample_app.BuildConfig
 import com.tjlabs.resource_sdk_sample_app.R
+import com.tjlabs.tjlabsauth_sdk_android.AuthServerEnv
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsauth_sdk_android.TokenResult
 import com.tjlabs.tjlabsresource_sdk_android.*
@@ -31,6 +32,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var warpDetailText: TextView
     private lateinit var callbackContainer: LinearLayout
     private lateinit var providerGroup: RadioGroup
+    private lateinit var envGroup: RadioGroup
+    private lateinit var currentEnvText: TextView
     private lateinit var testJupiterBundleButton: Button
     private lateinit var testVenusBundleButton: Button
     private lateinit var testWardBundleButton: Button
@@ -72,6 +75,19 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         warpDetailText = findViewById(R.id.textWarpDetail)
         callbackContainer = findViewById(R.id.callbackContainer)
         providerGroup = findViewById(R.id.radioGroupProvider)
+        envGroup = findViewById(R.id.radioGroupEnv)
+        currentEnvText = findViewById(R.id.textCurrentEnv)
+        val refreshEnvLabel = {
+            val env = getSelectedEnv()
+            val suffix = if (env == AuthServerEnv.PROD) ".jupiter.tjlabscorp.com" else ".jupiter.tjlabs.dev"
+            currentEnvText.text = "Selected env : $env  (OLYMPUS suffix : $suffix)"
+        }
+        refreshEnvLabel()
+        envGroup.setOnCheckedChangeListener { _, _ ->
+            refreshEnvLabel()
+            // env 를 바꾸면 이전 auth 토큰은 유효하지 않으므로 캐시 초기화 → 다음 호출에서 다시 auth
+            authenticatedProviders.clear()
+        }
         testJupiterBundleButton = findViewById(R.id.buttonTestJupiterBundle)
         testVenusBundleButton = findViewById(R.id.buttonTestVenusBundle)
         testWardBundleButton = findViewById(R.id.buttonTestWardBundle)
@@ -156,7 +172,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 application = application,
                 provider = provider,
                 region = ResourceRegion.KOREA.value,
-                sectorId = sectorId
+                sectorId = sectorId,
+                env = getSelectedResourceEnv(),
             ) { coldSuccess ->
                 val coldElapsed = System.currentTimeMillis() - coldStart
 
@@ -214,7 +231,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 application = application,
                 provider = provider,
                 region = ResourceRegion.KOREA.value,
-                sectorId = sectorId
+                sectorId = sectorId,
+                env = getSelectedResourceEnv(),
             ) { isSuccess ->
                 val totalElapsed = System.currentTimeMillis() - jupiterLoadStartMs
                 val sdkElapsed = System.currentTimeMillis() - loadCallStartMs
@@ -250,7 +268,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 application = application,
                 provider = provider,
                 region = ResourceRegion.KOREA.value,
-                sectorId = sectorId
+                sectorId = sectorId,
+                env = getSelectedResourceEnv(),
             ) { isSuccess ->
                 appendCallbackLog("loadVenusResource", "success=$isSuccess sectorId=$sectorId", "api")
                 updateVenusStatus(
@@ -356,6 +375,24 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         }
     }
 
+    /**
+     * UI env RadioGroup 값 → Auth SDK env.
+     * Resource SDK 의 [ResourceServerEnv] 는 같은 시각의 동일 선택으로 매핑된다.
+     */
+    private fun getSelectedEnv(): AuthServerEnv {
+        return when (envGroup.checkedRadioButtonId) {
+            R.id.radioEnvDev -> AuthServerEnv.DEV_TESTING_ONLY
+            else -> AuthServerEnv.PROD
+        }
+    }
+
+    private fun getSelectedResourceEnv(): ResourceServerEnv {
+        return when (getSelectedEnv()) {
+            AuthServerEnv.PROD -> ResourceServerEnv.PROD
+            AuthServerEnv.DEV_TESTING_ONLY -> ResourceServerEnv.DEV_TESTING_ONLY
+        }
+    }
+
     private fun authenticate(provider: String, completion: (Boolean) -> Unit) {
         val authPhaseStart = System.currentTimeMillis()
 
@@ -370,7 +407,11 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
             return
         }
 
-        TJLabsAuthManager.setServerURL(provider = provider, region = ResourceRegion.KOREA.value)
+        TJLabsAuthManager.setServerURL(
+            provider = provider,
+            region = ResourceRegion.KOREA.value,
+            env = getSelectedEnv(),
+        )
         TJLabsAuthManager.setLogEnabled(true)
         TJLabsAuthManager.setClientSecret(application, clientKey)
 
