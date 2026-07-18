@@ -27,6 +27,23 @@ enum class ResourceBundleType {
     WARP
 }
 
+/**
+ * Resource SDK 의 Jupiter (OLYMPUS) 도메인 환경.
+ *
+ * - [PROD] : 실 운영 서버 (`.jupiter.tjlabscorp.com`). 외부 앱 · 실 배포는 반드시 이 값.
+ *   `TJLabsResourceNetworkConstants.setServerURL(...)` 를 env 인자 없이 호출하면 자동 PROD.
+ *
+ * - [DEV_TESTING_ONLY] : 개발 서버 (`.jupiter.tjlabs.dev`). **TJLabs 내부 개발 · QA 전용.**
+ *   외부 프로덕션 앱에서 사용 금지 — 개발 서버는 SLA 없이 스키마 변경 · 다운타임이 발생한다.
+ *
+ * NOTE: 이 env 는 **OLYMPUS_SUFFIX (Jupiter 도메인) 에만** 적용된다.
+ * WARP_SUFFIX 는 AWS 기반 별도 인프라라 env 스위칭 대상 아님.
+ */
+enum class ResourceServerEnv {
+    PROD,
+    DEV_TESTING_ONLY
+}
+
 
 data class PathPixelData(
     val roadType: List<Int> = listOf(),

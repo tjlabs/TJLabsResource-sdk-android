@@ -45,9 +45,10 @@ class TJLabsResourceManager {
         provider: String,
         region: String,
         sectorId: Int,
-        completion: (Boolean) -> Unit
+        env: ResourceServerEnv = ResourceServerEnv.PROD,
+        completion: (Boolean) -> Unit,
     ) {
-        setRegion(provider, region)
+        setRegion(provider, region, env)
         bundleDataManager.loadBundle(application, bundleType, sectorId) { isSuccess, message, snapshot ->
             TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message")
             if (!isSuccess || snapshot == null) {
@@ -75,10 +76,11 @@ class TJLabsResourceManager {
         provider: String,
         region: String,
         sectorId: Int,
-        completion: (Boolean) -> Unit
+        env: ResourceServerEnv = ResourceServerEnv.PROD,
+        completion: (Boolean) -> Unit,
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, completion)
+        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
+        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, completion)
     }
 
     fun loadVenusResource(
@@ -86,12 +88,16 @@ class TJLabsResourceManager {
         provider: String,
         region: String,
         sectorId: Int,
-        completion: (Boolean) -> Unit
+        env: ResourceServerEnv = ResourceServerEnv.PROD,
+        completion: (Boolean) -> Unit,
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, completion)
+        TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
+        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, env, completion)
     }
 
+    /**
+     * WARP 는 AWS 기반 별도 인프라라 env 스위칭 대상 아님 → env 파라미터 없음.
+     */
     fun loadWarpResource(
         application: Application,
         provider: String,
@@ -100,7 +106,7 @@ class TJLabsResourceManager {
         completion: (Boolean) -> Unit
     ) {
         TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, completion)
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion)
     }
 
     fun loadResource(
@@ -108,13 +114,14 @@ class TJLabsResourceManager {
         provider: String,
         region: String,
         sectorId: Int,
-        completion: (Boolean) -> Unit
+        env: ResourceServerEnv = ResourceServerEnv.PROD,
+        completion: (Boolean) -> Unit,
     ) {
-        loadJupiterResource(application, provider, region, sectorId, completion)
+        loadJupiterResource(application, provider, region, sectorId, env, completion)
     }
 
-    private fun setRegion(provider: String, region: String) {
-        TJLabsResourceNetworkConstants.setServerURL(provider, region)
+    private fun setRegion(provider: String, region: String, env: ResourceServerEnv = ResourceServerEnv.PROD) {
+        TJLabsResourceNetworkConstants.setServerURL(provider, region, env)
         TJLabsFileDownloader.provider = provider
         TJLabsFileDownloader.region = region
     }

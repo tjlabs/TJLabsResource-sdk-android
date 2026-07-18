@@ -67,18 +67,28 @@ internal object TJLabsResourceNetworkConstants {
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
-    private const val OLYMPUS_SUFFIX = ".jupiter.tjlabs.dev"
+    // OLYMPUS (Jupiter 도메인) : env 로 PROD/DEV 스위칭.
+    //  PROD : .jupiter.tjlabscorp.com — 실 운영
+    //  DEV  : .jupiter.tjlabs.dev — 내부 테스트
+    private const val OLYMPUS_SUFFIX_PROD = ".jupiter.tjlabscorp.com"
+    private const val OLYMPUS_SUFFIX_DEV  = ".jupiter.tjlabs.dev"
+    private var currentOlympusSuffix = OLYMPUS_SUFFIX_PROD  // 기본 PROD
+    // WARP : AWS 기반 별도 인프라 — env 스위칭 대상 아님.
     private const val WARP_SUFFIX = ".warp.tjlabs.dev"
     private var currentProvider : String = ServerProvider.AWS.value
 
-    private var USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
+    private var USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
     private var WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
 
 
-    fun setServerURL(provider: String, region: String) {
-        TJResourceLogger.d("(TJLabsResource) setServerURL provider : $provider // region : $region")
+    fun setServerURL(provider: String, region: String, env: ResourceServerEnv = ResourceServerEnv.PROD) {
+        TJResourceLogger.d("(TJLabsResource) setServerURL provider : $provider // region : $region // env : $env")
 
         currentProvider = provider
+        currentOlympusSuffix = when (env) {
+            ResourceServerEnv.PROD -> OLYMPUS_SUFFIX_PROD
+            ResourceServerEnv.DEV_TESTING_ONLY -> OLYMPUS_SUFFIX_DEV
+        }
         REGION_PREFIX = when (region) {
             ResourceRegion.KOREA.value -> {
                 when (provider) {
@@ -95,7 +105,7 @@ internal object TJLabsResourceNetworkConstants {
             else -> "ap-northeast-2."
         }
 
-        USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + OLYMPUS_SUFFIX
+        USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
         WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
         TJResourceLogger.d("(TJLabsResource) USER_URL : $USER_URL")
         TJResourceLogger.d("(TJLabsResource) WARP_USER_URL : $WARP_USER_URL")
