@@ -57,7 +57,7 @@ android {
 
 dependencies {
     // Auth 1.0.27 : setServerURL(env) 도입. env 인자로 PROD/DEV 스위칭 가능.
-    api ("com.github.tjlabs:TJLabsAuth-sdk-android:1.0.27")
+    api ("com.github.tjlabs:TJLabsAuth-sdk-android:1.0.28")
     api ("androidx.security:security-crypto-ktx:1.1.0-alpha03") //auth 사용을 위해 같이 추가해야함
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
