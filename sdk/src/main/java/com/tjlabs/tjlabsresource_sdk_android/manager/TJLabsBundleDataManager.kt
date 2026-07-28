@@ -377,8 +377,9 @@ internal class TJLabsBundleDataManager {
     ) {
         val baseUrl = TJLabsResourceNetworkConstants.getBaseUrl(bundleType)
         val serverVersion = TJLabsResourceNetworkConstants.getBundleServerVersion(bundleType)
+        val env = TJLabsResourceNetworkConstants.getCurrentEnv()
         TJResourceLogger.d(
-            "(TJLabsResource) request bundle meta // type=$bundleType // baseUrl=$baseUrl // version=$serverVersion // sectorId=$sectorId"
+            "(TJLabsResource) request bundle meta // type=$bundleType // env=$env // baseUrl=$baseUrl // version=$serverVersion // sectorId=$sectorId"
         )
         TJLabsResourceNetworkConstants.genRetrofit(baseUrl) { retrofit, authStatus, authMessage ->
             if (retrofit == null) {
@@ -425,7 +426,8 @@ internal class TJLabsBundleDataManager {
         bundleUrl: String,
         completion: (Int, String, String?) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // url=$bundleUrl")
+        val env = TJLabsResourceNetworkConstants.getCurrentEnv()
+        TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // env=$env // url=$bundleUrl")
         val retrofit = TJLabsResourceNetworkConstants.genPlainRetrofit(TJLabsResourceNetworkConstants.getBaseUrl(bundleType))
         val api = retrofit.create(PostInput::class.java)
         api.getSectorBundleJsonRaw(bundleUrl).enqueue(object : Callback<okhttp3.ResponseBody> {

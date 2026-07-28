@@ -329,6 +329,12 @@ class TJLabsResourceManager {
 
     fun getSimulationData(sectorId: Int): SimulationBundleOutput? = simulationDataMap[sectorId]
 
+    /**
+     * BC-preserving 5-arg overload. env 를 명시하지 않으면 마지막으로 세팅된 env
+     * ([TJLabsResourceNetworkConstants.getCurrentEnv]) 를 사용한다. Jupiter SDK 2.0.24
+     * 이하 등 기존 caller 가 env 를 넘기지 않고 이 오버로드를 호출해도, 이전에 확정된
+     * env (예: loadJupiterResource 로 세팅된 DEV) 가 유지된다.
+     */
     fun loadSimulationData(
         application: Application,
         provider: String,
@@ -336,7 +342,32 @@ class TJLabsResourceManager {
         sectorId: Int,
         completion: (Boolean) -> Unit
     ) {
-        setRegion(provider, region)
+        loadSimulationData(
+            application,
+            provider,
+            region,
+            sectorId,
+            TJLabsResourceNetworkConstants.getCurrentEnv(),
+            completion
+        )
+    }
+
+    /**
+     * env 를 명시적으로 지정하는 오버로드. 신규 caller 는 이 시그니처를 사용해 URL 이
+     * 항상 의도된 env 로 세팅되도록 해야 한다.
+     */
+    fun loadSimulationData(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        env: ResourceServerEnv,
+        completion: (Boolean) -> Unit
+    ) {
+        TJResourceLogger.d(
+            "(TJLabsResource) loadSimulationData request // provider=$provider // region=$region // sectorId=$sectorId // env=$env"
+        )
+        setRegion(provider, region, env)
         bundleDataManager.loadSimulationData(application, sectorId) { isSuccess, message, simulationData ->
             TJResourceLogger.d(
                 "(TJLabsResource) loadSimulationData callback // success=$isSuccess // message=$message // sectorId=$sectorId"

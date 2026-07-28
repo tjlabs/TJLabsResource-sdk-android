@@ -76,6 +76,12 @@ internal object TJLabsResourceNetworkConstants {
     // WARP : AWS 기반 별도 인프라 — env 스위칭 대상 아님.
     private const val WARP_SUFFIX = ".warp.tjlabs.dev"
     private var currentProvider : String = ServerProvider.AWS.value
+    private var currentRegion : String = ResourceRegion.KOREA.value
+    // 마지막으로 세팅된 env. `setServerURL` 이 호출될 때마다 갱신되고, env 를 명시하지 않는
+    // load* API 들이 default 로 이 값을 사용한다. 초기값 PROD 는 최초 config 이전 상태의
+    // 안전 기본 (실 배포에서 실수로 DEV URL 이 조립되는 상황 예방).
+    @Volatile
+    private var currentEnv: ResourceServerEnv = ResourceServerEnv.PROD
 
     private var USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
     private var WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
@@ -85,6 +91,8 @@ internal object TJLabsResourceNetworkConstants {
         TJResourceLogger.d("(TJLabsResource) setServerURL provider : $provider // region : $region // env : $env")
 
         currentProvider = provider
+        currentRegion = region
+        currentEnv = env
         currentOlympusSuffix = when (env) {
             ResourceServerEnv.PROD -> OLYMPUS_SUFFIX_PROD
             ResourceServerEnv.DEV_TESTING_ONLY -> OLYMPUS_SUFFIX_DEV
@@ -112,6 +120,16 @@ internal object TJLabsResourceNetworkConstants {
 
 
     }
+
+    /**
+     * 마지막으로 setServerURL 로 확정된 env. env 미지정 load* 호출이 여기에 의존한다.
+     * 초기값은 [ResourceServerEnv.PROD].
+     */
+    fun getCurrentEnv(): ResourceServerEnv = currentEnv
+
+    fun getCurrentProvider(): String = currentProvider
+
+    fun getCurrentRegion(): String = currentRegion
 
     fun getUserBaseURL(): String {
         return USER_URL
