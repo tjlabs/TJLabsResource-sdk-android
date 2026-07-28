@@ -16,12 +16,20 @@ fun String.escapeForBuildConfig(): String = this
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
-val authClientSecret: String = providers.gradleProperty("AUTH_CLIENT_SECRET").orNull
-    ?: localProperties.getProperty("AUTH_CLIENT_SECRET", "")
-val authAccessKey: String = providers.gradleProperty("AUTH_ACCESS_KEY").orNull
-    ?: localProperties.getProperty("AUTH_ACCESS_KEY", "")
-val authSecretAccessKey: String = providers.gradleProperty("AUTH_SECRET_ACCESS_KEY").orNull
-    ?: localProperties.getProperty("AUTH_SECRET_ACCESS_KEY", "")
+fun authProp(name: String, default: String = ""): String =
+    providers.gradleProperty(name).orNull ?: localProperties.getProperty(name, default)
+
+val authClientSecret: String = authProp("AUTH_CLIENT_SECRET")
+
+// Region × Env 조합별 access key / secret. local.properties 에서 4쌍 관리.
+val authAccessKeyKoreaProd: String = authProp("AUTH_ACCESS_KEY_KOREA_PROD")
+val authSecretAccessKeyKoreaProd: String = authProp("AUTH_SECRET_ACCESS_KEY_KOREA_PROD")
+val authAccessKeyKoreaDev: String = authProp("AUTH_ACCESS_KEY_KOREA_DEV")
+val authSecretAccessKeyKoreaDev: String = authProp("AUTH_SECRET_ACCESS_KEY_KOREA_DEV")
+val authAccessKeySaudiProd: String = authProp("AUTH_ACCESS_KEY_SAUDI_PROD")
+val authSecretAccessKeySaudiProd: String = authProp("AUTH_SECRET_ACCESS_KEY_SAUDI_PROD")
+val authAccessKeySaudiDev: String = authProp("AUTH_ACCESS_KEY_SAUDI_DEV")
+val authSecretAccessKeySaudiDev: String = authProp("AUTH_SECRET_ACCESS_KEY_SAUDI_DEV")
 
 android {
     namespace = "com.tjlabs.resource_sdk_sample_app"
@@ -34,21 +42,15 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField(
-            "String",
-            "AUTH_CLIENT_SECRET",
-            "\"${authClientSecret.escapeForBuildConfig()}\""
-        )
-        buildConfigField(
-            "String",
-            "AUTH_ACCESS_KEY",
-            "\"${authAccessKey.escapeForBuildConfig()}\""
-        )
-        buildConfigField(
-            "String",
-            "AUTH_SECRET_ACCESS_KEY",
-            "\"${authSecretAccessKey.escapeForBuildConfig()}\""
-        )
+        buildConfigField("String", "AUTH_CLIENT_SECRET", "\"${authClientSecret.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_ACCESS_KEY_KOREA_PROD", "\"${authAccessKeyKoreaProd.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_SECRET_ACCESS_KEY_KOREA_PROD", "\"${authSecretAccessKeyKoreaProd.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_ACCESS_KEY_KOREA_DEV", "\"${authAccessKeyKoreaDev.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_SECRET_ACCESS_KEY_KOREA_DEV", "\"${authSecretAccessKeyKoreaDev.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_ACCESS_KEY_SAUDI_PROD", "\"${authAccessKeySaudiProd.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_SECRET_ACCESS_KEY_SAUDI_PROD", "\"${authSecretAccessKeySaudiProd.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_ACCESS_KEY_SAUDI_DEV", "\"${authAccessKeySaudiDev.escapeForBuildConfig()}\"")
+        buildConfigField("String", "AUTH_SECRET_ACCESS_KEY_SAUDI_DEV", "\"${authSecretAccessKeySaudiDev.escapeForBuildConfig()}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
