@@ -36,6 +36,9 @@ import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
 import com.tjlabs.tjlabsresource_sdk_android.SimulationBundleOutput
 import com.tjlabs.tjlabsresource_sdk_android.SimulationItemOutput
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader
+import com.tjlabs.tjlabsresource_sdk_android.TransitionLevelRef
+import com.tjlabs.tjlabsresource_sdk_android.TransitionOutput
+import com.tjlabs.tjlabsresource_sdk_android.TransitionPoint
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
 import com.tjlabs.tjlabsresource_sdk_android.UnitData
 import com.tjlabs.tjlabsresource_sdk_android.VenusBuildingOutput
@@ -87,7 +90,8 @@ internal data class BundleDataSnapshot(
     val graphPathUrlsByKey: Map<String, String>,
     val entranceRouteUrlsByKey: Map<String, String>,
     val warpSectorData: WarpSectorOutput?,
-    val venusSectorData: VenusSectorOutput?
+    val venusSectorData: VenusSectorOutput?,
+    val transitions: List<TransitionOutput> = emptyList()
 )
 
 internal class TJLabsBundleDataManager {
@@ -173,11 +177,18 @@ internal class TJLabsBundleDataManager {
         runCatching { if (exists()) deleteRecursively() }
     }
 
+    /**
+     * 번들 로드 콜백. [source] 는 로딩 경로를 식별하는 내부 문자열:
+     *   memory_fastpath, pref_meta+memory_cache, pref_meta+disk_raw, pref_meta+network_raw,
+     *   network_meta+memory_cache, network_meta+disk_raw, network_meta+network_raw,
+     *   meta_fail, network_meta+raw_fail, network_meta+parse_fail
+     * TJLabsResourceManager 는 이 문자열로 `fromCache` 를 판정 (network_raw 포함 여부).
+     */
     fun loadBundle(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int,
-        completion: (Boolean, String, BundleDataSnapshot?) -> Unit
+        completion: (Boolean, String, BundleDataSnapshot?, String) -> Unit
     ) {
         val loadStartMs = nowMs()
 
@@ -202,12 +213,12 @@ internal class TJLabsBundleDataManager {
 
         fun finish(success: Boolean, message: String, snapshot: BundleDataSnapshot?, source: String) {
             emitSummary(source, success)
-            completion(success, message, snapshot)
+            completion(success, message, snapshot, source)
         }
         fun finishOnMain(success: Boolean, message: String, snapshot: BundleDataSnapshot?, source: String) {
             emitSummary(source, success)
             CoroutineScope(Dispatchers.Main).launch {
-                completion(success, message, snapshot)
+                completion(success, message, snapshot, source)
             }
         }
 
@@ -1083,7 +1094,9 @@ internal class TJLabsBundleDataManager {
 
                     val mapImage = levelObj.optJSONObject("map_image")
                     val imageUrl = mapImage?.optString("url").orEmpty()
-                    levels.add(LevelOutput(id = levelId, name = levelName, image = imageUrl))
+                    // 2026-08-06+ 스키마: "floor" | "transition". 이전 스키마엔 필드 없음 → 기본 "floor".
+                    val levelType = levelObj.optString("type", "floor").ifBlank { "floor" }
+                    levels.add(LevelOutput(id = levelId, name = levelName, image = imageUrl, type = levelType))
                     if (isDebugLevel.not() && imageUrl.isNotBlank()) {
                         imageUrlsByKey[levelKey] = imageUrl
                     }
@@ -1146,10 +1159,19 @@ internal class TJLabsBundleDataManager {
                         }
 
                         val pathUrl = drGraphObj.optJSONObject("path")?.optString("url").orEmpty()
-                        if (pathUrl.isNotBlank()) {
+                        // 그래프가 실제로 비어있으면 (nodes=0, links=0) pathUrl 은 서버에 잔존하는
+                        // 껍데기일 뿐 실제 CSV 는 없다 — 2026-08-06 스키마부터 순수 floor 의
+                        // walkable 데이터가 전이층으로 이동한 경우 이런 상태가 발생. fetch 시도
+                        // 자체를 스킵해서 404 → sector 실패 오판을 예방.
+                        val hasGraphContent = (nodes?.isNotEmpty() == true) || (links?.isNotEmpty() == true)
+                        if (pathUrl.isNotBlank() && hasGraphContent) {
                             graphPathUrls[levelKey] = pathUrl
                             TJResourceLogger.d(
                                 "(TJLabsResource) parseBundleRaw DR path mapped // levelKey=$levelKey // url=$pathUrl"
+                            )
+                        } else if (pathUrl.isNotBlank()) {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw DR path skipped (empty graph) // levelKey=$levelKey // url=$pathUrl"
                             )
                         } else {
                             TJResourceLogger.d(
@@ -1163,12 +1185,20 @@ internal class TJLabsBundleDataManager {
                     }
 
                     if (isDebugLevel.not()) {
-                        val pdrPathUrl = resolvePdrPathUrl(levelObj)
-                        if (pdrPathUrl.isNotBlank()) {
+                        val pdrGraphObj = resolvePdrGraphObject(levelObj)
+                        val pdrPathUrl = pdrGraphObj?.optJSONObject("path")?.optString("url").orEmpty()
+                        val pdrNodeCount = pdrGraphObj?.optJSONArray("nodes")?.length() ?: 0
+                        val pdrLinkCount = pdrGraphObj?.optJSONArray("links")?.length() ?: 0
+                        val pdrHasGraphContent = pdrNodeCount > 0 || pdrLinkCount > 0
+                        if (pdrPathUrl.isNotBlank() && pdrHasGraphContent) {
                             val pdrLevelKey = "${levelKey}${PDR_LEVEL_KEY_SUFFIX}"
                             graphPathUrls[pdrLevelKey] = pdrPathUrl
                             TJResourceLogger.d(
                                 "(TJLabsResource) parseBundleRaw PDR path mapped // levelKey=$pdrLevelKey // url=$pdrPathUrl"
+                            )
+                        } else if (pdrPathUrl.isNotBlank()) {
+                            TJResourceLogger.d(
+                                "(TJLabsResource) parseBundleRaw PDR path skipped (empty graph) // levelKey=$levelKey // url=$pdrPathUrl"
                             )
                         } else {
                             TJResourceLogger.d(
@@ -1202,12 +1232,15 @@ internal class TJLabsBundleDataManager {
                 )
             }
 
+            val transitions = parseTransitions(root.optJSONArray("transitions"))
+
             val sectorData = SectorOutput(
                 id = root.optInt("id"),
                 name = root.optString("name"),
                 debug = root.optBoolean("debug"),
                 buildings = buildings,
-                default_position = parseDefaultPosition(root.optJSONObject("default_position"))
+                default_position = parseDefaultPosition(root.optJSONObject("default_position")),
+                transitions = transitions
             )
 
             BundleDataSnapshot(
@@ -1232,7 +1265,8 @@ internal class TJLabsBundleDataManager {
                 graphPathUrlsByKey = graphPathUrls,
                 entranceRouteUrlsByKey = entranceRouteUrls,
                 warpSectorData = if (bundleType == ResourceBundleType.WARP) parseWarpSector(root) else null,
-                venusSectorData = if (bundleType == ResourceBundleType.VENUS) parseVenusSector(root) else null
+                venusSectorData = if (bundleType == ResourceBundleType.VENUS) parseVenusSector(root) else null,
+                transitions = transitions
             )
         } catch (e: Exception) {
             TJResourceLogger.d("(TJLabsResource) parseBundleRaw failed // type=$bundleType // sectorId=$sectorId // error=${e.localizedMessage}")
@@ -1530,13 +1564,13 @@ internal class TJLabsBundleDataManager {
         return graphsArray.optJSONObject(0)
     }
 
-    private fun resolvePdrPathUrl(levelObj: JSONObject): String {
-        val graphsArray = levelObj.optJSONArray("graphs") ?: return ""
+    private fun resolvePdrGraphObject(levelObj: JSONObject): JSONObject? {
+        val graphsArray = levelObj.optJSONArray("graphs") ?: return null
         for (i in 0 until graphsArray.length()) {
             val graphObj = graphsArray.optJSONObject(i) ?: continue
             val drType = resolveDeadReckoningType(graphObj)
             if (drType.equals("PDR", ignoreCase = true)) {
-                return graphObj.optJSONObject("path")?.optString("url").orEmpty()
+                return graphObj
             }
         }
 
@@ -1545,11 +1579,12 @@ internal class TJLabsBundleDataManager {
             val graphObj = graphsArray.optJSONObject(i) ?: continue
             val pathUrl = graphObj.optJSONObject("path")?.optString("url").orEmpty()
             if (pathUrl.contains("/paths/pdr/", ignoreCase = true)) {
-                return pathUrl
+                return graphObj
             }
         }
-        return ""
+        return null
     }
+
 
     private fun resolveDeadReckoningType(graphObj: JSONObject): String {
         // Current schema rule:
@@ -1567,6 +1602,57 @@ internal class TJLabsBundleDataManager {
             else -> null
         }
         return if (isVehicle == true) "DR" else "PDR"
+    }
+
+    private fun parseTransitions(arr: JSONArray?): List<TransitionOutput> {
+        if (arr == null) return emptyList()
+        val result = mutableListOf<TransitionOutput>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val levelRef = parseTransitionLevelRef(obj.optJSONObject("level")) ?: continue
+            val lowerRef = parseTransitionLevelRef(obj.optJSONObject("lower_level")) ?: continue
+            val upperRef = parseTransitionLevelRef(obj.optJSONObject("upper_level")) ?: continue
+            result.add(
+                TransitionOutput(
+                    id = obj.optInt("id"),
+                    name = obj.optString("name"),
+                    level = levelRef,
+                    lower_level = lowerRef,
+                    upper_level = upperRef,
+                    points = parseTransitionPoints(obj.optJSONArray("points"))
+                )
+            )
+        }
+        return result
+    }
+
+    private fun parseTransitionLevelRef(obj: JSONObject?): TransitionLevelRef? {
+        if (obj == null) return null
+        return TransitionLevelRef(
+            id = obj.optInt("id"),
+            name = obj.optString("name"),
+            building_id = obj.optInt("building_id")
+        )
+    }
+
+    private fun parseTransitionPoints(arr: JSONArray?): List<TransitionPoint> {
+        if (arr == null) return emptyList()
+        val result = mutableListOf<TransitionPoint>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            result.add(
+                TransitionPoint(
+                    id = obj.optInt("id"),
+                    lower_x = obj.optInt("lower_x"),
+                    lower_y = obj.optInt("lower_y"),
+                    upper_x = obj.optInt("upper_x"),
+                    upper_y = obj.optInt("upper_y"),
+                    transition_type = obj.optString("transition_type"),
+                    is_vehicle = obj.optBoolean("is_vehicle")
+                )
+            )
+        }
+        return result
     }
 
     private fun parseWarpSector(root: JSONObject): WarpSectorOutput {
