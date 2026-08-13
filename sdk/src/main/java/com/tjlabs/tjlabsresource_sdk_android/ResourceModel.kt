@@ -110,7 +110,8 @@ data class SectorOutput(
     val name: String,
     val debug: Boolean,
     val buildings: List<BuildingOutput>,
-    val default_position: DefaultPositionOutput? = null
+    val default_position: DefaultPositionOutput? = null,
+    val transitions: List<TransitionOutput> = emptyList()
 )
 
 data class DefaultPositionOutput(
@@ -279,7 +280,44 @@ data class BuildingOutput(
 data class LevelOutput(
     val id: Int,
     val name: String,
-    val image: String
+    val image: String,
+    // "floor" (일반 층) or "transition" (층이동 전이층). 층 선택 UI 는 "floor" 로 필터해서 쓸 것.
+    // 측위·경로탐색은 전이층 포함해야 하므로 SDK 는 필터링 없이 그대로 전달한다.
+    val type: String = "floor"
+)
+
+// MARK: - Transitions (층이동 구간)
+// 서버 스키마 2026-08-06+ 에서 sector 루트에 실려오는 층이동(계단·엘리베이터·에스컬레이터·램프) 정보.
+// 구버전 응답에는 없으므로 기본값 emptyList 로 안전하게 fallback 된다.
+data class TransitionOutput(
+    val id: Int,
+    val name: String,
+    // 전이층 자신 (type == "transition"). 그래프·RF맵이 이 id 에 달려 있음.
+    val level: TransitionLevelRef,
+    // 물리적 상하 관계일 뿐 통행 방향이 아님. 일방통행은 전이층 그래프 heading 이 표현.
+    val lower_level: TransitionLevelRef,
+    val upper_level: TransitionLevelRef,
+    // 지점 목록. 빈 배열일 수 있음(전이 행만 만들고 지점 미부착 상태).
+    val points: List<TransitionPoint> = emptyList()
+)
+
+data class TransitionLevelRef(
+    val id: Int,
+    val name: String,
+    val building_id: Int
+)
+
+data class TransitionPoint(
+    val id: Int,
+    // 앵커 좌표 — 미터, 양의 정수, 각 층 자기 좌표계.
+    val lower_x: Int,
+    val lower_y: Int,
+    val upper_x: Int,
+    val upper_y: Int,
+    // "stair" | "elevator" | "escalator" | "ramp"
+    val transition_type: String,
+    // 보행/차량 배타 플래그. 길찾기 요청의 is_vehicle 과 일치하는 지점만 경로 후보.
+    val is_vehicle: Boolean
 )
 
 // MARK: - PathPixel
@@ -634,7 +672,11 @@ interface TJLabsResourceManagerDelegate {
     fun onBuildingsData(data: List<BuildingOutput>)
     fun onLevelWardsData(levelKey: String, data : List<String>)
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
-    fun onPathPixelData(pathPixelKey: String, data: PathPixelData)
+    // levelType: 해당 level 의 type ("floor" | "transition"). 2026-08-06+ 스키마에서 전이층의
+    // path pixel 도 이 콜백으로 함께 전달되므로 수신 측이 여기서 구분할 수 있게 한다.
+    // 구버전 응답에는 전이층 자체가 없으므로 항상 "floor" 만 전달된다.
+    // 키 접미사 "_PDR" (PDR 경로) 도 base level 의 type 을 그대로 따라간다.
+    fun onPathPixelData(pathPixelKey: String, levelType: String, data: PathPixelData)
     fun onGeofenceData(geofenceKey: String, data: GeofenceData)
     fun onEntranceData(entranceKey: String, data: EntranceData)
     fun onEntranceRouteData(entranceKey: String, data: EntranceRouteData)
@@ -647,6 +689,12 @@ interface TJLabsResourceManagerDelegate {
     fun onSpotsData(key: Int, type: SpotType, data: Any)
     fun onNodeLinkData(key: String, type: NodeLinkType, data: Any)
     fun onError(error: ResourceError, key: String)
+
+    // 층이동 구간 per-key 콜백. key 는 전이층 자체의 "${sectorId}_${bldg}_${전이층이름}" —
+    // onGeofenceData / onNodeLinkData / onBuildingLevelImageData 등 다른 level-scope 콜백과
+    // 동일한 형식이라 소비자는 같은 key 로 상관관계를 잡을 수 있다.
+    // 서버 스키마 2026-08-06+ 에서만 발동. 기존 구현체는 override 없이 두면 무시.
+    fun onTransitionData(transitionKey: String, data: TransitionOutput) {}
 }
 
 interface TJLabsWarpResourceManagerDelegate {

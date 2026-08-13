@@ -31,6 +31,14 @@ class TJLabsResourceManager {
         private val linkDataMap: MutableMap<String, Map<Int, LinkData>> = mutableMapOf()
         private val affineParamMap: MutableMap<Int, AffineTransParamOutput?> = mutableMapOf()
         private val simulationDataMap: MutableMap<Int, SimulationBundleOutput> = mutableMapOf()
+        // "${sectorId}_${bldg}_${전이층이름}" → TransitionOutput. 다른 level-scope 콜백과
+        // 동일한 key 형식. 소비자는 이 key 로 onGeofenceData/onNodeLinkData 등과 상관관계 잡음.
+        private val transitionsByKey: MutableMap<String, TransitionOutput> = mutableMapOf()
+        // sectorId → transitions[] : 섹터 전체 조회용 aggregate 인덱스.
+        private val transitionsBySector: MutableMap<Int, List<TransitionOutput>> = mutableMapOf()
+        // levelKey ("${sectorId}_${bldg}_${level}") → level.type ("floor"|"transition")
+        // 콜백 emit 시 level 종류를 O(1) 로 판정하기 위한 인덱스.
+        private val levelTypeMap: MutableMap<String, String> = mutableMapOf()
 
         private val imageDataMap: MutableMap<String, Bitmap> = mutableMapOf()
         private val sectorParamData: MutableMap<Int, SectorParameterOutput> = mutableMapOf()
@@ -39,6 +47,13 @@ class TJLabsResourceManager {
 
     private val bundleDataManager = TJLabsBundleDataManager()
 
+    /**
+     * loadBundle 콜백 source 문자열을 [ResourceLoadInfo.fromCache] 로 변환.
+     * source 에 "network_raw" 가 포함되어 있으면 raw bundle 을 새로 다운로드한 것이므로 fromCache=false.
+     * (meta 만 네트워크 fetch 하고 raw 는 재사용한 경우도 raw 기준으로 fromCache=true 로 취급.)
+     */
+    private fun isFromCache(source: String): Boolean = !source.contains("network_raw")
+
     private fun loadResourceByType(
         bundleType: ResourceBundleType,
         application: Application,
@@ -46,18 +61,18 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
-        completion: (Boolean) -> Unit,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         setRegion(provider, region, env)
-        bundleDataManager.loadBundle(application, bundleType, sectorId) { isSuccess, message, snapshot ->
-            TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message")
+        bundleDataManager.loadBundle(application, bundleType, sectorId) { isSuccess, message, snapshot, source ->
+            TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message // source=$source")
             if (!isSuccess || snapshot == null) {
                 when (bundleType) {
                     ResourceBundleType.JUPITER -> delegate?.onSectorError(ResourceError.Sector)
                     ResourceBundleType.WARP -> warpDelegate?.onWarpError(ResourceError.Sector)
                     ResourceBundleType.VENUS -> venusDelegate?.onVenusError(ResourceError.Sector)
                 }
-                completion(false)
+                completion(false, null)
                 return@loadBundle
             }
 
@@ -67,7 +82,7 @@ class TJLabsResourceManager {
                 ResourceBundleType.WARP -> emitWarpSnapshot(snapshot)
                 ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
             }
-            completion(true)
+            completion(true, ResourceLoadInfo(versionId = snapshot.versionId, fromCache = isFromCache(source)))
         }
     }
 
@@ -77,7 +92,7 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
-        completion: (Boolean) -> Unit,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
         loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, completion)
@@ -89,7 +104,7 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
-        completion: (Boolean) -> Unit,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
         loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, env, completion)
@@ -103,7 +118,7 @@ class TJLabsResourceManager {
         provider: String,
         region: String,
         sectorId: Int,
-        completion: (Boolean) -> Unit
+        completion: (Boolean, ResourceLoadInfo?) -> Unit
     ) {
         TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
         loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion)
@@ -115,7 +130,7 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
-        completion: (Boolean) -> Unit,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         loadJupiterResource(application, provider, region, sectorId, env, completion)
     }
@@ -132,10 +147,20 @@ class TJLabsResourceManager {
         sectorDataMap[sectorId] = snapshot.sectorData
         buildingsDataMap[sectorId] = snapshot.sectorData.buildings
 
+        // transitions 인덱싱: sector-aggregate + per-key ("${sectorId}_${bldg}_${전이층이름}")
+        transitionsBySector[sectorId] = snapshot.transitions
+        val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
+        for (t in snapshot.transitions) {
+            val bldgName = buildingNameById[t.level.building_id] ?: continue
+            val key = "${sectorId}_${bldgName}_${t.level.name}"
+            transitionsByKey[key] = t
+        }
+
         for (building in snapshot.sectorData.buildings) {
             for (level in building.levels) {
                 val key = "${sectorId}_${building.name}_${level.name}"
                 levelIdMap[key] = level.id
+                levelTypeMap[key] = level.type
                 if (level.name.contains("_D").not()) {
                     levelImageUrlMap[key] = level.image
                 }
@@ -180,7 +205,7 @@ class TJLabsResourceManager {
         }
 
         snapshot.pathPixelDataMap.forEach { (key, value) ->
-            delegate?.onPathPixelData(key, value)
+            delegate?.onPathPixelData(key, resolveLevelType(key), value)
         }
 
         snapshot.geofenceDataMap.forEach { (key, value) ->
@@ -219,6 +244,15 @@ class TJLabsResourceManager {
         val affine = snapshot.affineParam
         if (affine != null) {
             delegate?.onAffineData(loadedSectorId, affine)
+        }
+
+        // 층이동 구간 per-key emit. key 형식은 다른 level-scope 콜백들과 동일.
+        // 구버전 응답에는 transitions 가 없어 발동 자체가 없음.
+        val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
+        for (t in snapshot.transitions) {
+            val bldgName = buildingNameById[t.level.building_id] ?: continue
+            val key = "${loadedSectorId}_${bldgName}_${t.level.name}"
+            delegate?.onTransitionData(key, t)
         }
     }
 
@@ -270,13 +304,19 @@ class TJLabsResourceManager {
             imageDataMap.clear()
             sectorParamData.clear()
             levelParamData.clear()
+            transitionsByKey.clear()
+            transitionsBySector.clear()
+            levelTypeMap.clear()
         } else {
             sectorDataMap.remove(sectorId)
             buildingsDataMap.remove(sectorId)
             affineParamMap.remove(sectorId)
             simulationDataMap.remove(sectorId)
             sectorParamData.remove(sectorId)
+            transitionsBySector.remove(sectorId)
             val prefix = "${sectorId}_"
+            transitionsByKey.keys.removeAll { it.startsWith(prefix) }
+            levelTypeMap.keys.removeAll { it.startsWith(prefix) }
             levelIdMap.keys.removeAll { it.startsWith(prefix) }
             levelImageUrlMap.keys.removeAll { it.startsWith(prefix) }
             levelWardsDataMap.keys.removeAll { it.startsWith(prefix) }
@@ -328,6 +368,37 @@ class TJLabsResourceManager {
     fun getAffineParamData(): Map<Int, AffineTransParamOutput?> = affineParamMap
 
     fun getSimulationData(sectorId: Int): SimulationBundleOutput? = simulationDataMap[sectorId]
+
+    /**
+     * 섹터의 전체 층이동 구간 목록. 서버 스키마 2026-08-06+ 응답에서만 채워지고,
+     * 구버전에서는 항상 emptyList. 로드된 적 없으면 null.
+     */
+    fun getTransitions(sectorId: Int): List<TransitionOutput>? = transitionsBySector[sectorId]
+
+    /**
+     * 전이층 key ("${sectorId}_${bldg}_${전이층이름}") 로 단일 층이동 구간 조회.
+     * 다른 level-scope 콜백에서 받은 key 를 그대로 넣으면 됨.
+     */
+    fun getTransition(transitionKey: String): TransitionOutput? = transitionsByKey[transitionKey]
+
+    /**
+     * 전체 층이동 구간을 key 기반으로 조회. key 형식은 [getTransition] 참고.
+     */
+    fun getTransitionsByKey(): Map<String, TransitionOutput> = transitionsByKey
+
+    /**
+     * levelKey ("${sectorId}_${bldg}_${level}") 로부터 level.type ("floor" | "transition") 을
+     * 조회. path pixel 키의 "_PDR" 접미사는 자동으로 제거해 base key 로 조회한다.
+     *
+     * 매칭이 없으면 (아직 sector 로드 전이거나 알 수 없는 key) "floor" 를 반환 — 구버전
+     * 스키마에서도 안전하게 기존 흐름과 동일하게 동작하도록.
+     */
+    fun resolveLevelType(key: String): String {
+        val baseKey = if (key.endsWith("_PDR")) key.removeSuffix("_PDR") else key
+        return levelTypeMap[baseKey] ?: "floor"
+    }
+
+    fun getLevelType(key: String): String? = levelTypeMap[key]
 
     /**
      * BC-preserving 5-arg overload. env 를 명시하지 않으면 마지막으로 세팅된 env
@@ -396,7 +467,7 @@ class TJLabsResourceManager {
     fun updatePathPixelData(sectorId: Int, key: String, completion: (Boolean) -> Unit) {
         val cached = pathPixelDataMap[key]
         if (cached != null) {
-            delegate?.onPathPixelData(key, cached)
+            delegate?.onPathPixelData(key, resolveLevelType(key), cached)
             completion(true)
         } else {
             delegate?.onError(ResourceError.PathPixel, key)
