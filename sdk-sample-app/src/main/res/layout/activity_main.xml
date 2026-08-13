@@ -134,6 +134,13 @@
                 android:textStyle="italic" />
 
             <Button
+                android:id="@+id/buttonAuthOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Auth Only (forceFresh)" />
+
+            <Button
                 android:id="@+id/buttonRunAll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

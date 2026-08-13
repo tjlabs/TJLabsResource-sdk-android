@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var regionGroup: RadioGroup
     private lateinit var envGroup: RadioGroup
     private lateinit var currentEnvText: TextView
+    private lateinit var authOnlyButton: Button
     private lateinit var runAllButton: Button
     private lateinit var testJupiterBundleButton: Button
     private lateinit var testVenusBundleButton: Button
@@ -68,7 +69,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var clientKey: String
     // 마지막으로 auth 성공한 (provider, region, env) 조합. 조합이 바뀌면 재-auth 필요.
     private var lastAuthedScope: Triple<String, String, AuthServerEnv>? = null
-    private val sectorId = 20 // covensia : 20 // tips : 1
+    private val sectorId = 111 // covensia : 20 // tips : 1
 
     // verbose OFF 이면 아래 whitelist 이벤트만 UI callback log 에 표시. 나머지 (개별 데이터
     // 콜백 - onScaleOffsetData, onPathPixelData 등) 은 logcat 만 흘려보내 UI 노이즈 감소.
@@ -80,6 +81,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         "onWarpSectorData", "onWarpError",
         "onVenusSectorData", "onVenusError",
         "onSimulationData",
+        "onTransitionData",
         "onError",
         "benchmark",
         "clearCache",
@@ -140,6 +142,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         envGroup.setOnCheckedChangeListener { _, _ -> onScopeChanged() }
         regionGroup.setOnCheckedChangeListener { _, _ -> onScopeChanged() }
         providerGroup.setOnCheckedChangeListener { _, _ -> onScopeChanged() }
+        authOnlyButton = findViewById(R.id.buttonAuthOnly)
         runAllButton = findViewById(R.id.buttonRunAll)
         testJupiterBundleButton = findViewById(R.id.buttonTestJupiterBundle)
         testVenusBundleButton = findViewById(R.id.buttonTestVenusBundle)
@@ -173,6 +176,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         manager.simulationDelegate = this
         manager.setDebugOption(true)
 
+        authOnlyButton.setOnClickListener {
+            runAuthOnly(getSelectedProvider())
+        }
         runAllButton.setOnClickListener {
             runAllResources(manager, getSelectedProvider(), sectorId)
         }
@@ -238,7 +244,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 region = getSelectedRegion(),
                 sectorId = sectorId,
                 env = getSelectedResourceEnv(),
-            ) { coldSuccess ->
+            ) { coldSuccess, _ ->
                 val coldElapsed = System.currentTimeMillis() - coldStart
 
                 // 4. Warm load (캐시 적중 기대)
@@ -248,7 +254,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                     provider = provider,
                     region = getSelectedRegion(),
                     sectorId = sectorId
-                ) { warmSuccess ->
+                ) { warmSuccess, _ ->
                     val warmElapsed = System.currentTimeMillis() - warmStart
                     val saved = (coldElapsed - warmElapsed).coerceAtLeast(0)
                     val pct = if (coldElapsed > 0) 100.0 * saved / coldElapsed else 0.0
@@ -277,6 +283,33 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
 
     private fun updateBenchmarkResult(text: String) {
         runOnUiThread { benchmarkResultText.text = text }
+    }
+
+    /**
+     * Auth 단독 실행. 리소스 로드 없이 access token 발급 경로만 검증한다 —
+     * forceFresh=true 로 in-mem 캐시와 Phase 1 (getAccessToken 프로브) 를 우회하고
+     * 곧장 `TJLabsAuthManager.auth()` 네트워크 호출을 발동. 어떤 access key 가 실제로
+     * 나가는지, 응답 status/시간이 어떤지 authStatusText · callback log 로 즉시 확인.
+     */
+    private fun runAuthOnly(provider: String) {
+        val scope = currentScopeLabel(provider)
+        appendCallbackLog("auth", "authOnly click scope=$scope (forceFresh)", "api")
+        runOnUiThread {
+            authStatusText.text = "Auth($scope): running…"
+            authStatusText.setTextColor(getColor(R.color.text_pending))
+        }
+        // (provider, region, env) 중 하나만 바뀌어도 새 auth 가 필요하므로 in-mem 캐시 비움.
+        authenticatedProviders.clear()
+        lastAuthedScope = null
+        val startMs = System.currentTimeMillis()
+        authenticate(provider, forceFresh = true) { success ->
+            val elapsedMs = System.currentTimeMillis() - startMs
+            appendCallbackLog(
+                "auth",
+                "authOnly done success=$success elapsed=${elapsedMs}ms scope=$scope",
+                "api"
+            )
+        }
     }
 
     /**
@@ -342,17 +375,17 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 region = getSelectedRegion(),
                 sectorId = sectorId,
                 env = getSelectedResourceEnv(),
-            ) { isSuccess ->
+            ) { isSuccess, info ->
                 val totalElapsed = System.currentTimeMillis() - jupiterLoadStartMs
                 val sdkElapsed = System.currentTimeMillis() - loadCallStartMs
                 Log.i(
                     "TJLabsResource_BENCH",
-                    "[$provider/$sectorId] total=%4dms = auth %4dms + sdk %4dms | ok=%s"
-                        .format(totalElapsed, authElapsed, sdkElapsed, isSuccess)
+                    "[$provider/$sectorId] total=%4dms = auth %4dms + sdk %4dms | ok=%s | version=%s cached=%s"
+                        .format(totalElapsed, authElapsed, sdkElapsed, isSuccess, info?.versionId ?: "-", info?.fromCache ?: "-")
                 )
                 appendCallbackLog(
                     "loadJupiterResource",
-                    "ok=$isSuccess total=${totalElapsed}ms (auth=${authElapsed} sdk=${sdkElapsed}) scope=$scope",
+                    "ok=$isSuccess total=${totalElapsed}ms (auth=${authElapsed} sdk=${sdkElapsed}) version=${info?.versionId ?: "-"} cached=${info?.fromCache ?: "-"} scope=$scope",
                     "api"
                 )
                 updateJupiterStatus(
@@ -380,10 +413,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 region = getSelectedRegion(),
                 sectorId = sectorId,
                 env = getSelectedResourceEnv(),
-            ) { isSuccess ->
+            ) { isSuccess, info ->
                 appendCallbackLog(
                     "loadVenusResource",
-                    "success=$isSuccess sectorId=$sectorId scope=$scope",
+                    "success=$isSuccess sectorId=$sectorId version=${info?.versionId ?: "-"} cached=${info?.fromCache ?: "-"} scope=$scope",
                     "api"
                 )
                 updateVenusStatus(
@@ -410,10 +443,10 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 provider = provider,
                 region = getSelectedRegion(),
                 sectorId = sectorId
-            ) { isSuccess ->
+            ) { isSuccess, info ->
                 appendCallbackLog(
                     "loadWarpResource",
-                    "success=$isSuccess sectorId=$sectorId scope=$scope",
+                    "success=$isSuccess sectorId=$sectorId version=${info?.versionId ?: "-"} cached=${info?.fromCache ?: "-"} scope=$scope",
                     "api"
                 )
                 updateWarpStatus(
@@ -758,8 +791,21 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     override fun onSectorData(data: SectorOutput) {
         TJResourceLogger.d("onSectorData : $data")
         populateSourceHints(data)
-        appendCallbackLog("onSectorData", "sectorId=${data.id} buildings=${data.buildings.size}", "api")
-        updateCardStatusOnly(jupiterCard, "sectorId=${data.id} buildings=${data.buildings.size} • ${nowText()}", true)
+        // 스키마 2026-08-06+ : level.type == "floor" 인 것만 사용자 층 선택 UI 후보.
+        // 전이층("transition") 은 측위·경로탐색 대상이므로 SDK 는 필터링 없이 그대로 전달함.
+        val allLevels = data.buildings.sumOf { it.levels.size }
+        val floors = data.buildings.sumOf { b -> b.levels.count { it.type == "floor" } }
+        val transitionLevels = allLevels - floors
+        appendCallbackLog(
+            "onSectorData",
+            "sectorId=${data.id} buildings=${data.buildings.size} levels=$allLevels (floor=$floors transition=$transitionLevels) transitions=${data.transitions.size}",
+            "api"
+        )
+        updateCardStatusOnly(
+            jupiterCard,
+            "sectorId=${data.id} buildings=${data.buildings.size} floors=$floors transitions=${data.transitions.size} • ${nowText()}",
+            true
+        )
     }
 
     override fun onSectorError(error: ResourceError) {
@@ -783,15 +829,15 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         appendCallbackLog("onScaleOffsetData", "key=$scaleKey size=${data.size}", "api")
     }
 
-    override fun onPathPixelData(pathPixelKey: String, data: PathPixelData) {
-        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.road}")
-        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadScale}")
-        TJResourceLogger.d("onPathPixelData : $pathPixelKey // data : ${data.roadHeading}")
+    override fun onPathPixelData(pathPixelKey: String, levelType: String, data: PathPixelData) {
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // type=$levelType // data : ${data.road}")
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // type=$levelType // data : ${data.roadScale}")
+        TJResourceLogger.d("onPathPixelData : $pathPixelKey // type=$levelType // data : ${data.roadHeading}")
 
         val source = pathPixelSourceHint[pathPixelKey] ?: "api"
         appendCallbackLog(
             "onPathPixelData",
-            "key=$pathPixelKey nodes=${data.road.size} roadPts=${data.road.firstOrNull()?.size ?: 0}",
+            "key=$pathPixelKey type=$levelType nodes=${data.road.size} roadPts=${data.road.firstOrNull()?.size ?: 0}",
             source
         )
     }
@@ -886,6 +932,26 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     override fun onError(error: ResourceError, key: String) {
         TJResourceLogger.d("onError : $error // key : $key")
         appendCallbackLog("onError", "error=$error key=$key", "api")
+    }
+
+    override fun onTransitionData(transitionKey: String, data: TransitionOutput) {
+        TJResourceLogger.d(
+            "onTransitionData key=$transitionKey id=${data.id} name=${data.name} " +
+                "level=${data.level.id} lower=${data.lower_level.id}(bldg=${data.lower_level.building_id}) " +
+                "upper=${data.upper_level.id}(bldg=${data.upper_level.building_id}) points=${data.points.size}"
+        )
+        val typeCounts = data.points
+            .groupingBy { it.transition_type }
+            .eachCount()
+            .entries
+            .joinToString(",") { "${it.key}=${it.value}" }
+            .ifEmpty { "none" }
+        val vehiclePoints = data.points.count { it.is_vehicle }
+        appendCallbackLog(
+            "onTransitionData",
+            "key=$transitionKey name=${data.name} points=${data.points.size} (vehicle=$vehiclePoints) types=[$typeCounts]",
+            "api"
+        )
     }
 
     override fun onWarpSectorData(data: WarpSectorOutput) {
