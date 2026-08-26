@@ -10,6 +10,8 @@ plugins {
 val versionMajor = 1
 val versionMinor = 1
 val versionPatch = 10
+// feat/onprem 브렌치: mavenLocal 개발 스냅샷. 정식 릴리즈 시 suffix 제거.
+val versionSuffix = "-onprem-SNAPSHOT"
 
 
 android {
@@ -73,7 +75,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "com.github.tjlabs"
                 artifactId = "TJLabsResource-sdk-android"
-                version = "$versionMajor.$versionMinor.$versionPatch"
+                version = "$versionMajor.$versionMinor.$versionPatch$versionSuffix"
             }
         }
     }

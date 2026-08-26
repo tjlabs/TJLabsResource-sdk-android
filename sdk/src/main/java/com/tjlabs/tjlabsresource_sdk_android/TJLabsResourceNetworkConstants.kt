@@ -2,6 +2,7 @@ package com.tjlabs.tjlabsresource_sdk_android
 
 import com.tjlabs.tjlabsauth_sdk_android.TJLabsAuthManager
 import com.tjlabs.tjlabsauth_sdk_android.TokenResult
+import com.tjlabs.tjlabsresource_sdk_android.onprem.OnPremRoutingState
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -25,8 +26,13 @@ internal object TJLabsResourceNetworkConstants {
 
         val okHttpClient = okHttpBuilder.build()
 
+        // Retrofit 은 baseUrl 이 반드시 '/' 로 끝나야 relative endpoint path 를 append 함.
+        // on-prem baseUrl 은 OnPremRoutingState.enable 에서 trailing / 를 잘라 저장하므로
+        // 여기서 다시 붙여서 안전하게 처리.
+        val normalized = if (url.endsWith("/")) url else "$url/"
+
         return Retrofit.Builder()
-            .baseUrl(url)
+            .baseUrl(normalized)
             .addConverterFactory(GsonConverterFactory.create())
             .client(okHttpClient)
             .build()
@@ -36,6 +42,18 @@ internal object TJLabsResourceNetworkConstants {
         url: String,
         completion: (retrofit: Retrofit?, statusCode: Int, message: String) -> Unit
     ) {
+        // On-prem 모드는 TJLabsAuthManager 를 거치지 않는다. 토큰은 상위 계층
+        // (jupiter-sdk) 이 tokenProvider 로 주입한 값을 매 요청마다 조회.
+        if (OnPremRoutingState.isEnabled) {
+            val token = OnPremRoutingState.currentToken()
+            if (token.isBlank()) {
+                completion(null, 401, "on-prem access token missing")
+                return
+            }
+            completion(buildRetrofit(url, token), 200, "ok")
+            return
+        }
+
         val authStartMs = System.currentTimeMillis()
         TJLabsAuthManager.getAccessToken { tokenResult ->
             val authElapsed = System.currentTimeMillis() - authStartMs
@@ -136,6 +154,12 @@ internal object TJLabsResourceNetworkConstants {
     }
 
     fun getBaseUrl(bundleType: ResourceBundleType): String {
+        // On-prem 모드는 세 서비스 모두 단일 base URL. cloud 의 Warp 만 별도 도메인
+        // (.warp.tjlabs.dev) 로 분리하는 규칙도 여기선 적용하지 않는다 (on-prem 은
+        // API·번들 파일·도면이 전부 같은 호스트에서 나옴).
+        if (OnPremRoutingState.isEnabled) {
+            return OnPremRoutingState.baseUrl
+        }
         return when (bundleType) {
             ResourceBundleType.JUPITER, ResourceBundleType.VENUS -> USER_URL
             ResourceBundleType.WARP -> WARP_USER_URL

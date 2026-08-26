@@ -28,6 +28,25 @@ internal interface PostInput {
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
+    // ---- On-prem PMS endpoints (`/v2/warp`, `/v2/venus` 접두어 고정) ----
+    // cloud 의 `{server_version}` 자리에 `v2/warp` · `v2/venus` 를 넣는 대신
+    // 명시적인 별도 endpoint 를 둔다. 응답 body 는 cloud 와 동일한 flat
+    // `{url, version_id}` 이므로 [SectorBundleMetaOutput] 을 재사용.
+
+    // relative path (leading / 없음) — baseUrl 의 path 부분 (예: 하나 서버의 "/api") 을
+    // 존중해서 append 되도록. 절대 경로로 두면 Retrofit 이 baseUrl 의 path 를 버림.
+    @GET("v2/warp/sectors/{pk}/bundle")
+    fun getWarpBundleOnPrem(
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
+    @GET("v2/venus/sectors/{pk}/bundle")
+    fun getVenusBundleOnPrem(
+        @Path("pk") pk: Int,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
     @GET
     fun getSectorBundleJsonRaw(
         @Url url: String

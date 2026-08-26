@@ -31,6 +31,7 @@ import com.tjlabs.tjlabsresource_sdk_android.PostInput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMetaOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.ResourceBundleType
+import com.tjlabs.tjlabsresource_sdk_android.onprem.OnPremRoutingState
 import com.tjlabs.tjlabsresource_sdk_android.ResourceRegion
 import com.tjlabs.tjlabsresource_sdk_android.ServerProvider
 import com.tjlabs.tjlabsresource_sdk_android.SimulationBundleOutput
@@ -402,9 +403,23 @@ internal class TJLabsBundleDataManager {
             }
 
             val api = retrofit.create(PostInput::class.java)
-            val call = when (bundleType) {
-                ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
-                ResourceBundleType.JUPITER, ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+            val call = if (OnPremRoutingState.isEnabled) {
+                // On-prem PMS 는 서비스별 접두어 endpoint (`/v2/warp`, `/v2/venus`) 를 쓴다.
+                // 응답 body 는 cloud 와 동일 (`SectorBundleMetaOutput` 재사용). JUPITER 는
+                // on-prem 스펙 미확정이라 실패시킴 — 호출측이 warp/venus 만 로드하도록 스코프.
+                when (bundleType) {
+                    ResourceBundleType.WARP -> api.getWarpBundleOnPrem(sectorId)
+                    ResourceBundleType.VENUS -> api.getVenusBundleOnPrem(sectorId)
+                    ResourceBundleType.JUPITER -> {
+                        completion(501, "(TJLabsResource) on-prem JUPITER endpoint not implemented", null)
+                        return@genRetrofit
+                    }
+                }
+            } else {
+                when (bundleType) {
+                    ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
+                    ResourceBundleType.JUPITER, ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+                }
             }
             call.enqueue(object : Callback<SectorBundleMetaOutput> {
                 override fun onFailure(call: Call<SectorBundleMetaOutput>, t: Throwable) {
@@ -958,6 +973,22 @@ internal class TJLabsBundleDataManager {
     }
 
     private fun buildCacheNamespace(): String {
+        // On-prem 모드는 cloud 와 캐시를 완전히 격리한다. 이유:
+        //  1) 같은 sectorId 라도 cloud/on-prem 서버가 다른 데이터를 서빙할 수 있고
+        //     bundle 파일명은 sectorId 만으로 정해지므로 네임스페이스가 겹치면 서로 덮어씀
+        //  2) version_id 는 파일 내용 해시라 두 서버가 우연히 같은 해시를 낼 가능성은
+        //     사실상 없지만, 서로 다른 origin 데이터를 같은 캐시 슬롯에서 관리하는 것은
+        //     추적성·디버깅 관점에서도 나쁨
+        //  3) 여러 on-prem 서버 (사내 10.0.5.110 vs 현장 192.168.120.75) 도 격리 대상
+        if (OnPremRoutingState.isEnabled) {
+            val hostPort = OnPremRoutingState.baseUrl
+                .removePrefix("https://")
+                .removePrefix("http://")
+                .replace(Regex("[^A-Za-z0-9]"), "_")
+                .trim('_')
+                .ifEmpty { "unknown" }
+            return "onprem_$hostPort"
+        }
         val provider = sanitizeStorageSegment(TJLabsFileDownloader.provider, ServerProvider.AWS.value)
         val region = sanitizeStorageSegment(TJLabsFileDownloader.region, ResourceRegion.KOREA.value)
         return "${provider}_${region}"
@@ -1698,8 +1729,6 @@ internal class TJLabsBundleDataManager {
                         WarpWardOutput(
                             id = wardObj.optInt("id"),
                             name = wardObj.optString("name"),
-                            x = wardObj.optInt("x"),
-                            y = wardObj.optInt("y"),
                             rssi = wardObj.optFloatOrNull("rssi")
                                 ?: legacyContentObj?.optFloatOrNull("rssi")
                                 ?: -99f,

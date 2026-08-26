@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import com.tjlabs.tjlabsresource_sdk_android.manager.BundleDataSnapshot
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
+import com.tjlabs.tjlabsresource_sdk_android.onprem.OnPremRoutingState
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 
 class TJLabsResourceManager {
@@ -13,6 +14,32 @@ class TJLabsResourceManager {
     var simulationDelegate: TJLabsSimulationResourceManagerDelegate? = null
 
     companion object {
+        /**
+         * On-prem PMS 서버로 번들 로드를 라우팅한다.
+         *
+         * resource-sdk 는 auth 를 소유하지 않는다 — 요청 시점마다 [tokenProvider] 를 호출해
+         * 최신 JWT 를 얻어 `Authorization: Bearer` 헤더에 실을 뿐이다. 토큰 캐시·갱신·만료
+         * 처리는 상위 계층 (jupiter-sdk 의 on-prem auth 클라이언트) 이 담당한다.
+         *
+         * cloud (기존 provider/region 조립) 와 상호 배타. 이 함수를 호출한 시점 이후의
+         * loadWarpResource / loadVenusResource 는 on-prem endpoint (`/v2/warp`, `/v2/venus`) 로
+         * 라우팅되고, [clearOnPremConfig] 로 해제하기 전까지 cloud 로 돌아가지 않는다.
+         *
+         * @param baseUrl scheme + host + port (예: `http://192.168.120.75:5050`)
+         * @param tokenProvider 요청 시점마다 호출되는 토큰 조회 콜백. 토큰이 아직 없거나
+         *   만료됐으면 `null` / 빈 문자열 반환 허용 (그 경우 요청은 401 로 실패).
+         */
+        @JvmStatic
+        fun setOnPremConfig(baseUrl: String, tokenProvider: () -> String?) {
+            OnPremRoutingState.enable(baseUrl, tokenProvider)
+        }
+
+        /** On-prem 라우팅을 해제하고 cloud 모드로 되돌린다. */
+        @JvmStatic
+        fun clearOnPremConfig() {
+            OnPremRoutingState.disable()
+        }
+
         private val sectorDataMap: MutableMap<Int, SectorOutput> = mutableMapOf()
         private val buildingsDataMap: MutableMap<Int, List<BuildingOutput>> = mutableMapOf()
         private val levelIdMap: MutableMap<String, Int> = mutableMapOf()
