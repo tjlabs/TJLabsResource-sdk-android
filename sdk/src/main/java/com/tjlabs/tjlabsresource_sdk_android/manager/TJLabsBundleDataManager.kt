@@ -1729,6 +1729,8 @@ internal class TJLabsBundleDataManager {
                         WarpWardOutput(
                             id = wardObj.optInt("id"),
                             name = wardObj.optString("name"),
+                            x = wardObj.optInt("x"),
+                            y = wardObj.optInt("y"),
                             rssi = wardObj.optFloatOrNull("rssi")
                                 ?: legacyContentObj?.optFloatOrNull("rssi")
                                 ?: -99f,
