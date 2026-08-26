@@ -217,11 +217,12 @@ data class WarpLevelOutput(
     val wards: List<WarpWardOutput>
 )
 
+// Warp 는 근접(proximity) 서비스라 좌표 개념 자체가 없다. 도면·좌표가 필요하면 Venus 를 쓴다.
+// on-prem PMS 스펙에도 wards[].x/y 필드가 존재하지 않으며, cloud 응답의 값(있다면)도 소비자가
+// 사용하지 않음. 미래 실수 방지를 위해 필드 자체를 제거.
 data class WarpWardOutput(
     val id: Int,
     val name: String,
-    val x: Int,
-    val y: Int,
     val rssi: Float,
     val contents: List<WarpWardContentOutput>
 )
