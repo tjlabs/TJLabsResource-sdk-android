@@ -453,10 +453,14 @@ internal class TJLabsBundleDataManager {
         completion: (Int, String, String?) -> Unit
     ) {
         val env = TJLabsResourceNetworkConstants.getCurrentEnv()
-        TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // env=$env // url=$bundleUrl")
+        val effectiveUrl = applyBaseUrlPathPrefix(TJLabsResourceNetworkConstants.getBaseUrl(bundleType), bundleUrl)
+        if (effectiveUrl != bundleUrl) {
+            TJResourceLogger.d("(TJLabsResource) request bundle raw url rewrite: $bundleUrl -> $effectiveUrl")
+        }
+        TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // env=$env // url=$effectiveUrl")
         val retrofit = TJLabsResourceNetworkConstants.genPlainRetrofit(TJLabsResourceNetworkConstants.getBaseUrl(bundleType))
         val api = retrofit.create(PostInput::class.java)
-        api.getSectorBundleJsonRaw(bundleUrl).enqueue(object : Callback<okhttp3.ResponseBody> {
+        api.getSectorBundleJsonRaw(effectiveUrl).enqueue(object : Callback<okhttp3.ResponseBody> {
             override fun onFailure(call: Call<okhttp3.ResponseBody>, t: Throwable) {
                 TJResourceLogger.d("(TJLabsResource) request bundle raw fail // url=$bundleUrl // error=${t.localizedMessage}")
                 completion(500, "(TJLabsResource) Failure : getSectorBundleJsonRaw", null)
@@ -467,7 +471,7 @@ internal class TJLabsBundleDataManager {
                 if (status in 200 until 300) {
                     val raw = response.body()?.string()
                     TJResourceLogger.d(
-                        "(TJLabsResource) request bundle raw success // status=$status // url=$bundleUrl // rawSize=${raw?.length ?: 0}"
+                        "(TJLabsResource) request bundle raw success // status=$status // url=$effectiveUrl // rawSize=${raw?.length ?: 0}"
                     )
                     completion(status, "(TJLabsResource) Success : getSectorBundleJsonRaw", raw)
                 } else {
@@ -478,12 +482,43 @@ internal class TJLabsBundleDataManager {
                     )
 
                     TJResourceLogger.d(
-                        "(TJLabsResource) request bundle raw error // status=$status // url=$bundleUrl // errorBody=$errorBody"
+                        "(TJLabsResource) request bundle raw error // status=$status // url=$effectiveUrl // errorBody=$errorBody"
                     )
                     completion(status, "(TJLabsResource) Error : getSectorBundleJsonRaw", null)
                 }
             }
         })
+    }
+
+    /**
+     * on-prem 서버 중 일부 (예: 하나 온프레미스) 는 endpoint 앞에 `/api` 같은 path prefix
+     * 를 요구하지만, meta 응답으로 리턴하는 raw bundle URL 에는 그 prefix 가 빠져 있는
+     * 케이스가 있다. **on-prem 모드에서만** host 동일 + baseUrl path prefix 가 있으면
+     * 자동 주입해 raw fetch 가 404 나지 않게 한다. cloud 모드에서는 절대 rewrite 하지 않는다.
+     *
+     * 조건 (모두 만족):
+     *  - [OnPremRoutingState.isEnabled] == true
+     *  - baseUrl 과 resource URL 의 scheme + host + port 가 같음
+     *  - baseUrl 의 path 가 존재 (예: `/api`)
+     *  - resource URL 의 path 가 baseUrl path 로 시작하지 **않음**
+     *
+     * 그 외에는 원본 URL 그대로 반환.
+     */
+    private fun applyBaseUrlPathPrefix(baseUrl: String, resourceUrl: String): String {
+        if (!OnPremRoutingState.isEnabled) return resourceUrl
+        return try {
+            val base = java.net.URL(baseUrl)
+            val res = java.net.URL(resourceUrl)
+            val basePath = base.path.trimEnd('/')
+            if (basePath.isEmpty()) return resourceUrl
+            if (base.protocol != res.protocol || base.host != res.host || base.port != res.port) return resourceUrl
+            if (res.path.startsWith("$basePath/") || res.path == basePath) return resourceUrl
+            val portPart = if (res.port != -1) ":${res.port}" else ""
+            val query = if (res.query != null) "?${res.query}" else ""
+            "${res.protocol}://${res.host}$portPart$basePath${res.path}$query"
+        } catch (_: Exception) {
+            resourceUrl
+        }
     }
 
     private fun enrichCsvData(

@@ -35,6 +35,7 @@ internal interface PostInput {
 
     // relative path (leading / 없음) — baseUrl 의 path 부분 (예: 하나 서버의 "/api") 을
     // 존중해서 append 되도록. 절대 경로로 두면 Retrofit 이 baseUrl 의 path 를 버림.
+    // 여기에 명시적으로 `api/` 를 붙이면 baseUrl 이 `/api` 를 포함할 때 이중이 되므로 주의.
     @GET("v2/warp/sectors/{pk}/bundle")
     fun getWarpBundleOnPrem(
         @Path("pk") pk: Int,
