@@ -9,7 +9,10 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
+import java.net.URL
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
 
 const val TIMEOUT_VALUE_PUT = 5L
 
@@ -19,6 +22,7 @@ internal object TJLabsResourceNetworkConstants {
             .connectTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
             .readTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
             .writeTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
+            .hostnameVerifier(onPremScopedHostnameVerifier())
 
         if (token.isNullOrBlank().not()) {
             okHttpBuilder.addInterceptor(HeaderInterceptor(token!!))
@@ -171,6 +175,29 @@ internal object TJLabsResourceNetworkConstants {
             ResourceBundleType.JUPITER -> JUPITER_SECTOR_BUNDLE_SERVER_VERSION
             ResourceBundleType.VENUS -> VENUS_SECTOR_BUNDLE_SERVER_VERSION
             ResourceBundleType.WARP -> WARP_SECTOR_BUNDLE_SERVER_VERSION
+        }
+    }
+
+    /**
+     * on-prem 서버 host 에 한해서만 hostname 검증을 pass 시키는 HostnameVerifier.
+     *
+     * 사용 이유: 사설 인증서 (예: CN=`tjlabscorp.com`) 로 IP (예: `192.168.120.104`) 로
+     * 접속할 때 Android 기본 검증은 hostname mismatch 로 거부. Trust chain 은 network
+     * security config `<trust-anchors>` 로 host-scope 제한되어 이미 안전하므로, hostname
+     * 검증만 on-prem host 한정으로 우회한다.
+     *
+     * 그 외 모든 호스트 (cloud, 외부 SaaS) 는 시스템 기본 verifier 로 위임 → 정상 검증.
+     */
+    private fun onPremScopedHostnameVerifier(): HostnameVerifier {
+        val default = HttpsURLConnection.getDefaultHostnameVerifier()
+        return HostnameVerifier { hostname, session ->
+            if (OnPremRoutingState.isEnabled) {
+                val onPremHost = runCatching { URL(OnPremRoutingState.baseUrl).host }.getOrDefault("")
+                if (onPremHost.isNotEmpty() && hostname.equals(onPremHost, ignoreCase = true)) {
+                    return@HostnameVerifier true
+                }
+            }
+            default.verify(hostname, session)
         }
     }
 
