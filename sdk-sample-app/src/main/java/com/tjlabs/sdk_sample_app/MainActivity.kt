@@ -69,7 +69,7 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var clientKey: String
     // 마지막으로 auth 성공한 (provider, region, env) 조합. 조합이 바뀌면 재-auth 필요.
     private var lastAuthedScope: Triple<String, String, AuthServerEnv>? = null
-    private val sectorId = 111 // covensia : 20 // tips : 1
+    private val sectorId = 8 // covensia : 20 // tips : 1
 
     // verbose OFF 이면 아래 whitelist 이벤트만 UI callback log 에 표시. 나머지 (개별 데이터
     // 콜백 - onScaleOffsetData, onPathPixelData 등) 은 logcat 만 흘려보내 UI 노이즈 감소.
