@@ -52,6 +52,9 @@ class TJLabsResourceManager {
         private val entranceDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceItemDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceRouteDataMap: MutableMap<String, EntranceRouteData> = mutableMapOf()
+        // 2026-08-28 스키마 — level id → 그 층의 GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑.
+        // 파일이 업로드된 층만 채워진다. 파일 없는 층은 map 에 key 자체가 없음.
+        private val parkingMatchesDataMap: MutableMap<Int, List<ParkingMatch>> = mutableMapOf()
         private val levelUnitsDataMap: MutableMap<String, List<UnitData>> = mutableMapOf()
         private val landmarkDataMap: MutableMap<String, Map<String, LandmarkData>> = mutableMapOf()
         private val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
@@ -201,6 +204,7 @@ class TJLabsResourceManager {
         entranceDataMap.putAll(snapshot.entranceDataMap)
         entranceItemDataMap.putAll(snapshot.entranceItemDataMap)
         entranceRouteDataMap.putAll(snapshot.entranceRouteDataMap)
+        parkingMatchesDataMap.putAll(snapshot.parkingMatchesDataByLevelId)
         levelUnitsDataMap.putAll(snapshot.levelUnitsDataMap)
         landmarkDataMap.putAll(snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() })
         nodeDataMap.putAll(snapshot.nodeDataMap.filterKeys { it.contains("_D").not() })
@@ -385,6 +389,16 @@ class TJLabsResourceManager {
     fun getEntranceData(): Map<String, EntranceData> = entranceDataMap
 
     fun getEntranceRouteData(): Map<String, EntranceRouteData> = entranceRouteDataMap
+
+    /**
+     * 2026-08-28 스키마 — level id 에 해당하는 GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑.
+     * 파일이 업로드되지 않은 층은 null, 업로드됐지만 matches 가 비어있으면 emptyList.
+     * `matchingId` 는 숫자처럼 보여도 String 이니 Int 로 파싱하지 말 것.
+     */
+    fun getParkingMatches(levelId: Int): List<ParkingMatch>? = parkingMatchesDataMap[levelId]
+
+    /** 전체 sector 의 모든 level 에 대한 parking matches 인덱스 (levelId → matches). */
+    fun getAllParkingMatches(): Map<Int, List<ParkingMatch>> = parkingMatchesDataMap
 
     fun getBuildingLevelImageData(): Map<String, Bitmap> = imageDataMap
 

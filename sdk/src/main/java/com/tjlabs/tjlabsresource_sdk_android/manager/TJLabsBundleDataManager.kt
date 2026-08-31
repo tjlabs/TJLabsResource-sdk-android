@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
+import com.tjlabs.tjlabsresource_sdk_android.ParkingMatch
 import com.tjlabs.tjlabsresource_sdk_android.Category
 import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
@@ -90,6 +91,10 @@ internal data class BundleDataSnapshot(
     val affineParam: AffineTransParamOutput?,
     val graphPathUrlsByKey: Map<String, String>,
     val entranceRouteUrlsByKey: Map<String, String>,
+    // 2026-08-28 스키마: level 별 parking-matches 파일 URL / 파싱 결과.
+    // 파일 미업로드 층은 두 map 모두 key 부재 (null 대신 absence).
+    val parkingMatchesUrlsByLevelId: Map<Int, String> = emptyMap(),
+    val parkingMatchesDataByLevelId: Map<Int, List<ParkingMatch>> = emptyMap(),
     val warpSectorData: WarpSectorOutput?,
     val venusSectorData: VenusSectorOutput?,
     val transitions: List<TransitionOutput> = emptyList()
@@ -110,6 +115,9 @@ internal class TJLabsBundleDataManager {
         private const val PREF_ENTRANCE_VERSION_PREFIX = "entrance_route_version_"
         private const val PREF_ENTRANCE_URL_PREFIX = "entrance_route_url_"
         private const val PREF_ENTRANCE_FILE_PREFIX = "entrance_route_file_"
+        private const val PREF_PARKING_MATCHES_VERSION_PREFIX = "parking_matches_version_"
+        private const val PREF_PARKING_MATCHES_URL_PREFIX = "parking_matches_url_"
+        private const val PREF_PARKING_MATCHES_FILE_PREFIX = "parking_matches_file_"
         private const val PREF_SIM_VERSION_PREFIX = "simulation_version_"
         private const val PREF_SIM_URL_PREFIX = "simulation_url_"
         private const val PREF_SIM_FILE_PREFIX = "simulation_file_"
@@ -531,7 +539,8 @@ internal class TJLabsBundleDataManager {
         val hasPathUrls = snapshot.graphPathUrlsByKey.isNotEmpty()
         val hasEntranceUrls = snapshot.entranceRouteUrlsByKey.isNotEmpty()
         val hasImageUrls = snapshot.imageUrlsByKey.isNotEmpty()
-        if (!hasPathUrls && !hasEntranceUrls && !hasImageUrls) {
+        val hasParkingMatchesUrls = snapshot.parkingMatchesUrlsByLevelId.isNotEmpty()
+        if (!hasPathUrls && !hasEntranceUrls && !hasImageUrls && !hasParkingMatchesUrls) {
             TJResourceLogger.d("(TJLabsResource) enrichCsvData skip // no enrich urls")
             completion(true, snapshot)
             return
@@ -545,8 +554,9 @@ internal class TJLabsBundleDataManager {
             val pathTargets = snapshot.graphPathUrlsByKey.filterKeys { it.contains("_D").not() }
             val entranceTargets = snapshot.entranceRouteUrlsByKey
             val imageTargets = snapshot.imageUrlsByKey
+            val parkingMatchesTargets = snapshot.parkingMatchesUrlsByLevelId
 
-            // path / entrance / image 세 단계를 모두 한 번에 fan-out 시켜 병렬 처리
+            // path / entrance / image / parking-matches 를 한 번에 fan-out 시켜 병렬 처리
             val parallelStart = nowMs()
             val pathDeferred = pathTargets.map { (key, url) ->
                 async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, url) }
@@ -557,10 +567,14 @@ internal class TJLabsBundleDataManager {
             val imageDeferred = imageTargets.map { (key, url) ->
                 async { key to loadImageWithCache(application, sectorId, snapshot.versionId, key, url) }
             }
+            val parkingMatchesDeferred = parkingMatchesTargets.map { (levelId, url) ->
+                async { levelId to fetchParkingMatchesData(application, sectorId, snapshot.versionId, levelId, url) }
+            }
 
             val pathResults = pathDeferred.awaitAll()
             val entranceResults = entranceDeferred.awaitAll()
             val imageResults = imageDeferred.awaitAll()
+            val parkingMatchesResults = parkingMatchesDeferred.awaitAll()
             TJResourceLogger.d {
                 "(TJLabsResource) perf enrichCsvData parallel stage // sectorId=$sectorId // pathCount=${pathTargets.size} // entranceCount=${entranceTargets.size} // imageCount=${imageTargets.size} // elapsedMs=${elapsedMs(parallelStart)}"
             }
@@ -569,6 +583,17 @@ internal class TJLabsBundleDataManager {
             val pathPixelData = snapshot.pathPixelDataMap.toMutableMap()
             val entranceRouteData = snapshot.entranceRouteDataMap.toMutableMap()
             val imageData = snapshot.imageDataMap.toMutableMap()
+            val parkingMatchesData = snapshot.parkingMatchesDataByLevelId.toMutableMap()
+
+            for ((levelId, parsed) in parkingMatchesResults) {
+                if (parsed != null) {
+                    parkingMatchesData[levelId] = parsed
+                } else {
+                    // 파일이 서버에 있다고 표기되어 있었으나 fetch/parse 실패 — enrich 전체 성공 여부에는
+                    // 영향을 주지 않는다 (parking-matches 는 optional 데이터). 로그만 남긴다.
+                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData optional fail@ParkingMatches // levelId=$levelId" }
+                }
+            }
 
             for ((key, parsed) in pathResults) {
                 if (parsed != null) {
@@ -592,10 +617,27 @@ internal class TJLabsBundleDataManager {
                 else TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@Image // key=$key" }
             }
 
+            // parking-matches 를 sectorData 안 각 LevelOutput 에 주입해 소비자가
+            // SectorOutput 순회만으로 접근 가능하게 한다 (manager lookup 도 별도 제공).
+            val updatedSectorData = if (parkingMatchesData.isEmpty()) {
+                snapshot.sectorData
+            } else {
+                snapshot.sectorData.copy(
+                    buildings = snapshot.sectorData.buildings.map { b ->
+                        b.copy(
+                            levels = b.levels.map { lv ->
+                                parkingMatchesData[lv.id]?.let { lv.copy(parking_matches = it) } ?: lv
+                            }
+                        )
+                    }
+                )
+            }
             val enriched = snapshot.copy(
+                sectorData = updatedSectorData,
                 pathPixelDataMap = pathPixelData,
                 entranceRouteDataMap = entranceRouteData,
-                imageDataMap = imageData
+                imageDataMap = imageData,
+                parkingMatchesDataByLevelId = parkingMatchesData
             )
 
             withContext(Dispatchers.Main) {
@@ -701,6 +743,68 @@ internal class TJLabsBundleDataManager {
         return parsed
     }
 
+    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 List<ParkingMatch> 로 파싱.
+    // url 은 만료 없는 공개 URL 이라 [getCsvTextWithCache] 의 version_id 기반 캐시가 그대로 유효.
+    private fun fetchParkingMatchesData(
+        application: Application,
+        sectorId: Int,
+        versionId: String,
+        levelId: Int,
+        url: String
+    ): List<ParkingMatch>? {
+        val key = "level_$levelId"
+        val startMs = nowMs()
+        TJResourceLogger.d("(TJLabsResource) fetchParkingMatchesData start // levelId=$levelId // url=$url")
+        val text = getCsvTextWithCache(
+            application = application,
+            sectorId = sectorId,
+            versionId = versionId,
+            key = key,
+            url = url,
+            source = "parkingMatches:$key",
+            versionPrefix = PREF_PARKING_MATCHES_VERSION_PREFIX,
+            urlPrefix = PREF_PARKING_MATCHES_URL_PREFIX,
+            filePrefix = PREF_PARKING_MATCHES_FILE_PREFIX,
+            extension = "json"
+        ) ?: run {
+            TJResourceLogger.d("(TJLabsResource) perf fetchParkingMatchesData fail // levelId=$levelId // elapsedMs=${elapsedMs(startMs)}")
+            return null
+        }
+        val parsed = parseParkingMatchesData(text)
+        TJResourceLogger.d(
+            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.size ?: -1} // elapsedMs=${elapsedMs(startMs)}"
+        )
+        return parsed
+    }
+
+    // 매칭 파일 포맷: {"matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
+    // matchingId 는 숫자처럼 보여도 문자열 (앞자리 0 이나 문자 포함 ID 가능성). Int 로 파싱하지 않음.
+    // matches 는 빈 배열일 수 있고, 그 경우 emptyList 반환.
+    private fun parseParkingMatchesData(text: String): List<ParkingMatch>? {
+        return try {
+            val root = JSONObject(text)
+            val arr = root.optJSONArray("matches") ?: return emptyList()
+            val out = ArrayList<ParkingMatch>(arr.length())
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("id").orEmpty()
+                if (id.isBlank()) continue
+                // matchingId 는 null 가능 (지도에는 있으나 현장에 없는 주차면).
+                // JSON 에서 null 이거나 문자열이지만 비어 있는 경우 모두 null 로 취급.
+                val matchingId: String? = if (obj.isNull("matchingId")) {
+                    null
+                } else {
+                    obj.optString("matchingId").takeIf { it.isNotBlank() }
+                }
+                out.add(ParkingMatch(id = id, matchingId = matchingId))
+            }
+            out
+        } catch (t: Throwable) {
+            TJResourceLogger.d("(TJLabsResource) parseParkingMatchesData failed // err=${t.message}")
+            null
+        }
+    }
+
     private fun fetchEntranceRouteData(
         application: Application,
         sectorId: Int,
@@ -740,7 +844,8 @@ internal class TJLabsBundleDataManager {
         source: String,
         versionPrefix: String,
         urlPrefix: String,
-        filePrefix: String
+        filePrefix: String,
+        extension: String = "csv"
     ): String? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
@@ -786,7 +891,8 @@ internal class TJLabsBundleDataManager {
             content = downloaded,
             versionPrefix = versionPrefix,
             urlPrefix = urlPrefix,
-            filePrefix = filePrefix
+            filePrefix = filePrefix,
+            extension = extension
         )
         return downloaded
     }
@@ -801,7 +907,8 @@ internal class TJLabsBundleDataManager {
         content: String,
         versionPrefix: String,
         urlPrefix: String,
-        filePrefix: String
+        filePrefix: String,
+        extension: String = "csv"
     ) {
         try {
             val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
@@ -809,7 +916,7 @@ internal class TJLabsBundleDataManager {
                 cacheDir.mkdirs()
             }
 
-            val fileName = buildCsvFileName(sectorId = sectorId, key = key)
+            val fileName = buildCsvFileName(sectorId = sectorId, key = key, extension = extension)
             val csvFile = File(cacheDir, fileName)
             csvFile.writeText(content)
 
@@ -985,9 +1092,11 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    private fun buildCsvFileName(sectorId: Int, key: String): String {
+    private fun buildCsvFileName(sectorId: Int, key: String, extension: String = "csv"): String {
         // key format: {sectorId}_{buildingName}_{levelName} or {sectorId}_{buildingName}_{levelName}_{entranceNumber}
-        // requested naming: {sectorId}_{buildingName}_{levelName}.csv
+        // requested naming: {sectorId}_{buildingName}_{levelName}.{extension}
+        // 대부분의 소비자는 CSV 저장 (path pixel · entrance route). parking-matches 처럼 JSON
+        // 컨텐츠는 호출부에서 extension="json" 을 명시적으로 넘겨 확장자로 표기해준다.
         val normalized = key
             .replace("/", "_")
             .replace("\\", "_")
@@ -1000,7 +1109,7 @@ internal class TJLabsBundleDataManager {
             .replace("|", "_")
             .trim()
             .ifEmpty { "${sectorId}_unknown" }
-        return "$normalized.csv"
+        return "$normalized.$extension"
     }
 
     private fun buildSectorCacheFolderName(sectorId: Int): String {
@@ -1142,6 +1251,9 @@ internal class TJLabsBundleDataManager {
             val imageUrlsByKey = mutableMapOf<String, String>()
             val graphPathUrls = mutableMapOf<String, String>()
             val entranceRouteUrls = mutableMapOf<String, String>()
+            // 2026-08-28 스키마 — level 별 parking_matches.url 을 levelId 기준으로 수집.
+            // 파일 미업로드 시 서버가 null 을 보내므로 정상 상태로 취급 (map key 부재).
+            val parkingMatchesUrls = mutableMapOf<Int, String>()
 
             val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
             for (i in 0 until buildingsJson.length()) {
@@ -1162,6 +1274,12 @@ internal class TJLabsBundleDataManager {
                     val imageUrl = mapImage?.optString("url").orEmpty()
                     // 2026-08-06+ 스키마: "floor" | "transition". 이전 스키마엔 필드 없음 → 기본 "floor".
                     val levelType = levelObj.optString("type", "floor").ifBlank { "floor" }
+                    // 2026-08-28 스키마: parking_matches 는 nullable 오브젝트. null 이면 파일 미업로드.
+                    // enrich 단계에서 이 url 을 GET 해 List<ParkingMatch> 로 채운다.
+                    levelObj.optJSONObject("parking_matches")?.let { pmObj ->
+                        val pmUrl = pmObj.optString("url").orEmpty()
+                        if (pmUrl.isNotBlank()) parkingMatchesUrls[levelId] = pmUrl
+                    }
                     levels.add(LevelOutput(id = levelId, name = levelName, image = imageUrl, type = levelType))
                     if (isDebugLevel.not() && imageUrl.isNotBlank()) {
                         imageUrlsByKey[levelKey] = imageUrl
@@ -1321,6 +1439,7 @@ internal class TJLabsBundleDataManager {
                 landmarkDataMap = landmarkMap,
                 nodeDataMap = nodeMap,
                 linkDataMap = linkMap,
+                parkingMatchesUrlsByLevelId = parkingMatchesUrls,
                 pathPixelDataMap = pathPixelMap,
                 entranceDataMap = entranceLevelMap,
                 entranceItemDataMap = entranceItemMap,

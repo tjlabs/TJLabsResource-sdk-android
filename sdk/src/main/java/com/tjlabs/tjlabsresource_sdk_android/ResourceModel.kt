@@ -162,7 +162,16 @@ data class SectorBundleLevelOutput(
     val entrances: List<SectorBundleEntranceOutput>?,
     val units: List<UnitData>?,
     val graph: SectorBundleGraphOutput?,
-    val wards: List<LevelLandmark>?
+    val wards: List<LevelLandmark>?,
+    // 2026-08-28 스키마 신규. GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑 파일의 공개 URL.
+    // 파일 미업로드 시 null. SDK 는 이 URL 을 다시 GET 해서 [ParkingMatchesData] 로 파싱한다.
+    val parking_matches: SectorBundleParkingMatchesOutput? = null
+)
+
+// 2026-08-28 스키마 — 각 level 안에 실려오는 parking matches 참조.
+// url 은 만료 없는 공개 URL (presigned 아님). 그대로 GET 하면 [ParkingMatchesData] JSON.
+data class SectorBundleParkingMatchesOutput(
+    val url: String
 )
 
 data class SectorBundleMapImageOutput(
@@ -286,7 +295,28 @@ data class LevelOutput(
     val image: String,
     // "floor" (일반 층) or "transition" (층이동 전이층). 층 선택 UI 는 "floor" 로 필터해서 쓸 것.
     // 측위·경로탐색은 전이층 포함해야 하므로 SDK 는 필터링 없이 그대로 전달한다.
-    val type: String = "floor"
+    val type: String = "floor",
+    // 2026-08-28 스키마 — GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑.
+    // 파일이 업로드된 층만 채워진다. 미업로드 → null. 빈 배열도 가능 (matches: []).
+    // 최종 소비자(VM/Jupiter/앱) 는 [id → matchingId] 또는 [matchingId → id] lookup 을
+    // 필요에 맞게 이 리스트에서 만들어 쓴다.
+    val parking_matches: List<ParkingMatch>? = null
+)
+
+// MARK: - Parking Matches (2026-08-28)
+// level 하나에 대응하는 GeoJSON 피처 ↔ 외부 업체 주차면 ID 매핑 파일의 파싱 결과.
+data class ParkingMatchesData(
+    val matches: List<ParkingMatch>
+)
+
+// GeoJSON 피처 id (UUID 문자열) ↔ 외부 업체 시스템 주차면 ID (문자열, 숫자처럼 보여도 문자열).
+// matchingId 를 Int 로 파싱하지 말 것 — 앞자리 0 이나 문자 포함 값이 들어올 수 있다.
+// matchingId 가 null 인 케이스는 "지도에는 있지만 현장에 존재하지 않는 주차면" 을 의미한다
+// (실제 현장 데이터와 지도 데이터 불일치). 소비자(VM) 는 이 항목의 GeoJSON id 를
+// 프론트의 unavailableParkingLocationIdList 조회 응답에 채워준다.
+data class ParkingMatch(
+    val id: String,
+    val matchingId: String?
 )
 
 // MARK: - Transitions (층이동 구간)
