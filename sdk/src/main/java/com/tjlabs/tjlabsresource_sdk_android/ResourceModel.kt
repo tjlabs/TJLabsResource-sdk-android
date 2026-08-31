@@ -311,9 +311,12 @@ data class ParkingMatchesData(
 
 // GeoJSON 피처 id (UUID 문자열) ↔ 외부 업체 시스템 주차면 ID (문자열, 숫자처럼 보여도 문자열).
 // matchingId 를 Int 로 파싱하지 말 것 — 앞자리 0 이나 문자 포함 값이 들어올 수 있다.
+// matchingId 가 null 인 케이스는 "지도에는 있지만 현장에 존재하지 않는 주차면" 을 의미한다
+// (실제 현장 데이터와 지도 데이터 불일치). 소비자(VM) 는 이 항목의 GeoJSON id 를
+// 프론트의 unavailableParkingLocationIdList 조회 응답에 채워준다.
 data class ParkingMatch(
     val id: String,
-    val matchingId: String
+    val matchingId: String?
 )
 
 // MARK: - Transitions (층이동 구간)

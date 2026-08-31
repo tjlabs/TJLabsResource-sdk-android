@@ -788,8 +788,14 @@ internal class TJLabsBundleDataManager {
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
                 val id = obj.optString("id").orEmpty()
-                val matchingId = obj.optString("matchingId").orEmpty()
-                if (id.isBlank() || matchingId.isBlank()) continue
+                if (id.isBlank()) continue
+                // matchingId 는 null 가능 (지도에는 있으나 현장에 없는 주차면).
+                // JSON 에서 null 이거나 문자열이지만 비어 있는 경우 모두 null 로 취급.
+                val matchingId: String? = if (obj.isNull("matchingId")) {
+                    null
+                } else {
+                    obj.optString("matchingId").takeIf { it.isNotBlank() }
+                }
                 out.add(ParkingMatch(id = id, matchingId = matchingId))
             }
             out
