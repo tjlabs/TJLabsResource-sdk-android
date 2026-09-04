@@ -213,11 +213,14 @@ internal class TJLabsBundleDataManager {
         var imgCount = 0
 
         fun emitSummary(source: String, success: Boolean) {
+            // TJResourceLogger.setDebugOption(true) 로 켠 상태에서만 emit.
+            // 릴리즈 빌드/기본 상태에서는 조용히 무시되어 소비자 앱 logcat 을 오염시키지 않음.
+            if (!TJResourceLogger.isDebugEnabled()) return
+
             val total = elapsedMs(loadStartMs)
 
             // iOS `[TJLabsResourceManager] (loadResources timing)` 로그와 포맷 매칭.
             // 필터: `adb logcat -s TJLabsResourceManager:I` (INFO 만 → 하단 debug 로그 노이즈 제거)
-            val iosTag = "TJLabsResourceManager"
             val iosPrefix = "(loadResources timing)"
             val isMemoryHit = source.contains("memory_cache") || source == "memory_fastpath"
             val isDiskHit = source.contains("disk_raw")
@@ -226,8 +229,7 @@ internal class TJLabsBundleDataManager {
 
             // [1/3] metadata — v1.1.14 는 항상 서버 meta 조회 → bypassLocalCache=true 가 기본.
             val metaVal = if (metaMs < 0L) 0.0 else metaMs.toDouble()
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix : [1/3] sector bundle metadata fetch = %.1fms // sectorId = $sectorId, bypassLocalCache = $bypassLocalCache"
                     .format(metaVal)
             )
@@ -238,8 +240,7 @@ internal class TJLabsBundleDataManager {
                 source.contains("disk_raw") -> parseMs.coerceAtLeast(0).toDouble()
                 else -> 0.0
             }
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix : [2/3] sector bundle json download+decode = %.1fms // sectorId = $sectorId, isCached = $isCached"
                     .format(jsonMs)
             )
@@ -249,25 +250,21 @@ internal class TJLabsBundleDataManager {
             val organizeAsyncMs = if (enrichMs < 0L) 0.0 else enrichMs.toDouble()
             val organizeSyncMs = 0.0
             val organizeTotalMs = organizeSyncMs + organizeAsyncMs
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix :   organize[a] sync in-memory build + dispatch = %.1fms // sectorId = $sectorId"
                     .format(organizeSyncMs)
             )
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix :   organize[b] async resource loads (DispatchGroup wait) = %.1fms // sectorId = $sectorId"
                     .format(organizeAsyncMs)
             )
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix : [3/3] organize sector bundle = %.1fms // sectorId = $sectorId"
                     .format(organizeTotalMs)
             )
 
             // TOTAL — metadata + json + organize (loadBundle 진입~종료)
-            android.util.Log.i(
-                iosTag,
+            TJResourceLogger.i(
                 "$iosPrefix : TOTAL = %.1fms (metadata %.1fms + bundle %.1fms + organize %.1fms) // sectorId = $sectorId, isCached = $isCached, success = $success"
                     .format(total.toDouble(), metaVal, jsonMs, organizeTotalMs)
             )
