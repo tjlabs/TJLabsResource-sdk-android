@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatch
+import com.tjlabs.tjlabsresource_sdk_android.ParkingMatchesData
 import com.tjlabs.tjlabsresource_sdk_android.Category
 import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
@@ -94,7 +95,7 @@ internal data class BundleDataSnapshot(
     // 2026-08-28 스키마: level 별 parking-matches 파일 URL / 파싱 결과.
     // 파일 미업로드 층은 두 map 모두 key 부재 (null 대신 absence).
     val parkingMatchesUrlsByLevelId: Map<Int, String> = emptyMap(),
-    val parkingMatchesDataByLevelId: Map<Int, List<ParkingMatch>> = emptyMap(),
+    val parkingMatchesDataByLevelId: Map<Int, ParkingMatchesData> = emptyMap(),
     val warpSectorData: WarpSectorOutput?,
     val venusSectorData: VenusSectorOutput?,
     val transitions: List<TransitionOutput> = emptyList()
@@ -671,6 +672,7 @@ internal class TJLabsBundleDataManager {
 
             // parking-matches 를 sectorData 안 각 LevelOutput 에 주입해 소비자가
             // SectorOutput 순회만으로 접근 가능하게 한다 (manager lookup 도 별도 제공).
+            // level_match 는 파일 root 에 실린 사용자 표기 (예: "3") — building 단위 유일.
             val updatedSectorData = if (parkingMatchesData.isEmpty()) {
                 snapshot.sectorData
             } else {
@@ -678,7 +680,12 @@ internal class TJLabsBundleDataManager {
                     buildings = snapshot.sectorData.buildings.map { b ->
                         b.copy(
                             levels = b.levels.map { lv ->
-                                parkingMatchesData[lv.id]?.let { lv.copy(parking_matches = it) } ?: lv
+                                parkingMatchesData[lv.id]?.let { pmd ->
+                                    lv.copy(
+                                        parking_matches = pmd.matches,
+                                        level_match = pmd.level_match
+                                    )
+                                } ?: lv
                             }
                         )
                     }
@@ -795,7 +802,7 @@ internal class TJLabsBundleDataManager {
         return parsed
     }
 
-    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 List<ParkingMatch> 로 파싱.
+    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 [ParkingMatchesData] 로 파싱.
     // url 은 만료 없는 공개 URL 이라 [getCsvTextWithCache] 의 version_id 기반 캐시가 그대로 유효.
     private fun fetchParkingMatchesData(
         application: Application,
@@ -803,7 +810,7 @@ internal class TJLabsBundleDataManager {
         versionId: String,
         levelId: Int,
         url: String
-    ): List<ParkingMatch>? {
+    ): ParkingMatchesData? {
         val key = "level_$levelId"
         val startMs = nowMs()
         TJResourceLogger.d("(TJLabsResource) fetchParkingMatchesData start // levelId=$levelId // url=$url")
@@ -824,18 +831,25 @@ internal class TJLabsBundleDataManager {
         }
         val parsed = parseParkingMatchesData(text)
         TJResourceLogger.d(
-            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.size ?: -1} // elapsedMs=${elapsedMs(startMs)}"
+            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.matches?.size ?: -1} // levelMatch=${parsed?.level_match} // elapsedMs=${elapsedMs(startMs)}"
         )
         return parsed
     }
 
-    // 매칭 파일 포맷: {"matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
+    // 매칭 파일 포맷: {"level_match":"<user-facing level, e.g., \"3\">", "matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
     // matchingId 는 숫자처럼 보여도 문자열 (앞자리 0 이나 문자 포함 ID 가능성). Int 로 파싱하지 않음.
-    // matches 는 빈 배열일 수 있고, 그 경우 emptyList 반환.
-    private fun parseParkingMatchesData(text: String): List<ParkingMatch>? {
+    // matches 는 빈 배열일 수 있고, 그 경우 emptyList 로 담김.
+    // level_match 도 옵셔널 — 없거나 빈 문자열이면 null 로 취급.
+    private fun parseParkingMatchesData(text: String): ParkingMatchesData? {
         return try {
             val root = JSONObject(text)
-            val arr = root.optJSONArray("matches") ?: return emptyList()
+            val levelMatch: String? = if (root.isNull("level_match")) {
+                null
+            } else {
+                root.optString("level_match").takeIf { it.isNotBlank() }
+            }
+            val arr = root.optJSONArray("matches")
+                ?: return ParkingMatchesData(matches = emptyList(), level_match = levelMatch)
             val out = ArrayList<ParkingMatch>(arr.length())
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
@@ -850,7 +864,7 @@ internal class TJLabsBundleDataManager {
                 }
                 out.add(ParkingMatch(id = id, matchingId = matchingId))
             }
-            out
+            ParkingMatchesData(matches = out, level_match = levelMatch)
         } catch (t: Throwable) {
             TJResourceLogger.d("(TJLabsResource) parseParkingMatchesData failed // err=${t.message}")
             null

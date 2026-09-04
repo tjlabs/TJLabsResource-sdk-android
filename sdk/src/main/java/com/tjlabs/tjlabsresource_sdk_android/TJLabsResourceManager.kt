@@ -52,9 +52,10 @@ class TJLabsResourceManager {
         private val entranceDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceItemDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceRouteDataMap: MutableMap<String, EntranceRouteData> = mutableMapOf()
-        // 2026-08-28 스키마 — level id → 그 층의 GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑.
+        // 2026-08-28 스키마 — level id → 그 층의 parking matches 파일 파싱 결과.
         // 파일이 업로드된 층만 채워진다. 파일 없는 층은 map 에 key 자체가 없음.
-        private val parkingMatchesDataMap: MutableMap<Int, List<ParkingMatch>> = mutableMapOf()
+        // ParkingMatchesData 는 matches (id ↔ matchingId) 와 level_match (사용자 표기, 예: "3") 를 함께 담는다.
+        private val parkingMatchesDataMap: MutableMap<Int, ParkingMatchesData> = mutableMapOf()
         private val levelUnitsDataMap: MutableMap<String, List<UnitData>> = mutableMapOf()
         private val landmarkDataMap: MutableMap<String, Map<String, LandmarkData>> = mutableMapOf()
         private val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
@@ -395,10 +396,24 @@ class TJLabsResourceManager {
      * 파일이 업로드되지 않은 층은 null, 업로드됐지만 matches 가 비어있으면 emptyList.
      * `matchingId` 는 숫자처럼 보여도 String 이니 Int 로 파싱하지 말 것.
      */
-    fun getParkingMatches(levelId: Int): List<ParkingMatch>? = parkingMatchesDataMap[levelId]
+    fun getParkingMatches(levelId: Int): List<ParkingMatch>? = parkingMatchesDataMap[levelId]?.matches
 
     /** 전체 sector 의 모든 level 에 대한 parking matches 인덱스 (levelId → matches). */
-    fun getAllParkingMatches(): Map<Int, List<ParkingMatch>> = parkingMatchesDataMap
+    fun getAllParkingMatches(): Map<Int, List<ParkingMatch>> =
+        parkingMatchesDataMap.mapValues { it.value.matches }
+
+    /**
+     * parking_matches 파일 root 의 "level_match" (사용자/호스트 앱이 인식하는 층 표기, 예: "3").
+     * 파일이 업로드되지 않았거나 파일에 필드가 없으면 null.
+     * building 단위로만 유일하므로 (buildingId, level_match) 조합으로 levelId 를 역인덱싱할 것.
+     */
+    fun getLevelMatch(levelId: Int): String? = parkingMatchesDataMap[levelId]?.level_match
+
+    /** 전체 sector 의 levelId → level_match 인덱스 (level_match 가 실린 층만 포함). */
+    fun getAllLevelMatches(): Map<Int, String> =
+        parkingMatchesDataMap.mapNotNull { (id, data) ->
+            data.level_match?.let { id to it }
+        }.toMap()
 
     fun getBuildingLevelImageData(): Map<String, Bitmap> = imageDataMap
 
