@@ -188,9 +188,10 @@ internal class TJLabsBundleDataManager {
 
     /**
      * 번들 로드 콜백. [source] 는 로딩 경로를 식별하는 내부 문자열:
-     *   memory_fastpath, pref_meta+memory_cache, pref_meta+disk_raw, pref_meta+network_raw,
      *   network_meta+memory_cache, network_meta+disk_raw, network_meta+network_raw,
      *   meta_fail, network_meta+raw_fail, network_meta+parse_fail
+     * v1.1.14 부터 memory_fastpath / pref_meta+* 는 발생하지 않음
+     * ([getSavedBundleMetaIfFresh] 가 항상 null → 항상 meta API 호출 후 version 비교).
      * TJLabsResourceManager 는 이 문자열로 `fromCache` 를 판정 (network_raw 포함 여부).
      */
     fun loadBundle(
@@ -212,11 +213,62 @@ internal class TJLabsBundleDataManager {
 
         fun emitSummary(source: String, success: Boolean) {
             val total = elapsedMs(loadStartMs)
-            fun fmt(v: Long) = if (v < 0L) "  -  " else "%5dms".format(v)
+
+            // iOS `[TJLabsResourceManager] (loadResources timing)` 로그와 포맷 매칭.
+            // 필터: `adb logcat -s TJLabsResourceManager:I` (INFO 만 → 하단 debug 로그 노이즈 제거)
+            val iosTag = "TJLabsResourceManager"
+            val iosPrefix = "(loadResources timing)"
+            val isMemoryHit = source.contains("memory_cache") || source == "memory_fastpath"
+            val isDiskHit = source.contains("disk_raw")
+            val isCached = isMemoryHit || isDiskHit
+            val bypassLocalCache = source.startsWith("network_meta")
+
+            // [1/3] metadata — v1.1.14 는 항상 서버 meta 조회 → bypassLocalCache=true 가 기본.
+            val metaVal = if (metaMs < 0L) 0.0 else metaMs.toDouble()
             android.util.Log.i(
-                "TJLabsResource_PERF",
-                "[${bundleType.name}/$sectorId] total=%5dms src=%-26s ok=%-5s | meta=%s raw=%s parse=%s enrich=%s | path=%2d ent=%2d img=%2d"
-                    .format(total, source, success.toString(), fmt(metaMs), fmt(rawFetchMs), fmt(parseMs), fmt(enrichMs), pathCount, entCount, imgCount)
+                iosTag,
+                "$iosPrefix : [1/3] sector bundle metadata fetch = %.1fms // sectorId = $sectorId, bypassLocalCache = $bypassLocalCache"
+                    .format(metaVal)
+            )
+
+            // [2/3] bundle json (download+decode) — 캐시 hit 시 0ms.
+            val jsonMs = when {
+                source.contains("network_raw") -> (rawFetchMs.coerceAtLeast(0) + parseMs.coerceAtLeast(0)).toDouble()
+                source.contains("disk_raw") -> parseMs.coerceAtLeast(0).toDouble()
+                else -> 0.0
+            }
+            android.util.Log.i(
+                iosTag,
+                "$iosPrefix : [2/3] sector bundle json download+decode = %.1fms // sectorId = $sectorId, isCached = $isCached"
+                    .format(jsonMs)
+            )
+
+            // [3/3] organize — Android 는 sync/async 를 분리 계측하지 않아 sync 는 0.0ms 로 표기,
+            //   async 만 enrichMs 로 잡힘. memory_cache 경로는 organize 전체 스킵.
+            val organizeAsyncMs = if (enrichMs < 0L) 0.0 else enrichMs.toDouble()
+            val organizeSyncMs = 0.0
+            val organizeTotalMs = organizeSyncMs + organizeAsyncMs
+            android.util.Log.i(
+                iosTag,
+                "$iosPrefix :   organize[a] sync in-memory build + dispatch = %.1fms // sectorId = $sectorId"
+                    .format(organizeSyncMs)
+            )
+            android.util.Log.i(
+                iosTag,
+                "$iosPrefix :   organize[b] async resource loads (DispatchGroup wait) = %.1fms // sectorId = $sectorId"
+                    .format(organizeAsyncMs)
+            )
+            android.util.Log.i(
+                iosTag,
+                "$iosPrefix : [3/3] organize sector bundle = %.1fms // sectorId = $sectorId"
+                    .format(organizeTotalMs)
+            )
+
+            // TOTAL — metadata + json + organize (loadBundle 진입~종료)
+            android.util.Log.i(
+                iosTag,
+                "$iosPrefix : TOTAL = %.1fms (metadata %.1fms + bundle %.1fms + organize %.1fms) // sectorId = $sectorId, isCached = $isCached, success = $success"
+                    .format(total.toDouble(), metaVal, jsonMs, organizeTotalMs)
             )
         }
 
@@ -940,34 +992,28 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    /**
+     * v1.1.14 정책 변경 — 항상 null 반환.
+     *
+     * 이전 (v1.1.13 까지): prefs 에 저장된 meta 가 5분 이내면 network fetch 없이 재사용
+     *   → memory_fastpath / pref_meta 경로가 활성화되었지만, 서버가 그 사이 bundle version 을
+     *     bump 한 경우 최대 5분 stale 데이터가 반환될 수 있음.
+     *
+     * 이후 (v1.1.14+): 모든 loadBundle 호출은 항상 [requestBundleMeta] API 로 최신 meta 를
+     *   서버에서 조회 → [proceedWithMeta] 에서 bundleCache / 디스크 raw 의 version 과 대조 →
+     *   일치 시 캐시 재사용, 불일치 시 raw 재다운로드. version 판정을 서버 기준으로 항상 확정.
+     *
+     * trade-off: 매 loadBundle 마다 meta HTTP round-trip (~수백ms~1s) 발생.
+     */
     private fun getSavedBundleMetaIfFresh(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int
     ): SectorBundleMetaOutput? {
-        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
-        val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
-        val tsKey = getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId)
-        val savedVersion = prefs.getString(versionKey, null)
-        val savedUrl = prefs.getString(urlKey, null)
-        val savedTs = prefs.getLong(tsKey, 0L)
-        if (savedVersion.isNullOrBlank() || savedUrl.isNullOrBlank() || savedTs <= 0L) {
-            return null
-        }
-
-        val ageMs = nowMs() - savedTs
-        val freshWindowMs = 5 * 60 * 1000L
-        if (ageMs > freshWindowMs) {
-            TJResourceLogger.d(
-                "(TJLabsResource) perf loadBundle meta shortcut miss // type=$bundleType // sectorId=$sectorId // reason=stale // ageMs=$ageMs"
-            )
-            return null
-        }
         TJResourceLogger.d(
-            "(TJLabsResource) perf loadBundle meta shortcut hit // type=$bundleType // sectorId=$sectorId // ageMs=$ageMs"
+            "(TJLabsResource) perf loadBundle meta shortcut disabled // type=$bundleType // sectorId=$sectorId // (v1.1.14 policy: always fetch meta then compare version)"
         )
-        return SectorBundleMetaOutput(url = savedUrl, version_id = savedVersion)
+        return null
     }
 
     private fun saveBundleMetaTimestamp(
