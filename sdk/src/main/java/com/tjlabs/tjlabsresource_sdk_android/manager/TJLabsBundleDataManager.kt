@@ -136,6 +136,103 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
+     * 이미 로드된 sector 스냅샷을 companion memory 캐시에서 조회. 네트워크 · 디스크 IO 없음.
+     * VM SDK 처럼 상위 계층이 먼저 loadBundle 을 성공시킨 뒤, 하위 계층 (JupiterCalcManager 등) 이
+     * 자기 delegate 로 같은 스냅샷을 즉시 re-emit 하려는 경우에 사용.
+     * bundleCache 는 companion 이라 [TJLabsBundleDataManager] 인스턴스 간 공유되므로,
+     * 상위 계층의 [TJLabsResourceManager] 인스턴스가 채운 값도 하위 인스턴스에서 볼 수 있다.
+     */
+    internal fun getCachedSnapshot(bundleType: ResourceBundleType, sectorId: Int): BundleDataSnapshot? {
+        return bundleCache[buildSnapshotCacheKey(bundleType, sectorId)]
+    }
+
+    /**
+     * 단일 층 이미지를 on-demand 로 fetch (또는 캐시 히트 시 즉시 반환).
+     * [ImageLoadPolicy.NONE] / [ImageLoadPolicy.DEFAULT_ONLY] 로 초기 로드한 뒤 사용자가 층 이동 시
+     * [TJLabsResourceManager.loadLevelImage] 를 통해 이 함수가 호출된다.
+     *
+     * bundleCache 에서 sector 스냅샷을 찾아 해당 levelKey 의 image URL 로 다운로드하고,
+     * 성공 시 `bundleCache[cacheKey].imageDataMap` 을 in-place 로 갱신 (다음 loadResource 에서
+     * emitSnapshot 이 이 값을 그대로 사용).
+     *
+     * @return 성공 시 (bitmap, true) — bitmap 은 이미 캐시된 인스턴스일 수 있음.
+     *         실패 시 (null, false) — snapshot 미보유 · levelKey 매핑 실패 · 네트워크 오류.
+     */
+    internal fun loadSingleImage(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        levelKey: String,
+    ): Pair<Bitmap?, Boolean> {
+        val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
+        val snapshot = bundleCache[cacheKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) loadSingleImage snapshot missing // type=$bundleType // sectorId=$sectorId // levelKey=$levelKey")
+            return null to false
+        }
+        // 이미 mem cache 에 있으면 즉시 반환
+        snapshot.imageDataMap[levelKey]?.let { return it to true }
+        val url = snapshot.imageUrlsByKey[levelKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) loadSingleImage url missing // sectorId=$sectorId // levelKey=$levelKey")
+            return null to false
+        }
+        val bitmap = loadImageWithCache(application, sectorId, snapshot.versionId, levelKey, url)
+            ?: return null to false
+        // snapshot 의 imageDataMap 을 갱신한 copy 로 bundleCache 교체.
+        // Map 이 immutable 타입으로 노출되므로 in-place 수정은 안전하지 않음 → copy() 사용.
+        val newImageMap = snapshot.imageDataMap.toMutableMap().apply { put(levelKey, bitmap) }
+        bundleCache[cacheKey] = snapshot.copy(imageDataMap = newImageMap)
+        return bitmap to true
+    }
+
+    /**
+     * sector 안에서 아직 다운로드되지 않은 이미지 전부를 병렬 fetch. 이미 있는 것은 skip.
+     * [TJLabsResourceManager.prefetchRemainingImages] 의 backend.
+     * @return (성공 개수, 실패 개수)
+     */
+    internal suspend fun prefetchMissingImages(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+    ): Pair<Int, Int> {
+        val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
+        val snapshot = bundleCache[cacheKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) prefetchMissingImages snapshot missing // type=$bundleType // sectorId=$sectorId")
+            return 0 to 0
+        }
+        val missing = snapshot.imageUrlsByKey.filterKeys { snapshot.imageDataMap[it] == null }
+        if (missing.isEmpty()) {
+            TJResourceLogger.d("(TJLabsResource) prefetchMissingImages nothing to do // sectorId=$sectorId")
+            return 0 to 0
+        }
+        TJResourceLogger.d("(TJLabsResource) prefetchMissingImages start // sectorId=$sectorId // count=${missing.size}")
+        val startMs = nowMs()
+        val results = withContext(Dispatchers.IO) {
+            missing.map { (key, url) ->
+                async {
+                    val bmp = loadImageWithCache(application, sectorId, snapshot.versionId, key, url)
+                    key to bmp
+                }
+            }.awaitAll()
+        }
+        var loaded = 0
+        var failed = 0
+        val newImageMap = snapshot.imageDataMap.toMutableMap()
+        for ((key, bmp) in results) {
+            if (bmp != null) {
+                newImageMap[key] = bmp
+                loaded++
+            } else {
+                failed++
+            }
+        }
+        bundleCache[cacheKey] = snapshot.copy(imageDataMap = newImageMap)
+        TJResourceLogger.i(
+            "(TJLabsResource) prefetchMissingImages done // sectorId=$sectorId // loaded=$loaded // failed=$failed // elapsedMs=${elapsedMs(startMs)}"
+        )
+        return loaded to failed
+    }
+
+    /**
      * 메모리 + 디스크 캐시(번들 raw json, csv, image, prefs)를 모두 비웁니다.
      * sectorId 가 null 이면 모든 sector 데이터를 비웁니다.
      */
@@ -199,6 +296,8 @@ internal class TJLabsBundleDataManager {
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy =
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.ALL,
         completion: (Boolean, String, BundleDataSnapshot?, String) -> Unit
     ) {
         val loadStartMs = nowMs()
@@ -305,7 +404,7 @@ internal class TJLabsBundleDataManager {
                     parseMs = elapsedMs(parseCacheStartMs)
                     if (parsedFromCache != null) {
                         val enrichStartMs = nowMs()
-                        enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
+                        enrichCsvData(application, sectorId, parsedFromCache, imageLoadPolicy) { csvSuccess, enriched ->
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
@@ -334,7 +433,7 @@ internal class TJLabsBundleDataManager {
                         }
 
                         val enrichStartMs = nowMs()
-                        enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
+                        enrichCsvData(application, sectorId, parsed, imageLoadPolicy) { csvSuccess, enriched ->
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
@@ -583,6 +682,7 @@ internal class TJLabsBundleDataManager {
         application: Application,
         sectorId: Int,
         snapshot: BundleDataSnapshot,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
         completion: (Boolean, BundleDataSnapshot) -> Unit
     ) {
         val enrichTotalStartMs = nowMs()
@@ -603,7 +703,7 @@ internal class TJLabsBundleDataManager {
 
             val pathTargets = snapshot.graphPathUrlsByKey.filterKeys { it.contains("_D").not() }
             val entranceTargets = snapshot.entranceRouteUrlsByKey
-            val imageTargets = snapshot.imageUrlsByKey
+            val imageTargets = filterImageTargetsByPolicy(sectorId, snapshot, imageLoadPolicy)
             val parkingMatchesTargets = snapshot.parkingMatchesUrlsByLevelId
 
             // path / entrance / image / parking-matches 를 한 번에 fan-out 시켜 병렬 처리
@@ -1247,6 +1347,58 @@ internal class TJLabsBundleDataManager {
             )
             null
         }
+    }
+
+    /**
+     * [ImageLoadPolicy] 에 따라 초기 로드에서 fetch 할 이미지 URL 을 필터링.
+     * ALL: 모든 층. NONE: 빈 map. DEFAULT_ONLY: sector 의 default_position 이 가리키는 층만.
+     * default_position 이 없거나 매핑 실패 시 NONE 과 동일 (빈 map) + 경고 로그.
+     */
+    private fun filterImageTargetsByPolicy(
+        sectorId: Int,
+        snapshot: BundleDataSnapshot,
+        policy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
+    ): Map<String, String> {
+        val all = snapshot.imageUrlsByKey
+        return when (policy) {
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.ALL -> all
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.NONE -> {
+                TJResourceLogger.d(
+                    "(TJLabsResource) enrichCsvData image skip // policy=NONE // sectorId=$sectorId // skippedImageCount=${all.size}"
+                )
+                emptyMap()
+            }
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.DEFAULT_ONLY -> {
+                val defaultKey = resolveDefaultLevelKey(sectorId, snapshot)
+                if (defaultKey == null) {
+                    TJResourceLogger.w(
+                        "(TJLabsResource) enrichCsvData image skip // policy=DEFAULT_ONLY // sectorId=$sectorId // reason=no default_position → treated as NONE"
+                    )
+                    emptyMap()
+                } else {
+                    val filtered = all.filterKeys { it == defaultKey }
+                    if (filtered.isEmpty()) {
+                        TJResourceLogger.w(
+                            "(TJLabsResource) enrichCsvData image skip // policy=DEFAULT_ONLY // sectorId=$sectorId // defaultKey=$defaultKey not in imageUrlsByKey → treated as NONE"
+                        )
+                    } else {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) enrichCsvData image filter // policy=DEFAULT_ONLY // sectorId=$sectorId // keepKey=$defaultKey // skippedCount=${all.size - filtered.size}"
+                        )
+                    }
+                    filtered
+                }
+            }
+        }
+    }
+
+    /**
+     * SectorOutput.default_position → imageKey ("${sectorId}_${bldg.name}_${level.name}") 매핑.
+     * default_position 이 없으면 null.
+     */
+    private fun resolveDefaultLevelKey(sectorId: Int, snapshot: BundleDataSnapshot): String? {
+        val dp = snapshot.sectorData.default_position ?: return null
+        return "${sectorId}_${dp.building.name}_${dp.building.level.name}"
     }
 
     private fun fetchImageFromUrl(key: String, urlString: String): Bitmap? {
