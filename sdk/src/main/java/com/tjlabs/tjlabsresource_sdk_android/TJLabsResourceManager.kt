@@ -355,13 +355,31 @@ class TJLabsResourceManager {
         // 층이동 구간 per-key emit. key 형식은 다른 level-scope 콜백들과 동일.
         // 구버전 응답에는 transitions 가 없어 발동 자체가 없음.
         val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
+        // 진단: transition 개수 · 스킵된 것 카운트 (Jupiter SDK 리맵 실패 시 원인 판별).
+        var emitCount = 0
+        var skippedByBuildingId = 0
+        val skippedSample = mutableListOf<String>()
         for (t in snapshot.transitions) {
-            val bldgName = buildingNameById[t.level.building_id] ?: continue
+            val bldgName = buildingNameById[t.level.building_id]
+            if (bldgName == null) {
+                skippedByBuildingId++
+                if (skippedSample.size < 5) {
+                    skippedSample.add("{id=${t.id}, name=${t.level.name}, level.building_id=${t.level.building_id}}")
+                }
+                continue
+            }
             val key = "${sectorId}_${bldgName}_${t.level.name}"
             timer.item("onTransitionData", "key=$key") {
                 delegate?.onTransitionData(key, t)
             }
+            emitCount++
         }
+        TJResourceLogger.i(
+            "TransitionEmit sector=$sectorId snapshot.transitions.size=${snapshot.transitions.size} " +
+                "emitted=$emitCount skippedByBuildingId=$skippedByBuildingId " +
+                "buildingsInSector=[${snapshot.sectorData.buildings.joinToString { "${it.name}(id=${it.id})" }}] " +
+                "skippedSample=$skippedSample"
+        )
 
         timer.logSummary()
     }
