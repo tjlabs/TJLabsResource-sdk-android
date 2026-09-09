@@ -648,34 +648,14 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
-     * on-prem 서버 중 일부 (예: 하나 온프레미스) 는 endpoint 앞에 `/api` 같은 path prefix
-     * 를 요구하지만, meta 응답으로 리턴하는 raw bundle URL 에는 그 prefix 가 빠져 있는
-     * 케이스가 있다. **on-prem 모드에서만** host 동일 + baseUrl path prefix 가 있으면
-     * 자동 주입해 raw fetch 가 404 나지 않게 한다. cloud 모드에서는 절대 rewrite 하지 않는다.
-     *
-     * 조건 (모두 만족):
-     *  - [OnPremRoutingState.isEnabled] == true
-     *  - baseUrl 과 resource URL 의 scheme + host + port 가 같음
-     *  - baseUrl 의 path 가 존재 (예: `/api`)
-     *  - resource URL 의 path 가 baseUrl path 로 시작하지 **않음**
-     *
-     * 그 외에는 원본 URL 그대로 반환.
+     * 하나 외부망 proxy (`.../sdk-proxy`) 이관 이후 meta 응답의 raw bundle URL 은 서버가
+     * proxy prefix 를 포함해 온전히 리턴한다 (예: `.../sdk-proxy/bundle/warp/1/xxx.json`).
+     * 예전 온프레미스 (`192.168.120.104`) 대응으로 baseUrl basePath 를 앞에 붙이는 로직이
+     * 있었으나, 새 proxy 환경에선 오히려 `/api` 이중 삽입을 유발해 404 를 낸다. 서버 URL 을
+     * 그대로 신뢰하고 rewrite 하지 않는다.
      */
     private fun applyBaseUrlPathPrefix(baseUrl: String, resourceUrl: String): String {
-        if (!OnPremRoutingState.isEnabled) return resourceUrl
-        return try {
-            val base = java.net.URL(baseUrl)
-            val res = java.net.URL(resourceUrl)
-            val basePath = base.path.trimEnd('/')
-            if (basePath.isEmpty()) return resourceUrl
-            if (base.protocol != res.protocol || base.host != res.host || base.port != res.port) return resourceUrl
-            if (res.path.startsWith("$basePath/") || res.path == basePath) return resourceUrl
-            val portPart = if (res.port != -1) ":${res.port}" else ""
-            val query = if (res.query != null) "?${res.query}" else ""
-            "${res.protocol}://${res.host}$portPart$basePath${res.path}$query"
-        } catch (_: Exception) {
-            resourceUrl
-        }
+        return resourceUrl
     }
 
     private fun enrichCsvData(
