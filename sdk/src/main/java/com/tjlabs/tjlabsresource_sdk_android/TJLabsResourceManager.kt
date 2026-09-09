@@ -6,6 +6,10 @@ import com.tjlabs.tjlabsresource_sdk_android.manager.BundleDataSnapshot
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
 import com.tjlabs.tjlabsresource_sdk_android.onprem.OnPremRoutingState
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class TJLabsResourceManager {
     var delegate: TJLabsResourceManagerDelegate? = null
@@ -52,9 +56,10 @@ class TJLabsResourceManager {
         private val entranceDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceItemDataMap: MutableMap<String, EntranceData> = mutableMapOf()
         private val entranceRouteDataMap: MutableMap<String, EntranceRouteData> = mutableMapOf()
-        // 2026-08-28 스키마 — level id → 그 층의 GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑.
+        // 2026-08-28 스키마 — level id → 그 층의 parking matches 파일 파싱 결과.
         // 파일이 업로드된 층만 채워진다. 파일 없는 층은 map 에 key 자체가 없음.
-        private val parkingMatchesDataMap: MutableMap<Int, List<ParkingMatch>> = mutableMapOf()
+        // ParkingMatchesData 는 matches (id ↔ matchingId) 와 level_match (사용자 표기, 예: "3") 를 함께 담는다.
+        private val parkingMatchesDataMap: MutableMap<Int, ParkingMatchesData> = mutableMapOf()
         private val levelUnitsDataMap: MutableMap<String, List<UnitData>> = mutableMapOf()
         private val landmarkDataMap: MutableMap<String, Map<String, LandmarkData>> = mutableMapOf()
         private val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
@@ -91,10 +96,11 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
+        imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         setRegion(provider, region, env)
-        bundleDataManager.loadBundle(application, bundleType, sectorId) { isSuccess, message, snapshot, source ->
+        bundleDataManager.loadBundle(application, bundleType, sectorId, imageLoadPolicy) { isSuccess, message, snapshot, source ->
             TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message // source=$source")
             if (!isSuccess || snapshot == null) {
                 when (bundleType) {
@@ -106,13 +112,18 @@ class TJLabsResourceManager {
                 return@loadBundle
             }
 
-            cacheSnapshot(sectorId, snapshot)
-            when (bundleType) {
-                ResourceBundleType.JUPITER -> emitSnapshot(snapshot)
-                ResourceBundleType.WARP -> emitWarpSnapshot(snapshot)
-                ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
+            val fromCache = isFromCache(source)
+            val postLoadStartMs = postLoadNowMs()
+            val cacheMs = measurePostLoadMs { cacheSnapshot(sectorId, snapshot) }
+            val emitMs = measurePostLoadMs {
+                when (bundleType) {
+                    ResourceBundleType.JUPITER -> emitSnapshot(snapshot)
+                    ResourceBundleType.WARP -> emitWarpSnapshot(snapshot)
+                    ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
+                }
             }
-            completion(true, ResourceLoadInfo(versionId = snapshot.versionId, fromCache = isFromCache(source)))
+            logPostLoadTotal(bundleType, sectorId, fromCache, cacheMs, emitMs, postLoadStartMs)
+            completion(true, ResourceLoadInfo(versionId = snapshot.versionId, fromCache = fromCache))
         }
     }
 
@@ -122,10 +133,11 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
+        imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
-        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, completion)
+        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env // imagePolicy=$imageLoadPolicy")
+        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, imageLoadPolicy, completion)
     }
 
     fun loadVenusResource(
@@ -137,7 +149,7 @@ class TJLabsResourceManager {
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
-        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, env, completion)
+        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, env, completion = completion)
     }
 
     /**
@@ -151,7 +163,7 @@ class TJLabsResourceManager {
         completion: (Boolean, ResourceLoadInfo?) -> Unit
     ) {
         TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion)
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion = completion)
     }
 
     fun loadResource(
@@ -160,9 +172,41 @@ class TJLabsResourceManager {
         region: String,
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
+        imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
-        loadJupiterResource(application, provider, region, sectorId, env, completion)
+        loadJupiterResource(application, provider, region, sectorId, env, imageLoadPolicy, completion)
+    }
+
+    /**
+     * companion memory 캐시에 남은 sector 스냅샷을 즉시 현재 delegate 로 re-emit 한다.
+     * [loadBundle] (네트워크 meta 조회 · 파싱 · 디스크 IO) 를 완전히 스킵하는 fast-path.
+     *
+     * ── 사용 시나리오 (2026-09-07)
+     * 상위 계층 (VM SDK) 이 자기 [TJLabsResourceManager] 인스턴스로 [loadResource] 를 이미 성공시킨
+     * 상태에서, 하위 계층 (JupiterCalcManager) 이 자기 delegate 로 같은 스냅샷을 흘려 받고 싶을 때.
+     * bundleCache 는 companion 이라 두 인스턴스 간 공유되므로, 같은 (provider, region, sectorId,
+     * bundleType) 이면 즉시 히트한다.
+     *
+     * @return 캐시 히트 시 [ResourceLoadInfo] (fromCache=true), 미스 시 null. 호출자는 null 이면
+     *         일반 [loadResource] 로 fallback 해야 한다.
+     */
+    fun emitCachedSnapshot(bundleType: ResourceBundleType, sectorId: Int): ResourceLoadInfo? {
+        val snapshot = bundleDataManager.getCachedSnapshot(bundleType, sectorId) ?: return null
+        TJResourceLogger.d(
+            "(TJLabsResource) emitCachedSnapshot hit // type=$bundleType // sectorId=$sectorId // versionId=${snapshot.versionId}"
+        )
+        val postLoadStartMs = postLoadNowMs()
+        val cacheMs = measurePostLoadMs { cacheSnapshot(sectorId, snapshot) }
+        val emitMs = measurePostLoadMs {
+            when (bundleType) {
+                ResourceBundleType.JUPITER -> emitSnapshot(snapshot)
+                ResourceBundleType.WARP -> emitWarpSnapshot(snapshot)
+                ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
+            }
+        }
+        logPostLoadTotal(bundleType, sectorId, fromCache = true, cacheMs = cacheMs, emitMs = emitMs, startMs = postLoadStartMs)
+        return ResourceLoadInfo(versionId = snapshot.versionId, fromCache = true)
     }
 
     private fun setRegion(provider: String, region: String, env: ResourceServerEnv = ResourceServerEnv.PROD) {
@@ -172,45 +216,55 @@ class TJLabsResourceManager {
     }
 
     private fun cacheSnapshot(sectorId: Int, snapshot: BundleDataSnapshot) {
-        clearDebugLevelCache(sectorId)
-
-        sectorDataMap[sectorId] = snapshot.sectorData
-        buildingsDataMap[sectorId] = snapshot.sectorData.buildings
-
-        // transitions 인덱싱: sector-aggregate + per-key ("${sectorId}_${bldg}_${전이층이름}")
-        transitionsBySector[sectorId] = snapshot.transitions
-        val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
-        for (t in snapshot.transitions) {
-            val bldgName = buildingNameById[t.level.building_id] ?: continue
-            val key = "${sectorId}_${bldgName}_${t.level.name}"
-            transitionsByKey[key] = t
+        val timer = PostLoadTimer("cache", sectorId)
+        timer.step("clearDebugLevelCache") { clearDebugLevelCache(sectorId) }
+        timer.step("sectorData") {
+            sectorDataMap[sectorId] = snapshot.sectorData
+            buildingsDataMap[sectorId] = snapshot.sectorData.buildings
         }
-
-        for (building in snapshot.sectorData.buildings) {
-            for (level in building.levels) {
-                val key = "${sectorId}_${building.name}_${level.name}"
-                levelIdMap[key] = level.id
-                levelTypeMap[key] = level.type
-                if (level.name.contains("_D").not()) {
-                    levelImageUrlMap[key] = level.image
+        timer.step("transitions", snapshot.transitions.size) {
+            transitionsBySector[sectorId] = snapshot.transitions
+            val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
+            for (t in snapshot.transitions) {
+                val bldgName = buildingNameById[t.level.building_id] ?: continue
+                val key = "${sectorId}_${bldgName}_${t.level.name}"
+                transitionsByKey[key] = t
+            }
+        }
+        timer.step("levelIndex", snapshot.sectorData.buildings.sumOf { it.levels.size }) {
+            for (building in snapshot.sectorData.buildings) {
+                for (level in building.levels) {
+                    val key = "${sectorId}_${building.name}_${level.name}"
+                    levelIdMap[key] = level.id
+                    levelTypeMap[key] = level.type
+                    if (level.name.contains("_D").not()) {
+                        levelImageUrlMap[key] = level.image
+                    }
                 }
             }
         }
 
-        levelWardsDataMap.putAll(snapshot.levelWardsDataMap.filterKeys { it.contains("_D").not() })
-        scaleOffsetDataMap.putAll(snapshot.scaleOffsetDataMap)
-        pathPixelDataMap.putAll(snapshot.pathPixelDataMap)
-        geofenceDataMap.putAll(snapshot.geofenceDataMap)
-        entranceDataMap.putAll(snapshot.entranceDataMap)
-        entranceItemDataMap.putAll(snapshot.entranceItemDataMap)
-        entranceRouteDataMap.putAll(snapshot.entranceRouteDataMap)
-        parkingMatchesDataMap.putAll(snapshot.parkingMatchesDataByLevelId)
-        levelUnitsDataMap.putAll(snapshot.levelUnitsDataMap)
-        landmarkDataMap.putAll(snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() })
-        nodeDataMap.putAll(snapshot.nodeDataMap.filterKeys { it.contains("_D").not() })
-        linkDataMap.putAll(snapshot.linkDataMap.filterKeys { it.contains("_D").not() })
-        imageDataMap.putAll(snapshot.imageDataMap.filterKeys { it.contains("_D").not() })
-        affineParamMap[sectorId] = snapshot.affineParam
+        val filteredLevelWards = snapshot.levelWardsDataMap.filterKeys { it.contains("_D").not() }
+        timer.step("levelWardsDataMap", filteredLevelWards.size) { levelWardsDataMap.putAll(filteredLevelWards) }
+        timer.step("scaleOffsetDataMap", snapshot.scaleOffsetDataMap.size) { scaleOffsetDataMap.putAll(snapshot.scaleOffsetDataMap) }
+        timer.step("pathPixelDataMap", snapshot.pathPixelDataMap.size) { pathPixelDataMap.putAll(snapshot.pathPixelDataMap) }
+        timer.step("geofenceDataMap", snapshot.geofenceDataMap.size) { geofenceDataMap.putAll(snapshot.geofenceDataMap) }
+        timer.step("entranceDataMap", snapshot.entranceDataMap.size) { entranceDataMap.putAll(snapshot.entranceDataMap) }
+        timer.step("entranceItemDataMap", snapshot.entranceItemDataMap.size) { entranceItemDataMap.putAll(snapshot.entranceItemDataMap) }
+        timer.step("entranceRouteDataMap", snapshot.entranceRouteDataMap.size) { entranceRouteDataMap.putAll(snapshot.entranceRouteDataMap) }
+        timer.step("parkingMatchesDataMap", snapshot.parkingMatchesDataByLevelId.size) { parkingMatchesDataMap.putAll(snapshot.parkingMatchesDataByLevelId) }
+        timer.step("levelUnitsDataMap", snapshot.levelUnitsDataMap.size) { levelUnitsDataMap.putAll(snapshot.levelUnitsDataMap) }
+
+        val filteredLandmark = snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() }
+        timer.step("landmarkDataMap", filteredLandmark.size) { landmarkDataMap.putAll(filteredLandmark) }
+        val filteredNode = snapshot.nodeDataMap.filterKeys { it.contains("_D").not() }
+        timer.step("nodeDataMap", filteredNode.size) { nodeDataMap.putAll(filteredNode) }
+        val filteredLink = snapshot.linkDataMap.filterKeys { it.contains("_D").not() }
+        timer.step("linkDataMap", filteredLink.size) { linkDataMap.putAll(filteredLink) }
+        val filteredImage = snapshot.imageDataMap.filterKeys { it.contains("_D").not() }
+        timer.step("imageDataMap", filteredImage.size) { imageDataMap.putAll(filteredImage) }
+        timer.step("affineParam") { affineParamMap[sectorId] = snapshot.affineParam }
+        timer.logSummary()
     }
 
     private fun clearDebugLevelCache(sectorId: Int) {
@@ -224,67 +278,110 @@ class TJLabsResourceManager {
     }
 
     private fun emitSnapshot(snapshot: BundleDataSnapshot) {
-        delegate?.onSectorData(snapshot.sectorData)
-        delegate?.onBuildingsData(snapshot.sectorData.buildings)
+        val sectorId = snapshot.sectorData.id
+        val timer = PostLoadTimer("emit", sectorId)
+
+        timer.item("onSectorData", "id=$sectorId buildings=${snapshot.sectorData.buildings.size}") {
+            delegate?.onSectorData(snapshot.sectorData)
+        }
+        timer.item("onBuildingsData", "n=${snapshot.sectorData.buildings.size}") {
+            delegate?.onBuildingsData(snapshot.sectorData.buildings)
+        }
 
         snapshot.levelWardsDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
-            delegate?.onLevelWardsData(key, value)
+            timer.item("onLevelWardsData", "key=$key wards=${value.size}") {
+                delegate?.onLevelWardsData(key, value)
+            }
         }
-
         snapshot.scaleOffsetDataMap.forEach { (key, value) ->
-            delegate?.onScaleOffsetData(key, value)
+            timer.item("onScaleOffsetData", "key=$key n=${value.size}") {
+                delegate?.onScaleOffsetData(key, value)
+            }
         }
-
         snapshot.pathPixelDataMap.forEach { (key, value) ->
-            delegate?.onPathPixelData(key, resolveLevelType(key), value)
+            timer.item("onPathPixelData", "key=$key") {
+                delegate?.onPathPixelData(key, resolveLevelType(key), value)
+            }
         }
-
         snapshot.geofenceDataMap.forEach { (key, value) ->
-            delegate?.onGeofenceData(key, value)
+            timer.item("onGeofenceData", "key=$key") {
+                delegate?.onGeofenceData(key, value)
+            }
         }
-
         snapshot.entranceItemDataMap.forEach { (key, value) ->
-            delegate?.onEntranceData(key, value)
+            timer.item("onEntranceData", "key=$key") {
+                delegate?.onEntranceData(key, value)
+            }
         }
-
         snapshot.entranceRouteDataMap.forEach { (key, value) ->
-            delegate?.onEntranceRouteData(key, value)
+            timer.item("onEntranceRouteData", "key=$key") {
+                delegate?.onEntranceRouteData(key, value)
+            }
         }
-
         snapshot.levelUnitsDataMap.forEach { (key, value) ->
-            delegate?.onLevelUnitsData(key, value)
+            timer.item("onLevelUnitsData", "key=$key n=${value.size}") {
+                delegate?.onLevelUnitsData(key, value)
+            }
         }
-
         snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
-            delegate?.onLandmarkData(key, value)
+            timer.item("onLandmarkData", "key=$key n=${value.size}") {
+                delegate?.onLandmarkData(key, value)
+            }
         }
-
         snapshot.nodeDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
-            delegate?.onNodeLinkData(key, NodeLinkType.NODE, value)
+            timer.item("onNodeLinkData:NODE", "key=$key n=${value.size}") {
+                delegate?.onNodeLinkData(key, NodeLinkType.NODE, value)
+            }
         }
-
         snapshot.linkDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
-            delegate?.onNodeLinkData(key, NodeLinkType.LINK, value)
+            timer.item("onNodeLinkData:LINK", "key=$key n=${value.size}") {
+                delegate?.onNodeLinkData(key, NodeLinkType.LINK, value)
+            }
         }
-
         snapshot.imageUrlsByKey.filterKeys { it.contains("_D").not() }.forEach { (key, _) ->
-            delegate?.onBuildingLevelImageData(key, snapshot.imageDataMap[key])
+            val bitmap = snapshot.imageDataMap[key]
+            timer.item("onBuildingLevelImageData", "key=$key ${bitmapDim(bitmap)}") {
+                delegate?.onBuildingLevelImageData(key, bitmap)
+            }
         }
 
-        val loadedSectorId = snapshot.sectorData.id
         val affine = snapshot.affineParam
         if (affine != null) {
-            delegate?.onAffineData(loadedSectorId, affine)
+            timer.item("onAffineData", "sector=$sectorId") {
+                delegate?.onAffineData(sectorId, affine)
+            }
         }
 
         // 층이동 구간 per-key emit. key 형식은 다른 level-scope 콜백들과 동일.
         // 구버전 응답에는 transitions 가 없어 발동 자체가 없음.
         val buildingNameById = snapshot.sectorData.buildings.associate { it.id to it.name }
+        // 진단: transition 개수 · 스킵된 것 카운트 (Jupiter SDK 리맵 실패 시 원인 판별).
+        var emitCount = 0
+        var skippedByBuildingId = 0
+        val skippedSample = mutableListOf<String>()
         for (t in snapshot.transitions) {
-            val bldgName = buildingNameById[t.level.building_id] ?: continue
-            val key = "${loadedSectorId}_${bldgName}_${t.level.name}"
-            delegate?.onTransitionData(key, t)
+            val bldgName = buildingNameById[t.level.building_id]
+            if (bldgName == null) {
+                skippedByBuildingId++
+                if (skippedSample.size < 5) {
+                    skippedSample.add("{id=${t.id}, name=${t.level.name}, level.building_id=${t.level.building_id}}")
+                }
+                continue
+            }
+            val key = "${sectorId}_${bldgName}_${t.level.name}"
+            timer.item("onTransitionData", "key=$key") {
+                delegate?.onTransitionData(key, t)
+            }
+            emitCount++
         }
+        TJResourceLogger.i(
+            "TransitionEmit sector=$sectorId snapshot.transitions.size=${snapshot.transitions.size} " +
+                "emitted=$emitCount skippedByBuildingId=$skippedByBuildingId " +
+                "buildingsInSector=[${snapshot.sectorData.buildings.joinToString { "${it.name}(id=${it.id})" }}] " +
+                "skippedSample=$skippedSample"
+        )
+
+        timer.logSummary()
     }
 
     private fun emitWarpSnapshot(snapshot: BundleDataSnapshot) {
@@ -395,10 +492,24 @@ class TJLabsResourceManager {
      * 파일이 업로드되지 않은 층은 null, 업로드됐지만 matches 가 비어있으면 emptyList.
      * `matchingId` 는 숫자처럼 보여도 String 이니 Int 로 파싱하지 말 것.
      */
-    fun getParkingMatches(levelId: Int): List<ParkingMatch>? = parkingMatchesDataMap[levelId]
+    fun getParkingMatches(levelId: Int): List<ParkingMatch>? = parkingMatchesDataMap[levelId]?.matches
 
     /** 전체 sector 의 모든 level 에 대한 parking matches 인덱스 (levelId → matches). */
-    fun getAllParkingMatches(): Map<Int, List<ParkingMatch>> = parkingMatchesDataMap
+    fun getAllParkingMatches(): Map<Int, List<ParkingMatch>> =
+        parkingMatchesDataMap.mapValues { it.value.matches }
+
+    /**
+     * parking_matches 파일 root 의 "level_match" (사용자/호스트 앱이 인식하는 층 표기, 예: "3").
+     * 파일이 업로드되지 않았거나 파일에 필드가 없으면 null.
+     * building 단위로만 유일하므로 (buildingId, level_match) 조합으로 levelId 를 역인덱싱할 것.
+     */
+    fun getLevelMatch(levelId: Int): String? = parkingMatchesDataMap[levelId]?.level_match
+
+    /** 전체 sector 의 levelId → level_match 인덱스 (level_match 가 실린 층만 포함). */
+    fun getAllLevelMatches(): Map<Int, String> =
+        parkingMatchesDataMap.mapNotNull { (id, data) ->
+            data.level_match?.let { id to it }
+        }.toMap()
 
     fun getBuildingLevelImageData(): Map<String, Bitmap> = imageDataMap
 
@@ -566,6 +677,67 @@ class TJLabsResourceManager {
         }
     }
 
+    /**
+     * 특정 층 이미지를 on-demand 로 다운로드 (또는 캐시 히트 시 즉시 사용).
+     *
+     * ── 사용 시나리오 (2026-09-07)
+     * [ImageLoadPolicy.NONE] / [ImageLoadPolicy.DEFAULT_ONLY] 로 초기 loadResource 를 마친 뒤,
+     * 사용자가 다른 층으로 이동하거나 호스트 앱이 층 지도를 새로 요청할 때 이 API 를 호출하면
+     * bundleCache 에 저장된 스냅샷의 imageUrlsByKey 에서 URL 을 찾아 fetch 하고 delegate 로 emit.
+     *
+     * @param application 컨텍스트
+     * @param sectorId 대상 sector
+     * @param levelKey `"${sectorId}_${buildingName}_${levelName}"` 형식. sector 로드 시 emit 된
+     *   `onBuildingLevelImageData(imageKey, null)` 의 imageKey 를 그대로 사용.
+     * @param completion (성공 여부). 성공 시 delegate 로 `onBuildingLevelImageData(key, bitmap)` 발화.
+     */
+    fun loadLevelImage(
+        application: Application,
+        sectorId: Int,
+        levelKey: String,
+        completion: (Boolean) -> Unit,
+    ) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val (bitmap, ok) = bundleDataManager.loadSingleImage(
+                application, ResourceBundleType.JUPITER, sectorId, levelKey
+            )
+            withContext(Dispatchers.Main) {
+                if (ok && bitmap != null) {
+                    imageDataMap[levelKey] = bitmap
+                    delegate?.onBuildingLevelImageData(levelKey, bitmap)
+                    completion(true)
+                } else {
+                    delegate?.onError(ResourceError.Image, levelKey)
+                    completion(false)
+                }
+            }
+        }
+    }
+
+    /**
+     * sector 안에서 아직 다운로드되지 않은 층 이미지 전부를 background 로 병렬 fetch.
+     *
+     * [ImageLoadPolicy.DEFAULT_ONLY] 로 첫 층만 받은 뒤 여유 시점에 이 함수를 호출하면
+     * 나머지 층이 미리 채워져 사용자 층 전환 시 즉시 표시 가능.
+     *
+     * @param completion (loaded, failed) — 이번 호출에서 새로 받은 개수와 실패 개수.
+     *   이미 캐시에 있는 것은 skip 되어 loaded 에도 포함되지 않음.
+     */
+    fun prefetchRemainingImages(
+        application: Application,
+        sectorId: Int,
+        completion: (loaded: Int, failed: Int) -> Unit,
+    ) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val (loaded, failed) = bundleDataManager.prefetchMissingImages(
+                application, ResourceBundleType.JUPITER, sectorId
+            )
+            // prefetch 로 새로 받은 이미지는 별도 emit 하지 않는다. 호스트 앱이 개별 층에 실제로
+            // 접근할 때 [loadLevelImage] 나 [updateImage] 를 통해 emit 하면 됨.
+            withContext(Dispatchers.Main) { completion(loaded, failed) }
+        }
+    }
+
     fun updateLevelParam(key: String, completion: (Boolean) -> Unit) {
         val cached = levelParamData[key]
         if (cached != null) {
@@ -585,6 +757,122 @@ class TJLabsResourceManager {
         } else {
             delegate?.onError(ResourceError.Affine, sectorId.toString())
             completion(false)
+        }
+    }
+
+    // ---- post-load timing helpers ----------------------------------------
+    //
+    // loadBundle 콜백 이후 (cacheSnapshot + emitSnapshot) 각 항목별 소요시간을 계측한다.
+    // loadBundle 내부의 network/parse/organize 타이밍은 TJLabsBundleDataManager 가 이미
+    // "(loadResources timing)" 프리픽스로 기록하므로, 여기서는 "(postLoad timing)" 프리픽스로
+    // 분리 발화한다. TJResourceLogger.setDebugOption(true) 로 켠 상태에서만 남는다.
+    //
+    // 필터: `adb logcat -s TJLabsResourceManager:I`  (카테고리 요약)
+    //       `adb logcat -s TJLabsResourceManager:D`  (항목별 상세)
+
+    private fun postLoadNowMs(): Long = System.nanoTime() / 1_000_000L
+
+    private inline fun measurePostLoadMs(block: () -> Unit): Long {
+        val start = System.nanoTime()
+        block()
+        return (System.nanoTime() - start) / 1_000_000L
+    }
+
+    private fun bitmapDim(bitmap: Bitmap?): String =
+        if (bitmap != null) "${bitmap.width}x${bitmap.height}" else "null"
+
+    private fun logPostLoadTotal(
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        fromCache: Boolean,
+        cacheMs: Long,
+        emitMs: Long,
+        startMs: Long,
+    ) {
+        if (!TJResourceLogger.isDebugEnabled()) return
+        val totalMs = (System.nanoTime() / 1_000_000L) - startMs
+        val mode = if (fromCache) "CACHE" else "FRESH"
+        TJResourceLogger.i(
+            "(postLoad timing) TOTAL = ${totalMs}ms (cache ${cacheMs}ms + emit ${emitMs}ms) // sectorId=$sectorId, type=$bundleType, mode=$mode"
+        )
+    }
+
+    /**
+     * 한 phase (cache 또는 emit) 안에서 개별 항목(카테고리/키)별 elapsed 를 집계한다.
+     *
+     * - `item(name, detail)` : 델리게이트 콜백 1건 시간 측정 (per-key). DEBUG 로그 + 카테고리별 누적.
+     * - `step(name, count)`  : bulk 연산 1건 시간 측정 (putAll 등). DEBUG 로그 + 카테고리별 누적.
+     * - `logSummary()`       : 카테고리별 요약 (INFO). 항목이 없으면 INFO 만 남김.
+     *
+     * TJResourceLogger.isDebugEnabled() = false 이면 전부 no-op (측정 자체도 skip).
+     */
+    private class PostLoadTimer(private val phase: String, private val sectorId: Int) {
+        private val enabled: Boolean = TJResourceLogger.isDebugEnabled()
+        private val startNs: Long = if (enabled) System.nanoTime() else 0L
+        private val counts = LinkedHashMap<String, Int>()
+        private val totalsNs = LinkedHashMap<String, Long>()
+        private val itemsNs = LinkedHashMap<String, Long>() // per-item count for avg
+
+        inline fun item(name: String, detail: String = "", block: () -> Unit) {
+            if (!enabled) { block(); return }
+            recordStart(name)
+            val t0 = System.nanoTime()
+            block()
+            recordEnd(name, System.nanoTime() - t0, detail, itemGranular = true)
+        }
+
+        inline fun step(name: String, count: Int = 1, block: () -> Unit) {
+            if (!enabled) { block(); return }
+            recordStart(name)
+            val t0 = System.nanoTime()
+            block()
+            recordEnd(name, System.nanoTime() - t0, "n=$count", itemGranular = false)
+            countsBumpBy(name, count - 1) // step already counted as 1 in recordEnd
+        }
+
+        fun logSummary() {
+            if (!enabled) return
+            val totalMs = (System.nanoTime() - startNs) / 1_000_000L
+            if (counts.isEmpty()) {
+                TJResourceLogger.i("(postLoad timing) [$phase] sectorId=$sectorId total=${totalMs}ms (no items)")
+                return
+            }
+            TJResourceLogger.i(
+                "(postLoad timing) [$phase] sectorId=$sectorId total=${totalMs}ms items=${counts.values.sum()} categories=${counts.size}"
+            )
+            for ((name, count) in counts) {
+                val sumMs = (totalsNs[name] ?: 0L) / 1_000_000L
+                val avgUs = if (count > 0) ((totalsNs[name] ?: 0L) / count) / 1_000L else 0L
+                TJResourceLogger.i("(postLoad timing)   [$phase] $name count=$count sumMs=$sumMs avgUs=$avgUs")
+            }
+        }
+
+        @PublishedApi internal fun recordStart(name: String) {
+            counts[name] = (counts[name] ?: 0)
+        }
+
+        @PublishedApi internal fun recordEnd(name: String, deltaNs: Long, detail: String, itemGranular: Boolean) {
+            counts[name] = (counts[name] ?: 0) + 1
+            totalsNs[name] = (totalsNs[name] ?: 0L) + deltaNs
+            itemsNs[name] = (itemsNs[name] ?: 0L) + deltaNs
+            if (itemGranular) {
+                val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
+                val dMicros = deltaNs / 1_000L
+                TJResourceLogger.d(
+                    "(postLoad timing) [$phase] +${elapsedMs}ms (Δ${dMicros}us) $name $detail"
+                )
+            } else {
+                val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
+                val dMicros = deltaNs / 1_000L
+                TJResourceLogger.d(
+                    "(postLoad timing) [$phase] +${elapsedMs}ms (Δ${dMicros}us) step $name $detail"
+                )
+            }
+        }
+
+        @PublishedApi internal fun countsBumpBy(name: String, extra: Int) {
+            if (extra <= 0) return
+            counts[name] = (counts[name] ?: 0) + extra
         }
     }
 }

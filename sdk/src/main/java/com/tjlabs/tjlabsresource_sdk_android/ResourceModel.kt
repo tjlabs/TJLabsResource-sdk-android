@@ -300,13 +300,19 @@ data class LevelOutput(
     // 파일이 업로드된 층만 채워진다. 미업로드 → null. 빈 배열도 가능 (matches: []).
     // 최종 소비자(VM/Jupiter/앱) 는 [id → matchingId] 또는 [matchingId → id] lookup 을
     // 필요에 맞게 이 리스트에서 만들어 쓴다.
-    val parking_matches: List<ParkingMatch>? = null
+    val parking_matches: List<ParkingMatch>? = null,
+    // parking_matches 파일 root 의 "level_match" 값 (사용자/호스트 앱이 인식하는 층 표기, 예: "3").
+    // 파일이 업로드된 층에서만 채워지고, 파일 자체에 필드가 없으면 null.
+    // building 단위로만 유일하므로 (building, level_match) 쌍으로 levelId 를 역인덱싱한다.
+    val level_match: String? = null
 )
 
 // MARK: - Parking Matches (2026-08-28)
 // level 하나에 대응하는 GeoJSON 피처 ↔ 외부 업체 주차면 ID 매핑 파일의 파싱 결과.
 data class ParkingMatchesData(
-    val matches: List<ParkingMatch>
+    val matches: List<ParkingMatch>,
+    // 파일 root 의 "level_match" (사용자/호스트 앱 관점의 층 표기). 없으면 null.
+    val level_match: String? = null
 )
 
 // GeoJSON 피처 id (UUID 문자열) ↔ 외부 업체 시스템 주차면 ID (문자열, 숫자처럼 보여도 문자열).

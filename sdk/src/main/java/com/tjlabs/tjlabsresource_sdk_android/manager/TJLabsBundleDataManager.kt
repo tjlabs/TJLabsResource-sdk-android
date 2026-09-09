@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatch
+import com.tjlabs.tjlabsresource_sdk_android.ParkingMatchesData
 import com.tjlabs.tjlabsresource_sdk_android.Category
 import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
@@ -94,7 +95,7 @@ internal data class BundleDataSnapshot(
     // 2026-08-28 스키마: level 별 parking-matches 파일 URL / 파싱 결과.
     // 파일 미업로드 층은 두 map 모두 key 부재 (null 대신 absence).
     val parkingMatchesUrlsByLevelId: Map<Int, String> = emptyMap(),
-    val parkingMatchesDataByLevelId: Map<Int, List<ParkingMatch>> = emptyMap(),
+    val parkingMatchesDataByLevelId: Map<Int, ParkingMatchesData> = emptyMap(),
     val warpSectorData: WarpSectorOutput?,
     val venusSectorData: VenusSectorOutput?,
     val transitions: List<TransitionOutput> = emptyList()
@@ -132,6 +133,103 @@ internal class TJLabsBundleDataManager {
 
     private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
         return "${buildCacheNamespace()}_${bundleType.name}_$sectorId"
+    }
+
+    /**
+     * 이미 로드된 sector 스냅샷을 companion memory 캐시에서 조회. 네트워크 · 디스크 IO 없음.
+     * VM SDK 처럼 상위 계층이 먼저 loadBundle 을 성공시킨 뒤, 하위 계층 (JupiterCalcManager 등) 이
+     * 자기 delegate 로 같은 스냅샷을 즉시 re-emit 하려는 경우에 사용.
+     * bundleCache 는 companion 이라 [TJLabsBundleDataManager] 인스턴스 간 공유되므로,
+     * 상위 계층의 [TJLabsResourceManager] 인스턴스가 채운 값도 하위 인스턴스에서 볼 수 있다.
+     */
+    internal fun getCachedSnapshot(bundleType: ResourceBundleType, sectorId: Int): BundleDataSnapshot? {
+        return bundleCache[buildSnapshotCacheKey(bundleType, sectorId)]
+    }
+
+    /**
+     * 단일 층 이미지를 on-demand 로 fetch (또는 캐시 히트 시 즉시 반환).
+     * [ImageLoadPolicy.NONE] / [ImageLoadPolicy.DEFAULT_ONLY] 로 초기 로드한 뒤 사용자가 층 이동 시
+     * [TJLabsResourceManager.loadLevelImage] 를 통해 이 함수가 호출된다.
+     *
+     * bundleCache 에서 sector 스냅샷을 찾아 해당 levelKey 의 image URL 로 다운로드하고,
+     * 성공 시 `bundleCache[cacheKey].imageDataMap` 을 in-place 로 갱신 (다음 loadResource 에서
+     * emitSnapshot 이 이 값을 그대로 사용).
+     *
+     * @return 성공 시 (bitmap, true) — bitmap 은 이미 캐시된 인스턴스일 수 있음.
+     *         실패 시 (null, false) — snapshot 미보유 · levelKey 매핑 실패 · 네트워크 오류.
+     */
+    internal fun loadSingleImage(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        levelKey: String,
+    ): Pair<Bitmap?, Boolean> {
+        val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
+        val snapshot = bundleCache[cacheKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) loadSingleImage snapshot missing // type=$bundleType // sectorId=$sectorId // levelKey=$levelKey")
+            return null to false
+        }
+        // 이미 mem cache 에 있으면 즉시 반환
+        snapshot.imageDataMap[levelKey]?.let { return it to true }
+        val url = snapshot.imageUrlsByKey[levelKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) loadSingleImage url missing // sectorId=$sectorId // levelKey=$levelKey")
+            return null to false
+        }
+        val bitmap = loadImageWithCache(application, sectorId, snapshot.versionId, levelKey, url)
+            ?: return null to false
+        // snapshot 의 imageDataMap 을 갱신한 copy 로 bundleCache 교체.
+        // Map 이 immutable 타입으로 노출되므로 in-place 수정은 안전하지 않음 → copy() 사용.
+        val newImageMap = snapshot.imageDataMap.toMutableMap().apply { put(levelKey, bitmap) }
+        bundleCache[cacheKey] = snapshot.copy(imageDataMap = newImageMap)
+        return bitmap to true
+    }
+
+    /**
+     * sector 안에서 아직 다운로드되지 않은 이미지 전부를 병렬 fetch. 이미 있는 것은 skip.
+     * [TJLabsResourceManager.prefetchRemainingImages] 의 backend.
+     * @return (성공 개수, 실패 개수)
+     */
+    internal suspend fun prefetchMissingImages(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+    ): Pair<Int, Int> {
+        val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
+        val snapshot = bundleCache[cacheKey] ?: run {
+            TJResourceLogger.w("(TJLabsResource) prefetchMissingImages snapshot missing // type=$bundleType // sectorId=$sectorId")
+            return 0 to 0
+        }
+        val missing = snapshot.imageUrlsByKey.filterKeys { snapshot.imageDataMap[it] == null }
+        if (missing.isEmpty()) {
+            TJResourceLogger.d("(TJLabsResource) prefetchMissingImages nothing to do // sectorId=$sectorId")
+            return 0 to 0
+        }
+        TJResourceLogger.d("(TJLabsResource) prefetchMissingImages start // sectorId=$sectorId // count=${missing.size}")
+        val startMs = nowMs()
+        val results = withContext(Dispatchers.IO) {
+            missing.map { (key, url) ->
+                async {
+                    val bmp = loadImageWithCache(application, sectorId, snapshot.versionId, key, url)
+                    key to bmp
+                }
+            }.awaitAll()
+        }
+        var loaded = 0
+        var failed = 0
+        val newImageMap = snapshot.imageDataMap.toMutableMap()
+        for ((key, bmp) in results) {
+            if (bmp != null) {
+                newImageMap[key] = bmp
+                loaded++
+            } else {
+                failed++
+            }
+        }
+        bundleCache[cacheKey] = snapshot.copy(imageDataMap = newImageMap)
+        TJResourceLogger.i(
+            "(TJLabsResource) prefetchMissingImages done // sectorId=$sectorId // loaded=$loaded // failed=$failed // elapsedMs=${elapsedMs(startMs)}"
+        )
+        return loaded to failed
     }
 
     /**
@@ -188,15 +286,18 @@ internal class TJLabsBundleDataManager {
 
     /**
      * 번들 로드 콜백. [source] 는 로딩 경로를 식별하는 내부 문자열:
-     *   memory_fastpath, pref_meta+memory_cache, pref_meta+disk_raw, pref_meta+network_raw,
      *   network_meta+memory_cache, network_meta+disk_raw, network_meta+network_raw,
      *   meta_fail, network_meta+raw_fail, network_meta+parse_fail
+     * v1.1.14 부터 memory_fastpath / pref_meta+* 는 발생하지 않음
+     * ([getSavedBundleMetaIfFresh] 가 항상 null → 항상 meta API 호출 후 version 비교).
      * TJLabsResourceManager 는 이 문자열로 `fromCache` 를 판정 (network_raw 포함 여부).
      */
     fun loadBundle(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy =
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.ALL,
         completion: (Boolean, String, BundleDataSnapshot?, String) -> Unit
     ) {
         val loadStartMs = nowMs()
@@ -211,12 +312,60 @@ internal class TJLabsBundleDataManager {
         var imgCount = 0
 
         fun emitSummary(source: String, success: Boolean) {
+            // TJResourceLogger.setDebugOption(true) 로 켠 상태에서만 emit.
+            // 릴리즈 빌드/기본 상태에서는 조용히 무시되어 소비자 앱 logcat 을 오염시키지 않음.
+            if (!TJResourceLogger.isDebugEnabled()) return
+
             val total = elapsedMs(loadStartMs)
-            fun fmt(v: Long) = if (v < 0L) "  -  " else "%5dms".format(v)
-            android.util.Log.i(
-                "TJLabsResource_PERF",
-                "[${bundleType.name}/$sectorId] total=%5dms src=%-26s ok=%-5s | meta=%s raw=%s parse=%s enrich=%s | path=%2d ent=%2d img=%2d"
-                    .format(total, source, success.toString(), fmt(metaMs), fmt(rawFetchMs), fmt(parseMs), fmt(enrichMs), pathCount, entCount, imgCount)
+
+            // iOS `[TJLabsResourceManager] (loadResources timing)` 로그와 포맷 매칭.
+            // 필터: `adb logcat -s TJLabsResourceManager:I` (INFO 만 → 하단 debug 로그 노이즈 제거)
+            val iosPrefix = "(loadResources timing)"
+            val isMemoryHit = source.contains("memory_cache") || source == "memory_fastpath"
+            val isDiskHit = source.contains("disk_raw")
+            val isCached = isMemoryHit || isDiskHit
+            val bypassLocalCache = source.startsWith("network_meta")
+
+            // [1/3] metadata — v1.1.14 는 항상 서버 meta 조회 → bypassLocalCache=true 가 기본.
+            val metaVal = if (metaMs < 0L) 0.0 else metaMs.toDouble()
+            TJResourceLogger.i(
+                "$iosPrefix : [1/3] sector bundle metadata fetch = %.1fms // sectorId = $sectorId, bypassLocalCache = $bypassLocalCache"
+                    .format(metaVal)
+            )
+
+            // [2/3] bundle json (download+decode) — 캐시 hit 시 0ms.
+            val jsonMs = when {
+                source.contains("network_raw") -> (rawFetchMs.coerceAtLeast(0) + parseMs.coerceAtLeast(0)).toDouble()
+                source.contains("disk_raw") -> parseMs.coerceAtLeast(0).toDouble()
+                else -> 0.0
+            }
+            TJResourceLogger.i(
+                "$iosPrefix : [2/3] sector bundle json download+decode = %.1fms // sectorId = $sectorId, isCached = $isCached"
+                    .format(jsonMs)
+            )
+
+            // [3/3] organize — Android 는 sync/async 를 분리 계측하지 않아 sync 는 0.0ms 로 표기,
+            //   async 만 enrichMs 로 잡힘. memory_cache 경로는 organize 전체 스킵.
+            val organizeAsyncMs = if (enrichMs < 0L) 0.0 else enrichMs.toDouble()
+            val organizeSyncMs = 0.0
+            val organizeTotalMs = organizeSyncMs + organizeAsyncMs
+            TJResourceLogger.i(
+                "$iosPrefix :   organize[a] sync in-memory build + dispatch = %.1fms // sectorId = $sectorId"
+                    .format(organizeSyncMs)
+            )
+            TJResourceLogger.i(
+                "$iosPrefix :   organize[b] async resource loads (DispatchGroup wait) = %.1fms // sectorId = $sectorId"
+                    .format(organizeAsyncMs)
+            )
+            TJResourceLogger.i(
+                "$iosPrefix : [3/3] organize sector bundle = %.1fms // sectorId = $sectorId"
+                    .format(organizeTotalMs)
+            )
+
+            // TOTAL — metadata + json + organize (loadBundle 진입~종료)
+            TJResourceLogger.i(
+                "$iosPrefix : TOTAL = %.1fms (metadata %.1fms + bundle %.1fms + organize %.1fms) // sectorId = $sectorId, isCached = $isCached, success = $success"
+                    .format(total.toDouble(), metaVal, jsonMs, organizeTotalMs)
             )
         }
 
@@ -255,7 +404,7 @@ internal class TJLabsBundleDataManager {
                     parseMs = elapsedMs(parseCacheStartMs)
                     if (parsedFromCache != null) {
                         val enrichStartMs = nowMs()
-                        enrichCsvData(application, sectorId, parsedFromCache) { csvSuccess, enriched ->
+                        enrichCsvData(application, sectorId, parsedFromCache, imageLoadPolicy) { csvSuccess, enriched ->
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
@@ -284,7 +433,7 @@ internal class TJLabsBundleDataManager {
                         }
 
                         val enrichStartMs = nowMs()
-                        enrichCsvData(application, sectorId, parsed) { csvSuccess, enriched ->
+                        enrichCsvData(application, sectorId, parsed, imageLoadPolicy) { csvSuccess, enriched ->
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
@@ -499,40 +648,21 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
-     * on-prem 서버 중 일부 (예: 하나 온프레미스) 는 endpoint 앞에 `/api` 같은 path prefix
-     * 를 요구하지만, meta 응답으로 리턴하는 raw bundle URL 에는 그 prefix 가 빠져 있는
-     * 케이스가 있다. **on-prem 모드에서만** host 동일 + baseUrl path prefix 가 있으면
-     * 자동 주입해 raw fetch 가 404 나지 않게 한다. cloud 모드에서는 절대 rewrite 하지 않는다.
-     *
-     * 조건 (모두 만족):
-     *  - [OnPremRoutingState.isEnabled] == true
-     *  - baseUrl 과 resource URL 의 scheme + host + port 가 같음
-     *  - baseUrl 의 path 가 존재 (예: `/api`)
-     *  - resource URL 의 path 가 baseUrl path 로 시작하지 **않음**
-     *
-     * 그 외에는 원본 URL 그대로 반환.
+     * 하나 외부망 proxy (`.../sdk-proxy`) 이관 이후 meta 응답의 raw bundle URL 은 서버가
+     * proxy prefix 를 포함해 온전히 리턴한다 (예: `.../sdk-proxy/bundle/warp/1/xxx.json`).
+     * 예전 온프레미스 (`192.168.120.104`) 대응으로 baseUrl basePath 를 앞에 붙이는 로직이
+     * 있었으나, 새 proxy 환경에선 오히려 `/api` 이중 삽입을 유발해 404 를 낸다. 서버 URL 을
+     * 그대로 신뢰하고 rewrite 하지 않는다.
      */
     private fun applyBaseUrlPathPrefix(baseUrl: String, resourceUrl: String): String {
-        if (!OnPremRoutingState.isEnabled) return resourceUrl
-        return try {
-            val base = java.net.URL(baseUrl)
-            val res = java.net.URL(resourceUrl)
-            val basePath = base.path.trimEnd('/')
-            if (basePath.isEmpty()) return resourceUrl
-            if (base.protocol != res.protocol || base.host != res.host || base.port != res.port) return resourceUrl
-            if (res.path.startsWith("$basePath/") || res.path == basePath) return resourceUrl
-            val portPart = if (res.port != -1) ":${res.port}" else ""
-            val query = if (res.query != null) "?${res.query}" else ""
-            "${res.protocol}://${res.host}$portPart$basePath${res.path}$query"
-        } catch (_: Exception) {
-            resourceUrl
-        }
+        return resourceUrl
     }
 
     private fun enrichCsvData(
         application: Application,
         sectorId: Int,
         snapshot: BundleDataSnapshot,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
         completion: (Boolean, BundleDataSnapshot) -> Unit
     ) {
         val enrichTotalStartMs = nowMs()
@@ -553,7 +683,7 @@ internal class TJLabsBundleDataManager {
 
             val pathTargets = snapshot.graphPathUrlsByKey.filterKeys { it.contains("_D").not() }
             val entranceTargets = snapshot.entranceRouteUrlsByKey
-            val imageTargets = snapshot.imageUrlsByKey
+            val imageTargets = filterImageTargetsByPolicy(sectorId, snapshot, imageLoadPolicy)
             val parkingMatchesTargets = snapshot.parkingMatchesUrlsByLevelId
 
             // path / entrance / image / parking-matches 를 한 번에 fan-out 시켜 병렬 처리
@@ -619,6 +749,7 @@ internal class TJLabsBundleDataManager {
 
             // parking-matches 를 sectorData 안 각 LevelOutput 에 주입해 소비자가
             // SectorOutput 순회만으로 접근 가능하게 한다 (manager lookup 도 별도 제공).
+            // level_match 는 파일 root 에 실린 사용자 표기 (예: "3") — building 단위 유일.
             val updatedSectorData = if (parkingMatchesData.isEmpty()) {
                 snapshot.sectorData
             } else {
@@ -626,7 +757,12 @@ internal class TJLabsBundleDataManager {
                     buildings = snapshot.sectorData.buildings.map { b ->
                         b.copy(
                             levels = b.levels.map { lv ->
-                                parkingMatchesData[lv.id]?.let { lv.copy(parking_matches = it) } ?: lv
+                                parkingMatchesData[lv.id]?.let { pmd ->
+                                    lv.copy(
+                                        parking_matches = pmd.matches,
+                                        level_match = pmd.level_match
+                                    )
+                                } ?: lv
                             }
                         )
                     }
@@ -743,7 +879,7 @@ internal class TJLabsBundleDataManager {
         return parsed
     }
 
-    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 List<ParkingMatch> 로 파싱.
+    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 [ParkingMatchesData] 로 파싱.
     // url 은 만료 없는 공개 URL 이라 [getCsvTextWithCache] 의 version_id 기반 캐시가 그대로 유효.
     private fun fetchParkingMatchesData(
         application: Application,
@@ -751,7 +887,7 @@ internal class TJLabsBundleDataManager {
         versionId: String,
         levelId: Int,
         url: String
-    ): List<ParkingMatch>? {
+    ): ParkingMatchesData? {
         val key = "level_$levelId"
         val startMs = nowMs()
         TJResourceLogger.d("(TJLabsResource) fetchParkingMatchesData start // levelId=$levelId // url=$url")
@@ -772,18 +908,25 @@ internal class TJLabsBundleDataManager {
         }
         val parsed = parseParkingMatchesData(text)
         TJResourceLogger.d(
-            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.size ?: -1} // elapsedMs=${elapsedMs(startMs)}"
+            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.matches?.size ?: -1} // levelMatch=${parsed?.level_match} // elapsedMs=${elapsedMs(startMs)}"
         )
         return parsed
     }
 
-    // 매칭 파일 포맷: {"matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
+    // 매칭 파일 포맷: {"level_match":"<user-facing level, e.g., \"3\">", "matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
     // matchingId 는 숫자처럼 보여도 문자열 (앞자리 0 이나 문자 포함 ID 가능성). Int 로 파싱하지 않음.
-    // matches 는 빈 배열일 수 있고, 그 경우 emptyList 반환.
-    private fun parseParkingMatchesData(text: String): List<ParkingMatch>? {
+    // matches 는 빈 배열일 수 있고, 그 경우 emptyList 로 담김.
+    // level_match 도 옵셔널 — 없거나 빈 문자열이면 null 로 취급.
+    private fun parseParkingMatchesData(text: String): ParkingMatchesData? {
         return try {
             val root = JSONObject(text)
-            val arr = root.optJSONArray("matches") ?: return emptyList()
+            val levelMatch: String? = if (root.isNull("level_match")) {
+                null
+            } else {
+                root.optString("level_match").takeIf { it.isNotBlank() }
+            }
+            val arr = root.optJSONArray("matches")
+                ?: return ParkingMatchesData(matches = emptyList(), level_match = levelMatch)
             val out = ArrayList<ParkingMatch>(arr.length())
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
@@ -798,7 +941,7 @@ internal class TJLabsBundleDataManager {
                 }
                 out.add(ParkingMatch(id = id, matchingId = matchingId))
             }
-            out
+            ParkingMatchesData(matches = out, level_match = levelMatch)
         } catch (t: Throwable) {
             TJResourceLogger.d("(TJLabsResource) parseParkingMatchesData failed // err=${t.message}")
             null
@@ -940,34 +1083,28 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    /**
+     * v1.1.14 정책 변경 — 항상 null 반환.
+     *
+     * 이전 (v1.1.13 까지): prefs 에 저장된 meta 가 5분 이내면 network fetch 없이 재사용
+     *   → memory_fastpath / pref_meta 경로가 활성화되었지만, 서버가 그 사이 bundle version 을
+     *     bump 한 경우 최대 5분 stale 데이터가 반환될 수 있음.
+     *
+     * 이후 (v1.1.14+): 모든 loadBundle 호출은 항상 [requestBundleMeta] API 로 최신 meta 를
+     *   서버에서 조회 → [proceedWithMeta] 에서 bundleCache / 디스크 raw 의 version 과 대조 →
+     *   일치 시 캐시 재사용, 불일치 시 raw 재다운로드. version 판정을 서버 기준으로 항상 확정.
+     *
+     * trade-off: 매 loadBundle 마다 meta HTTP round-trip (~수백ms~1s) 발생.
+     */
     private fun getSavedBundleMetaIfFresh(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int
     ): SectorBundleMetaOutput? {
-        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
-        val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
-        val tsKey = getBundleMetaKey(bundleType, PREF_BUNDLE_META_TS_PREFIX, sectorId)
-        val savedVersion = prefs.getString(versionKey, null)
-        val savedUrl = prefs.getString(urlKey, null)
-        val savedTs = prefs.getLong(tsKey, 0L)
-        if (savedVersion.isNullOrBlank() || savedUrl.isNullOrBlank() || savedTs <= 0L) {
-            return null
-        }
-
-        val ageMs = nowMs() - savedTs
-        val freshWindowMs = 5 * 60 * 1000L
-        if (ageMs > freshWindowMs) {
-            TJResourceLogger.d(
-                "(TJLabsResource) perf loadBundle meta shortcut miss // type=$bundleType // sectorId=$sectorId // reason=stale // ageMs=$ageMs"
-            )
-            return null
-        }
         TJResourceLogger.d(
-            "(TJLabsResource) perf loadBundle meta shortcut hit // type=$bundleType // sectorId=$sectorId // ageMs=$ageMs"
+            "(TJLabsResource) perf loadBundle meta shortcut disabled // type=$bundleType // sectorId=$sectorId // (v1.1.14 policy: always fetch meta then compare version)"
         )
-        return SectorBundleMetaOutput(url = savedUrl, version_id = savedVersion)
+        return null
     }
 
     private fun saveBundleMetaTimestamp(
@@ -1190,6 +1327,58 @@ internal class TJLabsBundleDataManager {
             )
             null
         }
+    }
+
+    /**
+     * [ImageLoadPolicy] 에 따라 초기 로드에서 fetch 할 이미지 URL 을 필터링.
+     * ALL: 모든 층. NONE: 빈 map. DEFAULT_ONLY: sector 의 default_position 이 가리키는 층만.
+     * default_position 이 없거나 매핑 실패 시 NONE 과 동일 (빈 map) + 경고 로그.
+     */
+    private fun filterImageTargetsByPolicy(
+        sectorId: Int,
+        snapshot: BundleDataSnapshot,
+        policy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
+    ): Map<String, String> {
+        val all = snapshot.imageUrlsByKey
+        return when (policy) {
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.ALL -> all
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.NONE -> {
+                TJResourceLogger.d(
+                    "(TJLabsResource) enrichCsvData image skip // policy=NONE // sectorId=$sectorId // skippedImageCount=${all.size}"
+                )
+                emptyMap()
+            }
+            com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.DEFAULT_ONLY -> {
+                val defaultKey = resolveDefaultLevelKey(sectorId, snapshot)
+                if (defaultKey == null) {
+                    TJResourceLogger.w(
+                        "(TJLabsResource) enrichCsvData image skip // policy=DEFAULT_ONLY // sectorId=$sectorId // reason=no default_position → treated as NONE"
+                    )
+                    emptyMap()
+                } else {
+                    val filtered = all.filterKeys { it == defaultKey }
+                    if (filtered.isEmpty()) {
+                        TJResourceLogger.w(
+                            "(TJLabsResource) enrichCsvData image skip // policy=DEFAULT_ONLY // sectorId=$sectorId // defaultKey=$defaultKey not in imageUrlsByKey → treated as NONE"
+                        )
+                    } else {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) enrichCsvData image filter // policy=DEFAULT_ONLY // sectorId=$sectorId // keepKey=$defaultKey // skippedCount=${all.size - filtered.size}"
+                        )
+                    }
+                    filtered
+                }
+            }
+        }
+    }
+
+    /**
+     * SectorOutput.default_position → imageKey ("${sectorId}_${bldg.name}_${level.name}") 매핑.
+     * default_position 이 없으면 null.
+     */
+    private fun resolveDefaultLevelKey(sectorId: Int, snapshot: BundleDataSnapshot): String? {
+        val dp = snapshot.sectorData.default_position ?: return null
+        return "${sectorId}_${dp.building.name}_${dp.building.level.name}"
     }
 
     private fun fetchImageFromUrl(key: String, urlString: String): Bitmap? {
