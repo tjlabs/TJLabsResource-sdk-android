@@ -1484,7 +1484,12 @@ internal class TJLabsBundleDataManager {
                     val wardsJson = levelObj.optJSONArray("wards")
                     if (isDebugLevel.not() && wardsJson != null) {
                         levelWardsMap[levelKey] = parseWards(wardsJson)
-                        landmarkMap[levelKey] = parseLandmarks(wardsJson)
+                    }
+                    // 2026-09-10 스키마: rf_landmarks 가 level 직속 평면 배열로 이동.
+                    // ward 정보는 각 랜드마크의 `ward` 필드에서 읽는다 (다른 층 ward 일 수 있음).
+                    val rfLandmarksJson = levelObj.optJSONArray("rf_landmarks")
+                    if (isDebugLevel.not() && rfLandmarksJson != null) {
+                        landmarkMap[levelKey] = parseLandmarks(rfLandmarksJson)
                     }
 
                     if (isDebugLevel.not() && TJResourceLogger.isDebugEnabled()) {
@@ -2216,39 +2221,37 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
+    // 2026-09-10 스키마: `arr` 는 level.rf_landmarks (평면). 각 항목이 자기 ward 를 들고 있다.
+    // ward 는 이 level 의 wards[] 에 없을 수 있으므로 각 랜드마크의 ward.name 을 그대로 그룹 키로 쓴다.
     private fun parseLandmarks(arr: JSONArray): Map<String, LandmarkData> {
         val result = mutableMapOf<String, LandmarkData>()
         for (i in 0 until arr.length()) {
-            val wardObj = arr.optJSONObject(i) ?: continue
-            val wardName = wardObj.optString("name")
+            val info = arr.optJSONObject(i) ?: continue
+            val wardName = info.optJSONObject("ward")?.optString("name").orEmpty()
             if (wardName.isBlank()) continue
 
-            val rfLandmarks = wardObj.optJSONArray("rf_landmarks") ?: JSONArray()
-            for (j in 0 until rfLandmarks.length()) {
-                val info = rfLandmarks.optJSONObject(j) ?: continue
-                val links = info.optJSONArray("links") ?: JSONArray()
-                val matchedLinks = mutableListOf<Int>()
-                for (k in 0 until links.length()) {
-                    val link = links.optJSONObject(k) ?: continue
-                    matchedLinks.add(link.optInt("number"))
-                }
+            val links = info.optJSONArray("links") ?: JSONArray()
+            val matchedLinks = mutableListOf<Int>()
+            for (k in 0 until links.length()) {
+                val link = links.optJSONObject(k) ?: continue
+                matchedLinks.add(link.optInt("number"))
+            }
 
-                val peak = PeakData(
-                    x = info.optInt("x"),
-                    y = info.optInt("y"),
-                    rssi = info.optFloatOrDefault("rssi"),
-                    matched_links = matchedLinks
+            val peak = PeakData(
+                x = info.optInt("x"),
+                y = info.optInt("y"),
+                rssi = info.optFloatOrDefault("rssi"),
+                matched_links = matchedLinks
+            )
+
+            val existing = result[wardName]
+            if (existing == null) {
+                result[wardName] = LandmarkData(
+                    ward_id = wardName,
+                    peaks = listOf(peak)
                 )
-
-                val existing = result[wardName]
-                if (existing == null) {
-                    result[wardName] = LandmarkData(
-                        ward_id = wardName,
-                        peaks = listOf(peak)
-                    )
-                } else {
-                    result[wardName] = existing.copy(peaks = existing.peaks + peak)
-                }
+            } else {
+                result[wardName] = existing.copy(peaks = existing.peaks + peak)
             }
         }
         return result

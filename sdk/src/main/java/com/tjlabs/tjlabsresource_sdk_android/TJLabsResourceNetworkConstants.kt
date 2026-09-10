@@ -83,7 +83,7 @@ internal object TJLabsResourceNetworkConstants {
         return buildRetrofit(url)
     }
 
-    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-09"
+    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-10"
     private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
     private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
 
