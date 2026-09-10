@@ -8,8 +8,6 @@ import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatch
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatchesData
-import com.tjlabs.tjlabsresource_sdk_android.Category
-import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionLevelOutput
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionOutput
@@ -43,7 +41,6 @@ import com.tjlabs.tjlabsresource_sdk_android.TransitionLevelRef
 import com.tjlabs.tjlabsresource_sdk_android.TransitionOutput
 import com.tjlabs.tjlabsresource_sdk_android.TransitionPoint
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.UnitData
 import com.tjlabs.tjlabsresource_sdk_android.VenusBuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.VenusLevelOutput
 import com.tjlabs.tjlabsresource_sdk_android.VenusSectorOutput
@@ -79,7 +76,6 @@ internal data class BundleDataSnapshot(
     val levelWardsDataMap: Map<String, List<String>>,
     val scaleOffsetDataMap: Map<String, List<Float>>,
     val geofenceDataMap: Map<String, GeofenceData>,
-    val levelUnitsDataMap: Map<String, List<UnitData>>,
     val landmarkDataMap: Map<String, Map<String, LandmarkData>>,
     val nodeDataMap: Map<String, Map<Int, NodeData>>,
     val linkDataMap: Map<String, Map<Int, LinkData>>,
@@ -1429,7 +1425,6 @@ internal class TJLabsBundleDataManager {
             val levelWardsMap = mutableMapOf<String, List<String>>()
             val scaleOffsetMap = mutableMapOf<String, List<Float>>()
             val geofenceMap = mutableMapOf<String, GeofenceData>()
-            val levelUnitsMap = mutableMapOf<String, List<UnitData>>()
             val landmarkMap = mutableMapOf<String, Map<String, LandmarkData>>()
             val nodeMap = mutableMapOf<String, Map<Int, NodeData>>()
             val linkMap = mutableMapOf<String, Map<Int, LinkData>>()
@@ -1485,8 +1480,6 @@ internal class TJLabsBundleDataManager {
                     }
 
                     parseGeofence(levelObj.optJSONObject("geofence"))?.let { geofenceMap[levelKey] = it }
-
-                    parseUnits(levelObj.optJSONArray("units"))?.let { levelUnitsMap[levelKey] = it }
 
                     val wardsJson = levelObj.optJSONArray("wards")
                     if (isDebugLevel.not() && wardsJson != null) {
@@ -1624,7 +1617,6 @@ internal class TJLabsBundleDataManager {
                 levelWardsDataMap = levelWardsMap,
                 scaleOffsetDataMap = scaleOffsetMap,
                 geofenceDataMap = geofenceMap,
-                levelUnitsDataMap = levelUnitsMap,
                 landmarkDataMap = landmarkMap,
                 nodeDataMap = nodeMap,
                 linkDataMap = linkMap,
@@ -2209,67 +2201,6 @@ internal class TJLabsBundleDataManager {
             entrance_area = parseIntMatrix(obj.optJSONArray("entrance_area")),
             entrance_matching_area = parseIntMatrix(obj.optJSONArray("entrance_matching_area")),
             level_change_area = parseIntMatrix(obj.optJSONArray("level_change_area"))
-        )
-    }
-
-    private fun parseUnits(arr: JSONArray?): List<UnitData>? {
-        if (arr == null) return null
-        val result = mutableListOf<UnitData>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            result.add(
-                UnitData(
-                    id = obj.optInt("id"),
-                    category = parseCategory(obj.opt("category")),
-                    name = obj.optString("name"),
-                    is_restricted = obj.optBoolean("is_restricted"),
-                    x = obj.optFloatOrDefault("x"),
-                    y = obj.optFloatOrDefault("y"),
-                    parking_space_code = obj.optString("parking_space_code")
-                )
-            )
-        }
-        return result
-    }
-
-    private fun parseCategory(raw: Any?): CategoryData {
-        var id = 0
-        var name = ""
-        var keyRaw = ""
-
-        when (raw) {
-            is JSONObject -> {
-                id = raw.optInt("id", 0)
-                name = raw.optString("name")
-                keyRaw = raw.optString("key")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("category")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("value")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("code")
-                if (name.isBlank()) name = keyRaw
-            }
-            is String -> {
-                name = raw
-                keyRaw = raw
-            }
-            is Number -> {
-                name = raw.toString()
-                keyRaw = raw.toString()
-            }
-            else -> {
-                name = ""
-                keyRaw = ""
-            }
-        }
-
-        val key = Category.fromRaw(if (keyRaw.isBlank()) name else keyRaw)
-        if (key == Category.UNKNOWN && (name.isNotBlank() || keyRaw.isNotBlank())) {
-            TJResourceLogger.d("(TJLabsResource) unknown category // raw=$raw")
-        }
-
-        return CategoryData(
-            id = id,
-            name = name,
-            key = key
         )
     }
 

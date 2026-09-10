@@ -1,13 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -66,17 +59,6 @@ data class EntranceRouteData(
     var routeLevel: List<String> = emptyList(),
     var route: List<List<Float>> = listOf(emptyList())
 )
-
-//data class UnitData(
-//    val category: Int = 0,
-//    val number: Int = 0,
-//    val name: String = "",
-//    val accessibility: String = "",
-//    val restriction: Boolean = false,
-//    val visibility: Boolean = false,
-//    val x: Float = 0f,
-//    val y: Float = 0f
-//)
 
 data class ParameterData(
     val trajectory_length: Int = 0,
@@ -160,7 +142,6 @@ data class SectorBundleLevelOutput(
     val map_image: SectorBundleMapImageOutput?,
     val geofence: GeofenceData?,
     val entrances: List<SectorBundleEntranceOutput>?,
-    val units: List<UnitData>?,
     val graph: SectorBundleGraphOutput?,
     val wards: List<LevelLandmark>?,
     // 2026-08-28 스키마 신규. GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑 파일의 공개 URL.
@@ -534,77 +515,6 @@ enum class NodeLinkType {
     NODE, LINK, FILE
 }
 
-// MARK: - Unit
-internal data class LevelUnitsInput(
-    var level_id: Int = 0,
-    var category: Category? = null
-)
-
-
-
-data class LevelUnitsOutput(
-    val id : Int,
-    val units: List<UnitData>
-)
-
-data class UnitData(
-    val id: Int,
-    val category: CategoryData,
-    val name: String,
-    val is_restricted: Boolean,
-    val x: Float,   // Swift Double → Kotlin Float
-    val y: Float,   // Swift Double → Kotlin Float
-    val parking_space_code: String
-)
-
-
-data class CategoryData(
-    val id : Int,
-    val name : String,
-    val key : Category
-)
-
-@Serializable(with = CategorySerializer::class)
-enum class Category {
-    PARKING_SPACE,
-    ENTRANCE_EXIT,
-    UNKNOWN;
-
-    companion object {
-        fun fromRaw(raw: String?): Category {
-            val normalized = raw
-                ?.trim()
-                ?.replace("-", "_")
-                ?.replace(" ", "_")
-                ?.uppercase()
-                .orEmpty()
-            return when (normalized) {
-                "PARKING_SPACE", "PARKING" -> PARKING_SPACE
-                "ENTRANCE_EXIT", "ENTRANCE", "EXIT" -> ENTRANCE_EXIT
-                else -> UNKNOWN
-            }
-        }
-    }
-}
-
-object CategorySerializer : KSerializer<Category> {
-    override val descriptor: SerialDescriptor =
-        PrimitiveSerialDescriptor("Category", PrimitiveKind.STRING)
-
-    override fun deserialize(decoder: Decoder): Category {
-        val raw = try {
-            decoder.decodeString()
-        } catch (e: Exception) {
-            ""
-        }
-        return Category.fromRaw(raw)
-    }
-
-    override fun serialize(encoder: Encoder, value: Category) {
-        encoder.encodeString(value.name)
-    }
-}
-
 // MARK: - Graph
 data class ItemIdNumber (
     val id : Int,
@@ -692,7 +602,6 @@ enum class ResourceError {
     Image,
     Scale,
     Entrance,
-    LevelUnits,
     Param,
     Geofence,
     Affine,
@@ -722,7 +631,6 @@ interface TJLabsResourceManagerDelegate {
     fun onSectorParamData(data: SectorParameterOutput)
     fun onLevelParamData(paramKey: String, data: LevelParameterOutput)
     fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
-    fun onLevelUnitsData(unitKey: String, data: List<UnitData>?)
     fun onAffineData(sectorId : Int, data : AffineTransParamOutput)
     fun onLandmarkData(key : String, data : Map<String, LandmarkData>)
     fun onSpotsData(key: Int, type: SpotType, data: Any)

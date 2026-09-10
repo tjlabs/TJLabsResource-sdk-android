@@ -60,7 +60,6 @@ class TJLabsResourceManager {
         // 파일이 업로드된 층만 채워진다. 파일 없는 층은 map 에 key 자체가 없음.
         // ParkingMatchesData 는 matches (id ↔ matchingId) 와 level_match (사용자 표기, 예: "3") 를 함께 담는다.
         private val parkingMatchesDataMap: MutableMap<Int, ParkingMatchesData> = mutableMapOf()
-        private val levelUnitsDataMap: MutableMap<String, List<UnitData>> = mutableMapOf()
         private val landmarkDataMap: MutableMap<String, Map<String, LandmarkData>> = mutableMapOf()
         private val nodeDataMap: MutableMap<String, Map<Int, NodeData>> = mutableMapOf()
         private val linkDataMap: MutableMap<String, Map<Int, LinkData>> = mutableMapOf()
@@ -253,7 +252,6 @@ class TJLabsResourceManager {
         timer.step("entranceItemDataMap", snapshot.entranceItemDataMap.size) { entranceItemDataMap.putAll(snapshot.entranceItemDataMap) }
         timer.step("entranceRouteDataMap", snapshot.entranceRouteDataMap.size) { entranceRouteDataMap.putAll(snapshot.entranceRouteDataMap) }
         timer.step("parkingMatchesDataMap", snapshot.parkingMatchesDataByLevelId.size) { parkingMatchesDataMap.putAll(snapshot.parkingMatchesDataByLevelId) }
-        timer.step("levelUnitsDataMap", snapshot.levelUnitsDataMap.size) { levelUnitsDataMap.putAll(snapshot.levelUnitsDataMap) }
 
         val filteredLandmark = snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() }
         timer.step("landmarkDataMap", filteredLandmark.size) { landmarkDataMap.putAll(filteredLandmark) }
@@ -316,11 +314,6 @@ class TJLabsResourceManager {
         snapshot.entranceRouteDataMap.forEach { (key, value) ->
             timer.item("onEntranceRouteData", "key=$key") {
                 delegate?.onEntranceRouteData(key, value)
-            }
-        }
-        snapshot.levelUnitsDataMap.forEach { (key, value) ->
-            timer.item("onLevelUnitsData", "key=$key n=${value.size}") {
-                delegate?.onLevelUnitsData(key, value)
             }
         }
         snapshot.landmarkDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
@@ -423,7 +416,6 @@ class TJLabsResourceManager {
             entranceDataMap.clear()
             entranceItemDataMap.clear()
             entranceRouteDataMap.clear()
-            levelUnitsDataMap.clear()
             landmarkDataMap.clear()
             nodeDataMap.clear()
             linkDataMap.clear()
@@ -454,7 +446,6 @@ class TJLabsResourceManager {
             entranceDataMap.keys.removeAll { it.startsWith(prefix) }
             entranceItemDataMap.keys.removeAll { it.startsWith(prefix) }
             entranceRouteDataMap.keys.removeAll { it.startsWith(prefix) }
-            levelUnitsDataMap.keys.removeAll { it.startsWith(prefix) }
             landmarkDataMap.keys.removeAll { it.startsWith(prefix) }
             nodeDataMap.keys.removeAll { it.startsWith(prefix) }
             linkDataMap.keys.removeAll { it.startsWith(prefix) }
@@ -478,8 +469,6 @@ class TJLabsResourceManager {
     fun getScaleOffset(): Map<String, List<Float>> = scaleOffsetDataMap
 
     fun getPathPixelData(): Map<String, PathPixelData> = pathPixelDataMap
-
-    fun getUnitData(): Map<String, List<UnitData>> = levelUnitsDataMap
 
     fun getGeofenceData(): Map<String, GeofenceData> = geofenceDataMap
 
@@ -623,17 +612,6 @@ class TJLabsResourceManager {
             completion(true)
         } else {
             delegate?.onError(ResourceError.PathPixel, key)
-            completion(false)
-        }
-    }
-
-    fun updateUnitData(key: String, completion: (Boolean) -> Unit) {
-        val cached = levelUnitsDataMap[key]
-        if (cached != null) {
-            delegate?.onLevelUnitsData(key, cached)
-            completion(true)
-        } else {
-            delegate?.onError(ResourceError.LevelUnits, key)
             completion(false)
         }
     }
