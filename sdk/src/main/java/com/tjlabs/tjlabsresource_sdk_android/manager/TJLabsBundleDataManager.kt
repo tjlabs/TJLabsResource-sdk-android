@@ -8,8 +8,6 @@ import com.tjlabs.tjlabsresource_sdk_android.AffineTransParamOutput
 import com.tjlabs.tjlabsresource_sdk_android.BuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatch
 import com.tjlabs.tjlabsresource_sdk_android.ParkingMatchesData
-import com.tjlabs.tjlabsresource_sdk_android.Category
-import com.tjlabs.tjlabsresource_sdk_android.CategoryData
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionBuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionLevelOutput
 import com.tjlabs.tjlabsresource_sdk_android.DefaultPositionOutput
@@ -43,7 +41,6 @@ import com.tjlabs.tjlabsresource_sdk_android.TransitionLevelRef
 import com.tjlabs.tjlabsresource_sdk_android.TransitionOutput
 import com.tjlabs.tjlabsresource_sdk_android.TransitionPoint
 import com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceNetworkConstants
-import com.tjlabs.tjlabsresource_sdk_android.UnitData
 import com.tjlabs.tjlabsresource_sdk_android.VenusBuildingOutput
 import com.tjlabs.tjlabsresource_sdk_android.VenusLevelOutput
 import com.tjlabs.tjlabsresource_sdk_android.VenusSectorOutput
@@ -79,7 +76,6 @@ internal data class BundleDataSnapshot(
     val levelWardsDataMap: Map<String, List<String>>,
     val scaleOffsetDataMap: Map<String, List<Float>>,
     val geofenceDataMap: Map<String, GeofenceData>,
-    val levelUnitsDataMap: Map<String, List<UnitData>>,
     val landmarkDataMap: Map<String, Map<String, LandmarkData>>,
     val nodeDataMap: Map<String, Map<Int, NodeData>>,
     val linkDataMap: Map<String, Map<Int, LinkData>>,
@@ -1429,7 +1425,6 @@ internal class TJLabsBundleDataManager {
             val levelWardsMap = mutableMapOf<String, List<String>>()
             val scaleOffsetMap = mutableMapOf<String, List<Float>>()
             val geofenceMap = mutableMapOf<String, GeofenceData>()
-            val levelUnitsMap = mutableMapOf<String, List<UnitData>>()
             val landmarkMap = mutableMapOf<String, Map<String, LandmarkData>>()
             val nodeMap = mutableMapOf<String, Map<Int, NodeData>>()
             val linkMap = mutableMapOf<String, Map<Int, LinkData>>()
@@ -1486,12 +1481,15 @@ internal class TJLabsBundleDataManager {
 
                     parseGeofence(levelObj.optJSONObject("geofence"))?.let { geofenceMap[levelKey] = it }
 
-                    parseUnits(levelObj.optJSONArray("units"))?.let { levelUnitsMap[levelKey] = it }
-
                     val wardsJson = levelObj.optJSONArray("wards")
                     if (isDebugLevel.not() && wardsJson != null) {
                         levelWardsMap[levelKey] = parseWards(wardsJson)
-                        landmarkMap[levelKey] = parseLandmarks(wardsJson)
+                    }
+                    // 2026-09-10 스키마: rf_landmarks 가 level 직속 평면 배열로 이동.
+                    // ward 정보는 각 랜드마크의 `ward` 필드에서 읽는다 (다른 층 ward 일 수 있음).
+                    val rfLandmarksJson = levelObj.optJSONArray("rf_landmarks")
+                    if (isDebugLevel.not() && rfLandmarksJson != null) {
+                        landmarkMap[levelKey] = parseLandmarks(rfLandmarksJson)
                     }
 
                     if (isDebugLevel.not() && TJResourceLogger.isDebugEnabled()) {
@@ -1624,7 +1622,6 @@ internal class TJLabsBundleDataManager {
                 levelWardsDataMap = levelWardsMap,
                 scaleOffsetDataMap = scaleOffsetMap,
                 geofenceDataMap = geofenceMap,
-                levelUnitsDataMap = levelUnitsMap,
                 landmarkDataMap = landmarkMap,
                 nodeDataMap = nodeMap,
                 linkDataMap = linkMap,
@@ -2212,67 +2209,6 @@ internal class TJLabsBundleDataManager {
         )
     }
 
-    private fun parseUnits(arr: JSONArray?): List<UnitData>? {
-        if (arr == null) return null
-        val result = mutableListOf<UnitData>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            result.add(
-                UnitData(
-                    id = obj.optInt("id"),
-                    category = parseCategory(obj.opt("category")),
-                    name = obj.optString("name"),
-                    is_restricted = obj.optBoolean("is_restricted"),
-                    x = obj.optFloatOrDefault("x"),
-                    y = obj.optFloatOrDefault("y"),
-                    parking_space_code = obj.optString("parking_space_code")
-                )
-            )
-        }
-        return result
-    }
-
-    private fun parseCategory(raw: Any?): CategoryData {
-        var id = 0
-        var name = ""
-        var keyRaw = ""
-
-        when (raw) {
-            is JSONObject -> {
-                id = raw.optInt("id", 0)
-                name = raw.optString("name")
-                keyRaw = raw.optString("key")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("category")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("value")
-                if (keyRaw.isBlank()) keyRaw = raw.optString("code")
-                if (name.isBlank()) name = keyRaw
-            }
-            is String -> {
-                name = raw
-                keyRaw = raw
-            }
-            is Number -> {
-                name = raw.toString()
-                keyRaw = raw.toString()
-            }
-            else -> {
-                name = ""
-                keyRaw = ""
-            }
-        }
-
-        val key = Category.fromRaw(if (keyRaw.isBlank()) name else keyRaw)
-        if (key == Category.UNKNOWN && (name.isNotBlank() || keyRaw.isNotBlank())) {
-            TJResourceLogger.d("(TJLabsResource) unknown category // raw=$raw")
-        }
-
-        return CategoryData(
-            id = id,
-            name = name,
-            key = key
-        )
-    }
-
     private fun parseWards(arr: JSONArray): List<String> {
         val result = mutableListOf<String>()
         for (i in 0 until arr.length()) {
@@ -2285,39 +2221,37 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
+    // 2026-09-10 스키마: `arr` 는 level.rf_landmarks (평면). 각 항목이 자기 ward 를 들고 있다.
+    // ward 는 이 level 의 wards[] 에 없을 수 있으므로 각 랜드마크의 ward.name 을 그대로 그룹 키로 쓴다.
     private fun parseLandmarks(arr: JSONArray): Map<String, LandmarkData> {
         val result = mutableMapOf<String, LandmarkData>()
         for (i in 0 until arr.length()) {
-            val wardObj = arr.optJSONObject(i) ?: continue
-            val wardName = wardObj.optString("name")
+            val info = arr.optJSONObject(i) ?: continue
+            val wardName = info.optJSONObject("ward")?.optString("name").orEmpty()
             if (wardName.isBlank()) continue
 
-            val rfLandmarks = wardObj.optJSONArray("rf_landmarks") ?: JSONArray()
-            for (j in 0 until rfLandmarks.length()) {
-                val info = rfLandmarks.optJSONObject(j) ?: continue
-                val links = info.optJSONArray("links") ?: JSONArray()
-                val matchedLinks = mutableListOf<Int>()
-                for (k in 0 until links.length()) {
-                    val link = links.optJSONObject(k) ?: continue
-                    matchedLinks.add(link.optInt("number"))
-                }
+            val links = info.optJSONArray("links") ?: JSONArray()
+            val matchedLinks = mutableListOf<Int>()
+            for (k in 0 until links.length()) {
+                val link = links.optJSONObject(k) ?: continue
+                matchedLinks.add(link.optInt("number"))
+            }
 
-                val peak = PeakData(
-                    x = info.optInt("x"),
-                    y = info.optInt("y"),
-                    rssi = info.optFloatOrDefault("rssi"),
-                    matched_links = matchedLinks
+            val peak = PeakData(
+                x = info.optInt("x"),
+                y = info.optInt("y"),
+                rssi = info.optFloatOrDefault("rssi"),
+                matched_links = matchedLinks
+            )
+
+            val existing = result[wardName]
+            if (existing == null) {
+                result[wardName] = LandmarkData(
+                    ward_id = wardName,
+                    peaks = listOf(peak)
                 )
-
-                val existing = result[wardName]
-                if (existing == null) {
-                    result[wardName] = LandmarkData(
-                        ward_id = wardName,
-                        peaks = listOf(peak)
-                    )
-                } else {
-                    result[wardName] = existing.copy(peaks = existing.peaks + peak)
-                }
+            } else {
+                result[wardName] = existing.copy(peaks = existing.peaks + peak)
             }
         }
         return result

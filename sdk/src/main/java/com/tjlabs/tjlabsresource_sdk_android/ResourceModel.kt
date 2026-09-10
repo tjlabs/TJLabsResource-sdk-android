@@ -1,13 +1,6 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
 import android.graphics.Bitmap
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 
 enum class ResourceRegion(val value: String) {
     KOREA("Korea"),
@@ -66,17 +59,6 @@ data class EntranceRouteData(
     var routeLevel: List<String> = emptyList(),
     var route: List<List<Float>> = listOf(emptyList())
 )
-
-//data class UnitData(
-//    val category: Int = 0,
-//    val number: Int = 0,
-//    val name: String = "",
-//    val accessibility: String = "",
-//    val restriction: Boolean = false,
-//    val visibility: Boolean = false,
-//    val x: Float = 0f,
-//    val y: Float = 0f
-//)
 
 data class ParameterData(
     val trajectory_length: Int = 0,
@@ -160,9 +142,14 @@ data class SectorBundleLevelOutput(
     val map_image: SectorBundleMapImageOutput?,
     val geofence: GeofenceData?,
     val entrances: List<SectorBundleEntranceOutput>?,
-    val units: List<UnitData>?,
     val graph: SectorBundleGraphOutput?,
-    val wards: List<LevelLandmark>?,
+    // 2026-09-10 스키마: ward 와 RF 랜드마크 분리. wards 는 이 층에 설치된 ward 목록(id/name)만.
+    // 이 층에서 잡히는 신호 중 다른 층 ward 소속 랜드마크는 [rf_landmarks] 에만 실린다.
+    val wards: List<Ward>?,
+    // 2026-09-10 스키마: level 직속 평면 랜드마크 목록. 각 항목은 자기 ward 를 그 자체로 포함
+    // (id, name) — 다른 층 ward 일 수 있음. 소비자는 [wards] 에서 lookup 하지 말고 이 필드의
+    // ward 정보를 그대로 사용해야 한다.
+    val rf_landmarks: List<LandmarkInfo>?,
     // 2026-08-28 스키마 신규. GeoJSON 피처 id ↔ 외부 업체 주차면 id 매핑 파일의 공개 URL.
     // 파일 미업로드 시 null. SDK 는 이 URL 을 다시 GET 해서 [ParkingMatchesData] 로 파싱한다.
     val parking_matches: SectorBundleParkingMatchesOutput? = null
@@ -501,6 +488,9 @@ data class LandmarkInfo(
     val x: Int,
     val y: Int,
     val rssi: Float,
+    // 2026-09-10 스키마: 이 랜드마크가 속한 ward. 지금 level 의 wards[] 에 없을 수 있다
+    // (다른 층에 설치된 ward 의 신호가 이 층에서 잡힌 케이스).
+    val ward: Ward,
     val links: List<LevelLandmarkLink>
 )
 
@@ -532,77 +522,6 @@ data class LinkData (
 
 enum class NodeLinkType {
     NODE, LINK, FILE
-}
-
-// MARK: - Unit
-internal data class LevelUnitsInput(
-    var level_id: Int = 0,
-    var category: Category? = null
-)
-
-
-
-data class LevelUnitsOutput(
-    val id : Int,
-    val units: List<UnitData>
-)
-
-data class UnitData(
-    val id: Int,
-    val category: CategoryData,
-    val name: String,
-    val is_restricted: Boolean,
-    val x: Float,   // Swift Double → Kotlin Float
-    val y: Float,   // Swift Double → Kotlin Float
-    val parking_space_code: String
-)
-
-
-data class CategoryData(
-    val id : Int,
-    val name : String,
-    val key : Category
-)
-
-@Serializable(with = CategorySerializer::class)
-enum class Category {
-    PARKING_SPACE,
-    ENTRANCE_EXIT,
-    UNKNOWN;
-
-    companion object {
-        fun fromRaw(raw: String?): Category {
-            val normalized = raw
-                ?.trim()
-                ?.replace("-", "_")
-                ?.replace(" ", "_")
-                ?.uppercase()
-                .orEmpty()
-            return when (normalized) {
-                "PARKING_SPACE", "PARKING" -> PARKING_SPACE
-                "ENTRANCE_EXIT", "ENTRANCE", "EXIT" -> ENTRANCE_EXIT
-                else -> UNKNOWN
-            }
-        }
-    }
-}
-
-object CategorySerializer : KSerializer<Category> {
-    override val descriptor: SerialDescriptor =
-        PrimitiveSerialDescriptor("Category", PrimitiveKind.STRING)
-
-    override fun deserialize(decoder: Decoder): Category {
-        val raw = try {
-            decoder.decodeString()
-        } catch (e: Exception) {
-            ""
-        }
-        return Category.fromRaw(raw)
-    }
-
-    override fun serialize(encoder: Encoder, value: Category) {
-        encoder.encodeString(value.name)
-    }
 }
 
 // MARK: - Graph
@@ -692,7 +611,6 @@ enum class ResourceError {
     Image,
     Scale,
     Entrance,
-    LevelUnits,
     Param,
     Geofence,
     Affine,
@@ -722,7 +640,6 @@ interface TJLabsResourceManagerDelegate {
     fun onSectorParamData(data: SectorParameterOutput)
     fun onLevelParamData(paramKey: String, data: LevelParameterOutput)
     fun onBuildingLevelImageData(imageKey: String, data: Bitmap?)
-    fun onLevelUnitsData(unitKey: String, data: List<UnitData>?)
     fun onAffineData(sectorId : Int, data : AffineTransParamOutput)
     fun onLandmarkData(key : String, data : Map<String, LandmarkData>)
     fun onSpotsData(key: Int, type: SpotType, data: Any)
