@@ -1294,8 +1294,8 @@ internal class TJLabsBundleDataManager {
         return try {
             val connection = URL(urlString).openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 10000
+            connection.readTimeout = 30000
             connection.connect()
             val status = connection.responseCode
             if ((status in 200 until 300) == false) {
@@ -1381,8 +1381,8 @@ internal class TJLabsBundleDataManager {
         return try {
             val connection = URL(urlString).openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
+            connection.connectTimeout = 10000
+            connection.readTimeout = 30000
             connection.connect()
             val status = connection.responseCode
             if ((status in 200 until 300).not()) {
