@@ -14,14 +14,16 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 
-const val TIMEOUT_VALUE_PUT = 5L
+const val CONNECT_TIMEOUT = 10L
+const val READ_TIMEOUT = 30L
+const val WRITE_TIMEOUT = 30L
 
 internal object TJLabsResourceNetworkConstants {
     private fun buildRetrofit(url: String, token: String? = null): Retrofit {
         val okHttpBuilder = OkHttpClient.Builder()
-            .connectTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
-            .readTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
-            .writeTimeout(TIMEOUT_VALUE_PUT, TimeUnit.SECONDS)
+            .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT, TimeUnit.SECONDS)
             .hostnameVerifier(onPremScopedHostnameVerifier())
 
         if (token.isNullOrBlank().not()) {
