@@ -988,20 +988,20 @@ internal class TJLabsBundleDataManager {
     /**
      * CSV 디스크 캐시 저장 위치 선택.
      *
-     * - [comboCacheDir] 가 null → 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`)
+     * - [sectorAssetsRoot] 가 null → 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`)
      *   에 저장. 기존 단일 섹터 `loadBundle` 흐름.
-     * - [comboCacheDir] 가 non-null → 그 조합 캐시 디렉토리 아래 저장
-     *   (`{comboCacheDir}/entrance/sector_{sectorId}/{filename}.csv`). Multi 로더 흐름 전용.
-     *   조합이 바뀌면 Multi 로더의 `evictOldCombinations` 가 상위 디렉토리를 통째로 지우므로
-     *   조합 변경 시 자동 무효화. 재시작 시 조합 zip 캐시가 재사용되면 entrance CSV 도 디스크
-     *   hit → **외부 URL 재다운로드 skip** → 오프라인 재구동 가능.
+     * - [sectorAssetsRoot] 가 non-null → bundle schema 와 동일 레이아웃으로 그 섹터 assets
+     *   디렉토리 아래 저장 (`{sectorAssetsRoot}/entrance/{filename}`). Multi 로더 흐름 전용.
+     *   조합이 바뀌어 `extractArchive` 가 version marker 불일치로 재추출하면 자동 무효화.
+     *   재시작 시 조합 zip 과 extract 가 재사용되면 entrance CSV 도 디스크 hit → **외부 URL
+     *   재다운로드 skip** → 오프라인 재구동 가능.
      */
     private fun enrichCsvData(
         application: Application,
         sectorId: Int,
         snapshot: BundleDataSnapshot,
         imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
-        comboCacheDir: File? = null,
+        sectorAssetsRoot: File? = null,
         completion: (Boolean, BundleDataSnapshot) -> Unit
     ) {
         val enrichTotalStartMs = nowMs()
@@ -1038,10 +1038,11 @@ internal class TJLabsBundleDataManager {
                 async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, ref, assetsRoot, zipFileFallback) }
             }
             // entrance route CSV 는 zip 스키마에도 포함되지 않는다 (여전히 절대 URL).
-            // comboCacheDir != null (Multi 로더 흐름) 이면 조합 캐시 디렉토리에 저장 — 섹터별
-            // side-effect 디렉토리 없음, 재시작 시 디스크 hit 가능.
+            // sectorAssetsRoot != null (Multi 로더 흐름) 이면 bundle schema 와 동일 레이아웃으로
+            // 섹터 assets 아래 저장 — 섹터별 side-effect 디렉토리 없음, extract 가 유지되는 한
+            // 재시작 시 디스크 hit 가능.
             val entranceDeferred = entranceTargets.map { (key, url) ->
-                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url, comboCacheDir) }
+                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url, sectorAssetsRoot) }
             }
             // map_image 는 도면 PNG → 항상 절대 URL. CDN 캐시가 잘 듣는다.
             val imageDeferred = imageTargets.map { (key, url) ->
@@ -1359,10 +1360,10 @@ internal class TJLabsBundleDataManager {
         versionId: String,
         key: String,
         url: String,
-        comboCacheDir: File? = null,
+        sectorAssetsRoot: File? = null,
     ): EntranceRouteData? {
         val startMs = nowMs()
-        val cacheModeLabel = if (comboCacheDir != null) "combo:${comboCacheDir.name}" else "sector"
+        val cacheModeLabel = if (sectorAssetsRoot != null) "bundle:${sectorAssetsRoot.absolutePath}" else "sector"
         TJResourceLogger.d(
             "(TJLabsResource) fetchEntranceRouteData start // key=$key // url=$url // cacheMode=$cacheModeLabel"
         )
@@ -1376,7 +1377,7 @@ internal class TJLabsBundleDataManager {
             versionPrefix = PREF_ENTRANCE_VERSION_PREFIX,
             urlPrefix = PREF_ENTRANCE_URL_PREFIX,
             filePrefix = PREF_ENTRANCE_FILE_PREFIX,
-            comboCacheDir = comboCacheDir,
+            sectorAssetsRoot = sectorAssetsRoot,
         ) ?: run {
             TJResourceLogger.d("(TJLabsResource) perf fetchEntranceRouteData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
             return null
@@ -1389,11 +1390,11 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
-     * @param comboCacheDir null 이면 기존 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`)
-     *   저장. non-null 이면 그 조합 캐시 디렉토리 아래 (`{comboCacheDir}/{source-category}/sector_{sectorId}/`)
-     *   저장. Multi 로더 흐름에서 섹터별 side-effect 디렉토리를 피하면서 조합 전체 캐시로 재사용.
-     *   조합 디렉토리는 Multi 로더의 `evictOldCombinations` 가 조합 변경 시 통째로 삭제하므로 LRU
-     *   관리는 그쪽에 위임.
+     * @param sectorAssetsRoot null 이면 기존 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`)
+     *   저장. non-null 이면 bundle schema 와 동일 레이아웃으로 섹터 assets 디렉토리 아래
+     *   (`{sectorAssetsRoot}/{category}/{filename}`) 저장. Multi 로더 흐름 전용.
+     *   조합이 바뀌면 `extractArchive` 가 version marker 불일치로 extract 재추출 → stale CSV
+     *   자동 cleanup.
      */
     private fun getCsvTextWithCache(
         application: Application,
@@ -1406,10 +1407,10 @@ internal class TJLabsBundleDataManager {
         urlPrefix: String,
         filePrefix: String,
         extension: String = "csv",
-        comboCacheDir: File? = null,
+        sectorAssetsRoot: File? = null,
     ): String? {
         // Multi 로더 조합 캐시 모드: prefs 네임스페이스는 그대로 쓰되 저장 디렉토리를 조합 아래로
-        // 격리. 조회 시 prefs savedPath 가 `{comboCacheDir}/...` 를 가리키는지 체크하면 자연
+        // 격리. 조회 시 prefs savedPath 가 `{sectorAssetsRoot}/...` 를 가리키는지 체크하면 자연
         // 재사용. 조합 변경 시 상위가 삭제되므로 savedPath 는 File.exists()=false 로 떨어져
         // 자동 재다운로드.
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -1448,16 +1449,16 @@ internal class TJLabsBundleDataManager {
             urlPrefix = urlPrefix,
             filePrefix = filePrefix,
             extension = extension,
-            comboCacheDir = comboCacheDir,
+            sectorAssetsRoot = sectorAssetsRoot,
         )
         return downloaded
     }
 
     /**
-     * CSV 디스크 캐시 저장. [comboCacheDir] non-null 이면 조합 캐시 디렉토리 아래
-     * (`{comboCacheDir}/{source-category}/sector_{sectorId}/{filename}`) 에 저장. null 이면 기존
-     * 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`). source 는 `"entrance:..."`,
-     * `"pathPixel:..."` 등 — "`:`" 앞을 카테고리로 사용.
+     * CSV 디스크 캐시 저장. [sectorAssetsRoot] non-null 이면 bundle schema 와 동일 레이아웃으로
+     * 그 섹터 assets 디렉토리 아래 (`{sectorAssetsRoot}/{category}/{filename}`) 저장. null 이면
+     * 기존 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`). source 는
+     * `"entrance:..."`, `"pathPixel:..."` 등 — "`:`" 앞을 카테고리로 사용.
      */
     private fun saveCsvCache(
         application: Application,
@@ -1471,12 +1472,12 @@ internal class TJLabsBundleDataManager {
         urlPrefix: String,
         filePrefix: String,
         extension: String = "csv",
-        comboCacheDir: File? = null,
+        sectorAssetsRoot: File? = null,
     ) {
         try {
-            val cacheDir = if (comboCacheDir != null) {
+            val cacheDir = if (sectorAssetsRoot != null) {
                 val category = source.substringBefore(":").ifBlank { "misc" }
-                File(comboCacheDir, "$category/sector_$sectorId")
+                File(sectorAssetsRoot, category)
             } else {
                 File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
             }
@@ -1651,7 +1652,7 @@ internal class TJLabsBundleDataManager {
         extractedRoot: File,
         versionId: String,
         imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
-        comboCacheDir: File? = null,
+        sectorAssetsRoot: File? = null,
     ): com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome {
         val bundleJsonFile = File(extractedRoot, "sectors/$sectorId/bundle.json")
         if (!bundleJsonFile.exists() || bundleJsonFile.length() <= 0) {
@@ -1693,13 +1694,13 @@ internal class TJLabsBundleDataManager {
         // 호출되므로 resume 도 메인에서 재개된다 (호출부가 멀티 처리 전체를 Dispatchers.IO 로
         // 둘러싸고 있어도 안전).
         return suspendCoroutine { cont ->
-            // Multi 로더 경로 — entrance route 등 외부 URL CSV 를 **조합 캐시 디렉토리** 아래 저장.
-            //   `{comboCacheDir}/entrance/sector_{sectorId}/*.csv` 로 격리되어 섹터별 side-effect
-            //   디렉토리가 생성되지 않고, 조합 캐시가 재사용되면 재시작 시 디스크 hit 로 네트워크
-            //   왕복 skip → 오프라인 재구동 가능. 조합 변경 시 evictOldCombinations 가 상위를
-            //   통째로 지워 LRU 자동 처리. comboCacheDir=null 이면 기존 섹터별 디렉토리 (단일
-            //   섹터 loadBundle 흐름).
-            enrichCsvData(application, sectorId, parsed, imageLoadPolicy, comboCacheDir = comboCacheDir) { csvSuccess, enriched ->
+            // Multi 로더 경로 — entrance route 등 외부 URL CSV 를 bundle schema 와 동일 레이아웃
+            //   (`{extractedRoot}/sectors/{sectorId}/assets/entrance/{filename}`) 에 저장. 섹터별
+            //   "aws_korea_X" side-effect 디렉토리 생성 없음. extractArchive 가 version marker 로
+            //   조건부 재추출이라 조합 zip 캐시 hit 시 extract 와 함께 CSV 도 유지 → 재시작 시
+            //   디스크 hit, 네트워크 왕복 skip. sectorAssetsRoot=null 이면 기존 섹터별 디렉토리
+            //   (단일 섹터 loadBundle 흐름 유지).
+            enrichCsvData(application, sectorId, parsed, imageLoadPolicy, sectorAssetsRoot = sectorAssetsRoot) { csvSuccess, enriched ->
                 val cacheKey = buildSnapshotCacheKey(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
                 bundleCache[cacheKey] = enriched
                 val failures = if (!csvSuccess) {

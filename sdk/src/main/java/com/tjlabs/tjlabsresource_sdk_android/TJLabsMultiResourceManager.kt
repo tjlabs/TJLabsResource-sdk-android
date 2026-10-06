@@ -335,7 +335,7 @@ object TJLabsMultiResourceManager {
             // nanoTime 수집해 수집기에 add — 두 측정은 서로 간섭 없이 공존.
             val extractStartMs = nowMs()
             val extractStartNs = if (TJLabsBundleDataManager.benchmarkTimingEnabled) System.nanoTime() else 0L
-            val extractedRoot = extractArchive(archiveFile, application) ?: run {
+            val extractedRoot = extractArchive(archiveFile, application, sectorIds, versionId) ?: run {
                 TJResourceLogger.e("(TJLabsMultiResourceManager) zip extract fail // archive=${archiveFile.absolutePath}")
                 withContext(Dispatchers.Main) {
                     finishFatal(input, ResourceLoadStage.SECTOR_BUNDLE_DOWNLOAD, TJLabsResourceCode.UNCLASSIFIED_FAILURE_STATUS, versionId, completion)
@@ -348,16 +348,15 @@ object TJLabsMultiResourceManager {
             }
             val tPrepare = nowMs()
             val decodeStartNs = if (TJLabsBundleDataManager.benchmarkTimingEnabled) System.nanoTime() else 0L
-            // iOS parity (TJ-609, 2026-10-06): 조합 캐시 디렉토리 격리.
-            //   엔트런스 route CSV 처럼 zip 안에 포함 안 되고 외부 URL 로 받는 자원을 섹터별
-            //   디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`) 대신 조합 아래
-            //   (`.../multiBundle/enrich/{comboKey}/entrance/sector_{sectorId}/*.csv`) 에 저장.
-            //   조합 변경 시 evictOldCombinations 가 enrich/{구조합} 함께 삭제 → LRU 자동.
-            val comboKey = combinationKey(sectorIds)
-            val comboCacheDir = File(application.cacheDir, "$CSV_DIR/$MULTI_DIR/enrich/$comboKey")
+            // iOS parity (TJ-609, 2026-10-06): 외부 URL 로 받는 자원 (entrance route CSV 등) 을
+            //   bundle schema 와 동일 레이아웃 (`sectors/{sectorId}/assets/{category}/`) 아래
+            //   저장한다. 섹터별 "aws_korea_X" 디렉토리 생성 없음, extracted 가 version marker 로
+            //   조건부 재추출되므로 재시작 시 캐시된 CSV 도 그대로 유지 → 오프라인 재구동 지원.
+            //   섹터 scoped 디렉토리이므로 조합 변경 → extract 재추출 → stale 섹터 CSV 자동 cleanup.
             // 섹터별 병렬 처리 — 각 섹터는 자기 영역만 터치하고 bundleCache 저장을 완료한다.
             val sectorDeferreds = sectorIds.map { sectorId ->
                 async {
+                    val sectorAssetsRoot = File(extractedRoot, "sectors/$sectorId/assets")
                     bundleDataManager.processSectorFromArchive(
                         application = application,
                         sectorId = sectorId,
@@ -365,7 +364,7 @@ object TJLabsMultiResourceManager {
                         extractedRoot = extractedRoot,
                         versionId = versionId,
                         imageLoadPolicy = imageLoadPolicy,
-                        comboCacheDir = comboCacheDir,
+                        sectorAssetsRoot = sectorAssetsRoot,
                     )
                 }
             }
@@ -579,18 +578,18 @@ object TJLabsMultiResourceManager {
         val zips = (dir.listFiles() ?: emptyArray()).filter { it.extension == "zip" }
         if (zips.size <= MAX_CACHED_COMBINATIONS) return
         val sorted = zips.sortedByDescending { it.lastModified() }
-        val enrichRoot = File(dir, "enrich")
         for (file in sorted.drop(MAX_CACHED_COMBINATIONS)) {
             val key = file.nameWithoutExtension
             runCatching { file.delete() }
-            // 2026-10-06 (TJ-609): 조합별 enrich 캐시 (entrance CSV 등) 도 함께 지움.
-            // comboCacheDir = `.../multiBundle/enrich/{comboKey}` 를 상위에서 통째로 삭제.
-            runCatching { File(enrichRoot, key).deleteRecursively() }
+            // 2026-10-06 (TJ-609): entrance CSV 등 외부 URL 로 받은 자원은 `extracted/sectors/
+            // {sectorId}/assets/{category}/` 안에 저장된다. extractArchive 가 version marker
+            // 기반 조건부 재추출이므로 조합 변경 시 다음 로드에서 자동 재구성. extract 자체는
+            // 공용 디렉토리 (`multiBundle/extracted`) 라 LRU 와 무관.
             application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .remove(PREF_VERSION_PREFIX + key)
                 .apply()
-            TJResourceLogger.d("(TJLabsMultiResourceManager) evict // key=$key // zip=${file.absolutePath} + enrich/{key}")
+            TJResourceLogger.d("(TJLabsMultiResourceManager) evict // key=$key // zip=${file.absolutePath}")
         }
     }
 
@@ -599,11 +598,34 @@ object TJLabsMultiResourceManager {
     // =========================================================================
 
     /**
-     * 조합 zip 을 공용 extracted 디렉토리로 풀고 그 File 을 돌려준다. 기존 extracted 디렉토리는
-     * 통째로 삭제 후 재구성 — 조합 단위로 교체 (iOS 메모리 archive 보존 정책과 1:1 매핑).
+     * 조합 zip 을 공용 extracted 디렉토리로 풀고 그 File 을 돌려준다.
+     *
+     * 2026-10-06 (TJ-609): 매 호출마다 통째로 삭제하지 않고 **version marker 로 조건부 재추출**.
+     *   `extractedRoot/.combo_version` 에 저장한 조합 versionId 와 현재 조합의 versionId 가
+     *   일치하고 요청 섹터 bundle.json 들이 모두 존재하면 extract skip (디스크 hit). 그렇지 않으면
+     *   삭제 후 재추출.
+     *
+     * 이렇게 하면 enrichCsvData 가 extract 디렉토리 안에 저장한 entrance CSV 등도 재시작/재로드
+     * 시 유지되어 외부 URL 재다운로드 없이 재사용 가능 → 오프라인 재구동 지원.
      */
-    private fun extractArchive(archiveFile: File, application: Application): File? {
+    private fun extractArchive(
+        archiveFile: File,
+        application: Application,
+        sectorIds: List<Int>,
+        versionId: String,
+    ): File? {
         val extractRoot = File(application.cacheDir, "$CSV_DIR/$MULTI_DIR/extracted")
+        val versionMarker = File(extractRoot, ".combo_version")
+        val markerVersion = runCatching { versionMarker.takeIf { it.exists() }?.readText()?.trim() }.getOrNull()
+        val allSectorsPresent = sectorIds.all { sid ->
+            File(extractRoot, "sectors/$sid/bundle.json").let { it.exists() && it.length() > 0 }
+        }
+        if (markerVersion == versionId && allSectorsPresent) {
+            TJResourceLogger.i(
+                "(TJLabsMultiResourceManager) extract reuse // version=$versionId // sectors=$sectorIds // dst=${extractRoot.absolutePath}"
+            )
+            return extractRoot
+        }
         runCatching { if (extractRoot.exists()) extractRoot.deleteRecursively() }
         if (!extractRoot.mkdirs() && !extractRoot.exists()) return null
         return try {
@@ -621,8 +643,9 @@ object TJLabsMultiResourceManager {
                     }
                 }
             }
+            runCatching { versionMarker.writeText(versionId) }
             TJResourceLogger.i(
-                "(TJLabsMultiResourceManager) extract done // archive=${archiveFile.name} // dst=${extractRoot.absolutePath}"
+                "(TJLabsMultiResourceManager) extract done // archive=${archiveFile.name} // version=$versionId // dst=${extractRoot.absolutePath}"
             )
             extractRoot
         } catch (e: Exception) {
