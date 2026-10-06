@@ -12,12 +12,11 @@ val versionMinor = 1
 val versionPatch = 20
 
 // 진단 배포용 publish 좌표 override.
-// Jupiter SDK 2.0.36 이 `strictly 1.1.19` constraint 로 TJLabsResource 를 pin 하므로
-// 1.1.20 좌표는 소비자 (VM SDK 등) 에서 downgrade 되어 반영되지 않는다.
-// mavenLocal 이 jitpack 보다 repository 우선순위 높은 점을 이용해 같은 좌표 (1.1.19) 로
-// 덮어씌우면 이 브랜치의 코드 (entrance CSV optional / zip 스키마 등) 가 소비자에 반영된다.
-// 검증 완료 후 이 override 를 지우고 정식 1.1.20 tag 배포로 전환.
-val publishVersionOverride: String? = "1.1.19"
+// 2026-10-06 전환 (TJ-609): Jupiter SDK 2.0.37 작업과 함께 Resource SDK 1.1.20 코드를
+// mavenLocal 에 **정식 좌표** (1.1.20) 로 발행해 Jupiter/VM 양쪽에서 참조. Jupiter 쪽
+// `resourceSdkVersion` 도 1.1.20 으로 올려 소비 좌표 일치시킴. 공식 1.1.20 tag 배포 후에는
+// 이 override 는 null 유지만으로 충분 (mavenLocal 우선 순위로 로컬 iterate 보장).
+val publishVersionOverride: String? = null
 
 
 android {
