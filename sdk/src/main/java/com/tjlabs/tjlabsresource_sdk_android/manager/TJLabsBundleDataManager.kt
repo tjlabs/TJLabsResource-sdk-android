@@ -670,6 +670,43 @@ internal class TJLabsBundleDataManager {
         completion: (Boolean, String, SimulationBundleOutput?) -> Unit
     ) {
         val bundleType = ResourceBundleType.JUPITER
+        // iOS parity (TJ-609, 2026-10-06): Multi 로더가 이미 조합 zip 과 extract 를 소유한 경우
+        // bundle.zip 재다운로드 없이 바로 extractSimulationsFromZip 로 진입. bundleCache[sector] 가
+        // bundleAssetsRoot + bundleZipPath 를 들고 있다면 그걸 그대로 재사용 — mock 모드 활성 시
+        // "aws_korea_{sector}/bundle.zip" 재다운로드로 발생하던 중복 캐시 디렉토리 제거.
+        val cached = getCachedSnapshot(bundleType, sectorId)
+        val cachedZip = cached?.bundleZipPath?.let { File(it) }?.takeIf { it.exists() && it.length() > 0 }
+        val cachedAssets = cached?.bundleAssetsRoot?.let { File(it) }?.takeIf { it.exists() }
+        if (cached != null && cachedZip != null && cachedAssets != null) {
+            TJResourceLogger.d(
+                "(TJLabsResource) loadSimulationData fast-path from Multi cache // sectorId=$sectorId " +
+                    "zip=${cachedZip.absolutePath} assets=${cachedAssets.absolutePath}"
+            )
+            CoroutineScope(Dispatchers.IO).launch {
+                val bundleJson = readBundleJsonFromFile(
+                    bundleType, sectorId, cachedZip, useLegacyEndpoint = false, extractedRoot = cachedAssets
+                )
+                if (bundleJson.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) {
+                        completion(false, "(TJLabsResource) Error : read bundle.json from Multi cache", null)
+                    }
+                    return@launch
+                }
+                val parsed = parseSimulationsFromRaw(bundleJson)
+                if (parsed == null) {
+                    withContext(Dispatchers.Main) {
+                        completion(false, "(TJLabsResource) Error : simulations not found (Multi cache)", null)
+                    }
+                    return@launch
+                }
+                val extracted = extractSimulationsFromZip(application, sectorId, cachedZip, cachedAssets, parsed)
+                withContext(Dispatchers.Main) {
+                    completion(true, "(TJLabsResource) Success : load simulation (Multi cache)", extracted)
+                }
+            }
+            return
+        }
+
         requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
             if ((metaStatus in 200 until 300) == false || meta == null) {
                 completion(false, metaMsg, null)

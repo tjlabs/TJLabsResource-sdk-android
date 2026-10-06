@@ -104,6 +104,14 @@ object TJLabsMultiResourceManager {
             return
         }
         TJLabsResourceNetworkConstants.setServerURL(provider, region, env)
+        // 2026-10-06 (TJ-609 보강): 캐시 네임스페이스 (buildCacheNamespace = "{provider}_{region}")
+        // 가 Multi 로더 경로에서도 호출자가 지정한 provider/region 을 쓰도록 TJLabsFileDownloader
+        // 전역 provider/region 을 함께 세팅. 그러지 않으면 Multi 로더가 작업하는 동안 캐시 디렉토리
+        // (bundle extract · 섹터별 이미지 저장 · bundleCache 조회 키) 가 모두 AWS fallback 값 (object
+        // 초기값) 네임스페이스로 떨어져, 단일 섹터 loadResource 와 Multi 로더가 저장/조회하는 캐시
+        // 좌표가 어긋나 cache miss 로 네트워크 재다운로드가 발생한다.
+        com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.provider = provider
+        com.tjlabs.tjlabsresource_sdk_android.TJLabsFileDownloader.region = region
 
         // iOS parity — `resetMultiState`. 멀티 로더 진입 시 메모리 bundleCache 를 전부 비워
         // 이전 조합의 섹터 데이터가 다음 로드에 섞이지 않도록 한다 ("새 로드 = 전역 교체").
