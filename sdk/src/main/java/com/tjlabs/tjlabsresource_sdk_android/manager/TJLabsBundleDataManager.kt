@@ -985,11 +985,19 @@ internal class TJLabsBundleDataManager {
         return resourceUrl
     }
 
+    /**
+     * @param persistToSectorCache true 면 외부 URL 로 받은 CSV (entrance route 등) 를
+     *   `cache/tj_bundle_csv/{namespace}_{sectorId}/` 아래 디스크에 저장 (기존 단일 섹터 로드
+     *   흐름). false 면 메모리 (entranceRouteDataMap 등) 에만 두고 디스크 저장 skip —
+     *   Multi 로더 흐름 전용. 섹터별 디스크 캐시 디렉토리가 생성되는 side-effect 를 막기 위함.
+     *   세션 재시작 시엔 조합 zip 캐시가 재사용되거나 다시 다운로드되므로 데이터 손실 없음.
+     */
     private fun enrichCsvData(
         application: Application,
         sectorId: Int,
         snapshot: BundleDataSnapshot,
         imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
+        persistToSectorCache: Boolean = true,
         completion: (Boolean, BundleDataSnapshot) -> Unit
     ) {
         val enrichTotalStartMs = nowMs()
@@ -1026,8 +1034,9 @@ internal class TJLabsBundleDataManager {
                 async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, ref, assetsRoot, zipFileFallback) }
             }
             // entrance route CSV 는 zip 스키마에도 포함되지 않는다 (여전히 절대 URL).
+            // persistToSectorCache=false (Multi 로더 흐름) 면 섹터별 디스크 캐시 skip — 메모리만.
             val entranceDeferred = entranceTargets.map { (key, url) ->
-                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url) }
+                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url, persistToSectorCache) }
             }
             // map_image 는 도면 PNG → 항상 절대 URL. CDN 캐시가 잘 듣는다.
             val imageDeferred = imageTargets.map { (key, url) ->
@@ -1344,10 +1353,11 @@ internal class TJLabsBundleDataManager {
         sectorId: Int,
         versionId: String,
         key: String,
-        url: String
+        url: String,
+        persist: Boolean = true,
     ): EntranceRouteData? {
         val startMs = nowMs()
-        TJResourceLogger.d("(TJLabsResource) fetchEntranceRouteData start // key=$key // url=$url")
+        TJResourceLogger.d("(TJLabsResource) fetchEntranceRouteData start // key=$key // url=$url // persist=$persist")
         val text = getCsvTextWithCache(
             application = application,
             sectorId = sectorId,
@@ -1357,7 +1367,8 @@ internal class TJLabsBundleDataManager {
             source = "entrance:$key",
             versionPrefix = PREF_ENTRANCE_VERSION_PREFIX,
             urlPrefix = PREF_ENTRANCE_URL_PREFIX,
-            filePrefix = PREF_ENTRANCE_FILE_PREFIX
+            filePrefix = PREF_ENTRANCE_FILE_PREFIX,
+            persist = persist,
         ) ?: run {
             TJResourceLogger.d("(TJLabsResource) perf fetchEntranceRouteData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
             return null
@@ -1369,6 +1380,13 @@ internal class TJLabsBundleDataManager {
         return parsed
     }
 
+    /**
+     * @param persist true 면 외부 URL 로 받은 CSV 를 섹터별 디스크 캐시에 저장 (기존 단일 섹터
+     *   로드 흐름). false 면 메모리 반환만 하고 디스크 저장·prefs 기록 skip — Multi 로더 흐름 전용.
+     *   섹터별 디스크 디렉토리가 생성되는 side-effect 를 막기 위함.
+     *   persist=false 흐름도 다음 조회 시 prefs 캐시 히트는 못 하지만, Multi 로더가 다시 로드할 때
+     *   조합 zip 캐시 또는 다시 다운로드로 데이터 복원 가능.
+     */
     private fun getCsvTextWithCache(
         application: Application,
         sectorId: Int,
@@ -1379,32 +1397,41 @@ internal class TJLabsBundleDataManager {
         versionPrefix: String,
         urlPrefix: String,
         filePrefix: String,
-        extension: String = "csv"
+        extension: String = "csv",
+        persist: Boolean = true,
     ): String? {
-        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
-        val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
-        val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
+        if (persist) {
+            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
+            val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
+            val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
 
-        val savedVersion = prefs.getString(versionKey, null)
-        val savedUrl = prefs.getString(urlKey, null)
-        val savedPath = prefs.getString(fileKey, null)
-        if (savedVersion == versionId && savedUrl == url && savedPath.isNullOrBlank().not()) {
-            val cachedFile = File(savedPath!!)
-            if (cachedFile.exists() && cachedFile.length() > 0) {
-                try {
-                    return cachedFile.readText()
-                    // hit 로그 제거 — 엔트리마다 반복 노이즈. 실패 시에만 로그.
-                } catch (e: Exception) {
-                    TJResourceLogger.d(
-                        "(TJLabsResource) csv cache read fail // source=$source // key=$key // path=${cachedFile.absolutePath} // error=${e.localizedMessage}"
-                    )
+            val savedVersion = prefs.getString(versionKey, null)
+            val savedUrl = prefs.getString(urlKey, null)
+            val savedPath = prefs.getString(fileKey, null)
+            if (savedVersion == versionId && savedUrl == url && savedPath.isNullOrBlank().not()) {
+                val cachedFile = File(savedPath!!)
+                if (cachedFile.exists() && cachedFile.length() > 0) {
+                    try {
+                        return cachedFile.readText()
+                        // hit 로그 제거 — 엔트리마다 반복 노이즈. 실패 시에만 로그.
+                    } catch (e: Exception) {
+                        TJResourceLogger.d(
+                            "(TJLabsResource) csv cache read fail // source=$source // key=$key // path=${cachedFile.absolutePath} // error=${e.localizedMessage}"
+                        )
+                    }
                 }
+                // stale / miss 개별 로그 제거 — 로드 성공 시 자연스러운 상태.
             }
-            // stale / miss 개별 로그 제거 — 로드 성공 시 자연스러운 상태.
         }
 
         val downloaded = fetchTextFromUrl(url, source) ?: return null
+        if (!persist) {
+            TJResourceLogger.d(
+                "(TJLabsResource) csv cache skipped (persist=false) // source=$source // key=$key // url=$url"
+            )
+            return downloaded
+        }
         saveCsvCache(
             application = application,
             sectorId = sectorId,
@@ -1648,7 +1675,10 @@ internal class TJLabsBundleDataManager {
         // 호출되므로 resume 도 메인에서 재개된다 (호출부가 멀티 처리 전체를 Dispatchers.IO 로
         // 둘러싸고 있어도 안전).
         return suspendCoroutine { cont ->
-            enrichCsvData(application, sectorId, parsed, imageLoadPolicy) { csvSuccess, enriched ->
+            // Multi 로더 경로 — entrance route 등 외부 URL CSV 를 섹터별 디스크 캐시에 저장하지
+            // 않도록 persistToSectorCache=false. 조합 zip 캐시만 디스크, 섹터별 side-effect 디렉토리
+            // (`cache/tj_bundle_csv/{namespace}_{sectorId}/`) 생성 없음.
+            enrichCsvData(application, sectorId, parsed, imageLoadPolicy, persistToSectorCache = false) { csvSuccess, enriched ->
                 val cacheKey = buildSnapshotCacheKey(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
                 bundleCache[cacheKey] = enriched
                 val failures = if (!csvSuccess) {
