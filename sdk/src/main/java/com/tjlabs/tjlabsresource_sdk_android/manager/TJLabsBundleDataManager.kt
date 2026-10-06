@@ -51,11 +51,16 @@ import com.tjlabs.tjlabsresource_sdk_android.WarpSectorOutput
 import com.tjlabs.tjlabsresource_sdk_android.WarpWardContentOutput
 import com.tjlabs.tjlabsresource_sdk_android.WarpWardOutput
 import com.tjlabs.tjlabsresource_sdk_android.SectorBundleMapImageOutput
+import com.tjlabs.tjlabsresource_sdk_android.ResourceLoadStage
+import com.tjlabs.tjlabsresource_sdk_android.ResourceLoadStageFailure
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -67,11 +72,20 @@ import retrofit2.Response
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.zip.ZipFile
 
 internal data class BundleDataSnapshot(
     val bundleType: ResourceBundleType,
     val versionId: String,
     val bundleUrl: String,
+    // 2026-09-28+ JUPITER: 로컬에 저장된 zip 경로. 아카이브 원본을 남겨두어 재-extract fallback 에 사용.
+    // WARP/VENUS 나 legacy JSON 응답의 경우 null.
+    val bundleZipPath: String? = null,
+    // 2026-09-28+ JUPITER: zip 을 실제로 압축 해제한 디렉토리. path CSV · parking_matches JSON · bundle.json
+    // 등 모든 entry 가 이 경로 아래에 원본 이름 그대로 존재한다 (예:
+    // `<assetsRoot>/sectors/111/assets/levels/128/paths/dr.csv`). enrichCsvData 는 여기서 개별
+    // 자원 파일을 직접 read 한다. legacy 는 null.
+    val bundleAssetsRoot: String? = null,
     val sectorData: SectorOutput,
     val levelWardsDataMap: Map<String, List<String>>,
     val scaleOffsetDataMap: Map<String, List<Float>>,
@@ -86,9 +100,11 @@ internal data class BundleDataSnapshot(
     val imageUrlsByKey: Map<String, String>,
     val imageDataMap: Map<String, Bitmap>,
     val affineParam: AffineTransParamOutput?,
+    // 2026-09-28+ JUPITER: 값은 zip 내부 경로(`sectors/{id}/assets/levels/{level_id}/paths/{dr|pdr}.csv`).
+    // WARP/VENUS 는 절대 URL 유지 (legacy 스키마). enrichCsvData 가 소스 타입을 자동 판별한다.
     val graphPathUrlsByKey: Map<String, String>,
     val entranceRouteUrlsByKey: Map<String, String>,
-    // 2026-08-28 스키마: level 별 parking-matches 파일 URL / 파싱 결과.
+    // 2026-09-28+: 값은 zip 내부 경로(`sectors/{id}/assets/levels/{level_id}/parking_matches.json`).
     // 파일 미업로드 층은 두 map 모두 key 부재 (null 대신 absence).
     val parkingMatchesUrlsByLevelId: Map<Int, String> = emptyMap(),
     val parkingMatchesDataByLevelId: Map<Int, ParkingMatchesData> = emptyMap(),
@@ -115,20 +131,53 @@ internal class TJLabsBundleDataManager {
         private const val PREF_PARKING_MATCHES_VERSION_PREFIX = "parking_matches_version_"
         private const val PREF_PARKING_MATCHES_URL_PREFIX = "parking_matches_url_"
         private const val PREF_PARKING_MATCHES_FILE_PREFIX = "parking_matches_file_"
-        private const val PREF_SIM_VERSION_PREFIX = "simulation_version_"
-        private const val PREF_SIM_URL_PREFIX = "simulation_url_"
-        private const val PREF_SIM_FILE_PREFIX = "simulation_file_"
+        // 2026-09-28+ 흐름에서는 simulation JSON 도 sector 번들 zip 안에 포함된다 —
+        // [extractSimulationsFromZip] 이 zip entry 를 로컬 파일로 흘려보내므로 별도 per-file
+        // pref 캐시는 필요 없다. (기존 PREF_SIM_* prefix 는 제거됨. 이전 앱 캐시에 남아 있어도
+        // [clearCache] 의 sectorToken 매치가 함께 지운다.)
         private const val PREF_IMAGE_VERSION_PREFIX = "image_version_"
         private const val PREF_IMAGE_URL_PREFIX = "image_url_"
         private const val PREF_IMAGE_FILE_PREFIX = "image_file_"
         private const val PDR_LEVEL_KEY_SUFFIX = "_PDR"
         private const val IMG_DIR = "tj_bundle_img"
+        // Path CSV 바이트 레벨 파서용 상수 (iOS `PathCSV` enum 매핑).
+        private const val LF: Byte = 0x0A
+        private const val CR: Byte = 0x0D
+        private const val COMMA: Byte = 0x2C
+        private const val OPEN_BRACKET: Byte = 0x5B
+        private const val CLOSE_BRACKET: Byte = 0x5D
+        private val ENCODING_MARKER: ByteArray = "encoding=".toByteArray(Charsets.UTF_8)
+
+        // 벤치마크 목적으로 유지되는 v1 (2026-09-10) 서버 버전. `Freezed` 상태라 이미 만들어져 있던
+        // sector×OS 조합만 응답하지만, v1 vs v2 다운로드 크기/시간 비교에 유효하다.
+        private const val LEGACY_JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-10"
+
+        // Meta / raw bundle 요청이 502/503/504/IOException 을 받았을 때 재시도까지의 지연.
+        // proxy 뒤 upstream rebuild 가 대개 수초 안에 끝나므로 짧은 backoff 로 충분.
+        private const val META_RETRY_BACKOFF_MS = 1200L
+        private const val RAW_RETRY_BACKOFF_MS = 1500L
 
         private val bitmapMemoryCache: MutableMap<String, Bitmap> = mutableMapOf()
+
+        // ── Benchmark infrastructure (TJLabsResourceBenchmark 가 토글) ───────────────────
+        // production 흐름에는 영향 없음 — flag 가 false 이면 어느 함수도 분기 안 함.
+        //  * [benchmarkCsvParserMode] : SINGLE_PASS (default) → 현재 production 파서
+        //    LEGACY_REGEX → Phase 4 이전의 regex 기반 파서 ([parsePathPixelDataLegacy]) 호출.
+        //  * [benchmarkTimingEnabled] : true 면 extract/decode/parse 단계마다 nanoTime 차이를
+        //    [benchmarkStageTimings] 에 누적. iteration 간 reset 필요.
+        @Volatile internal var benchmarkCsvParserMode: com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceBenchmark.CsvParserMode =
+            com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceBenchmark.CsvParserMode.SINGLE_PASS
+        @Volatile internal var benchmarkTimingEnabled: Boolean = false
+        internal val benchmarkStageTimings = com.tjlabs.tjlabsresource_sdk_android.BenchmarkStageTimingCollector()
     }
 
-    private fun buildSnapshotCacheKey(bundleType: ResourceBundleType, sectorId: Int): String {
-        return "${buildCacheNamespace()}_${bundleType.name}_$sectorId"
+    private fun buildSnapshotCacheKey(
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        useLegacyEndpoint: Boolean = false
+    ): String {
+        val suffix = if (useLegacyEndpoint) "_v1" else ""
+        return "${buildCacheNamespace()}_${bundleType.name}_${sectorId}${suffix}"
     }
 
     /**
@@ -229,6 +278,25 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
+     * iOS parity — `resetMultiState` 매핑.
+     *
+     * **메모리 bundleCache 만** 초기화 (디스크 조합 zip / raw / csv / prefs 유지).
+     * Multi 로더가 `loadResources` 진입 시 호출해 "**새 로드 = 전역 교체**" 정책을 구현한다.
+     *   - iOS 는 멀티 로드 시 이전 조합의 섹터 데이터를 전부 제거 (`resetMultiState`),
+     *     요청 섹터만 다시 채운다.
+     *   - Android bundleCache 는 섹터별 key 로 companion static — 다른 조합 로드하면
+     *     이전 섹터 데이터가 남아 메모리 누적 가능. 이 함수로 멀티 진입 시 전역 교체.
+     *
+     * 디스크 캐시 (CSV / 이미지 / 조합 zip LRU) 는 유지 — Multi 로더가 조합 캐시 LRU 를
+     * 별도 관리하므로 메모리만 리셋해도 충분. 단일 섹터 흐름 (`loadJupiterResource`) 은
+     * sectorId 별 교체가 자동 (`bundleCache[key] = enriched` 로 덮어씀) 이라 이 함수를 호출 X.
+     */
+    internal fun resetMultiBundleCache() {
+        bundleCache.clear()
+        bitmapMemoryCache.clear()
+    }
+
+    /**
      * 메모리 + 디스크 캐시(번들 raw json, csv, image, prefs)를 모두 비웁니다.
      * sectorId 가 null 이면 모든 sector 데이터를 비웁니다.
      */
@@ -288,12 +356,23 @@ internal class TJLabsBundleDataManager {
      * ([getSavedBundleMetaIfFresh] 가 항상 null → 항상 meta API 호출 후 version 비교).
      * TJLabsResourceManager 는 이 문자열로 `fromCache` 를 판정 (network_raw 포함 여부).
      */
+    /**
+     * @param useLegacyEndpoint true 면 v1 (2026-09-10 JSON) endpoint 강제 호출.
+     *  벤치마크/비교 전용 — 메모리·디스크 캐시 lookup 을 완전 스킵하고 매 호출마다 fresh fetch 한다.
+     *  이 flag 는 JUPITER 에서만 의미가 있고, VENUS/WARP 는 무시 (해당 flow 는 legacy 를 그대로 씀).
+     */
     fun loadBundle(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int,
         imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy =
             com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy.ALL,
+        useLegacyEndpoint: Boolean = false,
+        // 2026-10 iOS 4-2 오프라인 폴백 규칙 포팅. 기본 false — meta HTTP 또는 raw zip 다운로드가
+        // 실패해도 디스크의 저장된 bundle zip 이 있으면 그걸로 재조립해 소비자에게 전달한다
+        // (versionVerified=false). true 면 폴백 생략하고 원 실패를 그대로 전달 — 운영자가 강제 갱신
+        // 의도로 호출하는 경로 (예: 설정 화면의 "리소스 다시 받기") 용.
+        forceUpdate: Boolean = false,
         completion: (Boolean, String, BundleDataSnapshot?, String) -> Unit
     ) {
         val loadStartMs = nowMs()
@@ -383,20 +462,52 @@ internal class TJLabsBundleDataManager {
         }
 
         fun proceedWithMeta(meta: SectorBundleMetaOutput, metaSource: String) {
-            val cacheKey = buildSnapshotCacheKey(bundleType, sectorId)
-            val cached = bundleCache[cacheKey]
+            val cacheKey = buildSnapshotCacheKey(bundleType, sectorId, useLegacyEndpoint)
+            // v1 (useLegacyEndpoint=true) 는 벤치마크 fresh 경로 — memory cache 도 우회.
+            val cached = if (useLegacyEndpoint) null else bundleCache[cacheKey]
             if (cached != null && cached.versionId == meta.version_id) {
                 applyCounts(cached)
                 finish(true, "(TJLabsResource) Success : use cached bundle", cached, "${metaSource}+memory_cache")
                 return
             }
 
-            // 디스크 캐시 읽기 + JSON 파싱은 IO 스레드에서 수행, 메인 스레드 점유 제거
+            // 파싱/네트워크 IO 는 IO 스레드에서 수행, 메인 스레드 점유 제거.
             CoroutineScope(Dispatchers.IO).launch {
-                val cachedRaw = loadBundleRawFromCache(application, bundleType, sectorId, meta)
-                if (cachedRaw != null) {
+                val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+
+                // v2 zip 흐름 전용: zip 을 로컬 디렉토리에 풀어 개별 자원 파일로 노출. 실패 시 null →
+                // enrichCsvData 가 zipPath fallback (또는 URL fetch) 로 진행한다.
+                //
+                // @param forceReExtract fresh download 이후에는 zip 내용이 새 version 으로 덮어써졌으므로
+                //   기존 extract 는 무조건 stale — marker 존재 여부와 무관하게 다시 풀어야 한다.
+                //   disk-cache hit (같은 version 이 확정된 zip) 경우에만 marker 존재 시 재사용 최적화가 유효.
+                fun ensureExtractedAssetsRoot(zipFile: File, forceReExtract: Boolean = false): File? {
+                    if (!isV2ZipFlow) return null
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    if (!forceReExtract) {
+                        val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
+                        if (marker.exists() && marker.length() > 0) return extractRoot
+                    }
+                    return extractBundleZipToDisk(application, sectorId, zipFile)
+                }
+
+                fun bundleZipPathIfJupiter(file: File): String? =
+                    // v1 응답은 zip 이 아닌 JSON — zip entry read 를 하지 않도록 null.
+                    if (isV2ZipFlow) file.absolutePath else null
+
+                // ── 1) 디스크 캐시: version_id · url 이 일치하면 그대로 재사용. v1 은 스킵.
+                val cachedFile = if (useLegacyEndpoint) null else loadBundleRawFromCache(application, bundleType, sectorId, meta)
+                if (cachedFile != null) {
                     val parseCacheStartMs = nowMs()
-                    val parsedFromCache = parseBundleRaw(bundleType, sectorId, meta, cachedRaw)
+                    val extractedRoot = ensureExtractedAssetsRoot(cachedFile)
+                    val bundleJson = readBundleJsonFromFile(bundleType, sectorId, cachedFile, useLegacyEndpoint, extractedRoot)
+                    val parsedFromCache = bundleJson?.let {
+                        parseBundleRaw(
+                            bundleType, sectorId, meta, it,
+                            bundleZipPathIfJupiter(cachedFile),
+                            extractedRoot?.absolutePath
+                        )
+                    }
                     parseMs = elapsedMs(parseCacheStartMs)
                     if (parsedFromCache != null) {
                         val enrichStartMs = nowMs()
@@ -404,28 +515,64 @@ internal class TJLabsBundleDataManager {
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
-                            finish(csvSuccess, "(TJLabsResource) Success : use cached bundle(raw)", enriched, "${metaSource}+disk_raw")
+                            val statusLabel = if (csvSuccess) "Success" else "Partial-fail(DR path CSV missing)"
+                            finish(csvSuccess, "(TJLabsResource) $statusLabel : use cached bundle(raw)", enriched, "${metaSource}+disk_raw")
                         }
                         return@launch
                     }
                 }
 
-                // 디스크 캐시 미스 → 네트워크 fetch (Retrofit 콜백은 Main 스레드에서 옴)
+                // ── 2) 캐시 미스: URL 로부터 zip/JSON 을 스트리밍 다운로드해 디스크 캐시에 저장.
                 val rawStartMs = nowMs()
-                requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
+                downloadBundleFile(application, bundleType, sectorId, meta.url, useLegacyEndpoint) { rawStatus, rawMsg, downloadedFile ->
                     rawFetchMs = elapsedMs(rawStartMs)
-                    if ((rawStatus in 200 until 300) == false || raw.isNullOrEmpty()) {
-                        finish(false, rawMsg, null, "${metaSource}+raw_fail")
-                        return@requestBundleRaw
+                    if ((rawStatus in 200 until 300) == false || downloadedFile == null) {
+                        // iOS 4-2 오프라인 폴백: meta 는 성공했지만 raw 다운로드가 실패 (네트워크 끊김,
+                        // 5xx, 서버 bundle 삭제 등). forceUpdate=false 이고 디스크에 이전 zip 이 있으면
+                        // 그걸로 재조립해 성공으로 전달. 저장된 version 과 서버 meta.version_id 가 다를
+                        // 수도 있지만 (서버에 더 새 버전 있음) 신뢰성 우선 — versionVerified=false 표기.
+                        if (!forceUpdate) {
+                            TJResourceLogger.w(
+                                "(TJLabsResource) raw download failed — trying offline fallback // type=$bundleType // sectorId=$sectorId // rawStatus=$rawStatus // rawMsg=$rawMsg"
+                            )
+                            loadBundleFromCachedFile(application, bundleType, sectorId, useLegacyEndpoint, imageLoadPolicy) { fallbackSnapshot ->
+                                if (fallbackSnapshot != null) {
+                                    bundleCache[cacheKey] = fallbackSnapshot
+                                    applyCounts(fallbackSnapshot)
+                                    finish(
+                                        true,
+                                        "(TJLabsResource) fallback(raw_fail): use cached bundle // versionVerified=false // version=${fallbackSnapshot.versionId} // serverVersion=${meta.version_id}",
+                                        fallbackSnapshot,
+                                        "${metaSource}+fallback_raw_fail"
+                                    )
+                                } else {
+                                    finish(false, rawMsg, null, "${metaSource}+raw_fail")
+                                }
+                            }
+                        } else {
+                            finish(false, rawMsg, null, "${metaSource}+raw_fail")
+                        }
+                        return@downloadBundleFile
                     }
 
-                    CoroutineScope(Dispatchers.IO).launch {
+                    // 라벨 지정: 바깥 IO launch 와 구분해 [return@parseLaunch] 로 이 launch 만 종료.
+                    CoroutineScope(Dispatchers.IO).launch parseLaunch@{
                         val parseRawStartMs = nowMs()
-                        val parsed = parseBundleRaw(bundleType, sectorId, meta, raw)
+                        // fresh download: zip 내용이 새 version 으로 덮어써졌으므로 반드시 재-extract.
+                        // 이전 version 의 extracted/ 파일들이 남아 있으면 stale 데이터로 파싱될 수 있다.
+                        val extractedRoot = ensureExtractedAssetsRoot(downloadedFile, forceReExtract = true)
+                        val bundleJson = readBundleJsonFromFile(bundleType, sectorId, downloadedFile, useLegacyEndpoint, extractedRoot)
+                        val parsed = bundleJson?.let {
+                            parseBundleRaw(
+                                bundleType, sectorId, meta, it,
+                                bundleZipPathIfJupiter(downloadedFile),
+                                extractedRoot?.absolutePath
+                            )
+                        }
                         parseMs = elapsedMs(parseRawStartMs)
                         if (parsed == null) {
                             finishOnMain(false, "(TJLabsResource) Error : parse bundle raw", null, "${metaSource}+parse_fail")
-                            return@launch
+                            return@parseLaunch
                         }
 
                         val enrichStartMs = nowMs()
@@ -433,51 +580,90 @@ internal class TJLabsBundleDataManager {
                             enrichMs = elapsedMs(enrichStartMs)
                             bundleCache[cacheKey] = enriched
                             applyCounts(enriched)
-                            // 1) prefs 는 동기로 즉시 기록 → 다음 호출이 freshness shortcut 적중
-                            saveBundleMetaPrefs(application, bundleType, sectorId, meta.version_id, meta.url, null)
-                            // 2) raw json 파일 디스크 쓰기는 비동기 (큰 IO, 메인 콜백 블로킹 회피)
-                            CoroutineScope(Dispatchers.IO).launch {
-                                saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
+                            // v1 은 pref 캐시 오염 방지 — v2 만 다음 호출을 위한 shortcut 을 심는다.
+                            if (!useLegacyEndpoint) {
+                                saveBundleMetaPrefs(application, bundleType, sectorId, meta.version_id, meta.url, downloadedFile.absolutePath)
+                                // v2 network_raw 성공 시점에 legacy per-file 캐시(orphan) 를 정리.
+                                pruneLegacyPerFileCache(application, sectorId)
                             }
-                            finish(csvSuccess, "(TJLabsResource) Success : load bundle", enriched, "${metaSource}+network_raw")
+                            val statusLabel = if (csvSuccess) "Success" else "Partial-fail(DR path CSV missing)"
+                            finish(csvSuccess, "(TJLabsResource) $statusLabel : load bundle", enriched, "${metaSource}+network_raw")
                         }
                     }
                 }
             }
         }
 
-        // Fast-path: 메모리 스냅샷 + freshness window 적중 시, meta HTTP 와 디스크 IO 모두 스킵
-        val cacheKeyForFastPath = buildSnapshotCacheKey(bundleType, sectorId)
-        val inMemorySnapshot = bundleCache[cacheKeyForFastPath]
-        if (inMemorySnapshot != null) {
-            val cachedMetaFast = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
-            if (cachedMetaFast != null && cachedMetaFast.version_id == inMemorySnapshot.versionId) {
-                applyCounts(inMemorySnapshot)
-                finish(true, "(TJLabsResource) Success : use cached bundle (fastpath)", inMemorySnapshot, "memory_fastpath")
+        // Fast-path: 메모리 스냅샷 + freshness window 적중 시, meta HTTP 와 디스크 IO 모두 스킵.
+        // v1 (useLegacyEndpoint=true) 은 벤치마크 목적이라 fastpath 자체를 스킵해 매 호출마다 실 트래픽을 발생시킨다.
+        if (!useLegacyEndpoint) {
+            val cacheKeyForFastPath = buildSnapshotCacheKey(bundleType, sectorId, useLegacyEndpoint = false)
+            val inMemorySnapshot = bundleCache[cacheKeyForFastPath]
+            if (inMemorySnapshot != null) {
+                val cachedMetaFast = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
+                if (cachedMetaFast != null && cachedMetaFast.version_id == inMemorySnapshot.versionId) {
+                    applyCounts(inMemorySnapshot)
+                    finish(true, "(TJLabsResource) Success : use cached bundle (fastpath)", inMemorySnapshot, "memory_fastpath")
+                    return
+                }
+            }
+
+            val cachedMeta = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
+            if (cachedMeta != null) {
+                // metaMs 는 0 (네트워크 호출 없음) — prefs hit
+                metaMs = 0L
+                proceedWithMeta(cachedMeta, "pref_meta")
                 return
             }
         }
 
-        val cachedMeta = getSavedBundleMetaIfFresh(application, bundleType, sectorId)
-        if (cachedMeta != null) {
-            // metaMs 는 0 (네트워크 호출 없음) — prefs hit
-            metaMs = 0L
-            proceedWithMeta(cachedMeta, "pref_meta")
-            return
-        }
-
         val metaStartMs = nowMs()
-        requestBundleMeta(bundleType, sectorId) { metaStatus, metaMsg, meta ->
+        requestBundleMeta(bundleType, sectorId, useLegacyEndpoint) { metaStatus, metaMsg, meta ->
             metaMs = elapsedMs(metaStartMs)
             if ((metaStatus in 200 until 300) == false || meta == null) {
-                finish(false, metaMsg, null, "meta_fail")
+                // iOS 4-2 오프라인 폴백: forceUpdate=false 이고 디스크에 저장된 bundle zip 이
+                // 있으면 그걸로 재조립해 성공으로 전달. forceUpdate=true 면 폴백 생략.
+                if (!forceUpdate) {
+                    TJResourceLogger.w(
+                        "(TJLabsResource) meta failed — trying offline fallback // type=$bundleType // sectorId=$sectorId // metaStatus=$metaStatus // metaMsg=$metaMsg"
+                    )
+                    loadBundleFromCachedFile(application, bundleType, sectorId, useLegacyEndpoint, imageLoadPolicy) { fallbackSnapshot ->
+                        if (fallbackSnapshot != null) {
+                            val fallbackCacheKey = buildSnapshotCacheKey(bundleType, sectorId, useLegacyEndpoint)
+                            bundleCache[fallbackCacheKey] = fallbackSnapshot
+                            applyCounts(fallbackSnapshot)
+                            finish(
+                                true,
+                                "(TJLabsResource) fallback(meta_fail): use cached bundle // versionVerified=false // version=${fallbackSnapshot.versionId}",
+                                fallbackSnapshot,
+                                "fallback+meta_fail"
+                            )
+                        } else {
+                            finish(false, metaMsg, null, "meta_fail")
+                        }
+                    }
+                } else {
+                    finish(false, metaMsg, null, "meta_fail")
+                }
                 return@requestBundleMeta
             }
-            saveBundleMetaTimestamp(application, bundleType, sectorId, nowMs())
+            if (!useLegacyEndpoint) saveBundleMetaTimestamp(application, bundleType, sectorId, nowMs())
             proceedWithMeta(meta, "network_meta")
         }
     }
 
+    /**
+     * 2026-09-28+ 흐름 — simulations 는 sector 번들 zip 안에 들어 있다.
+     *
+     * 1) meta 를 얻어 version_id 를 서버 기준으로 확정
+     * 2) 디스크에 캐시된 zip (version 일치) 을 재사용하거나, 없으면 새로 스트리밍 다운로드
+     * 3) zip 안 `sectors/{id}/bundle.json` 을 읽어 simulations 항목을 파싱
+     * 4) 각 simulation JSON entry (`sectors/{id}/assets/simulations/{dr|pdr}/{name}.json`) 를
+     *    로컬 디스크로 extract 후 [SimulationItemOutput.url] 을 로컬 파일 경로로 갱신
+     *
+     * 소비자는 갱신된 url 을 File 로 열어 내용을 읽으면 된다 (HTTP GET 아님). VENUS/WARP 는 simulations
+     * 응답 자체가 없으므로 JUPITER 만 지원.
+     */
     fun loadSimulationData(
         application: Application,
         sectorId: Int,
@@ -490,58 +676,76 @@ internal class TJLabsBundleDataManager {
                 return@requestBundleMeta
             }
 
-            loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedRaw ->
-                val parsed = parseSimulationsFromRaw(cachedRaw)
-                if (parsed != null) {
-                    downloadSimulationFiles(application, sectorId, meta.version_id, parsed) { downloadSuccess ->
-                        completion(
-                            downloadSuccess,
-                            if (downloadSuccess) {
-                                "(TJLabsResource) Success : load simulation from cache"
-                            } else {
-                                "(TJLabsResource) Failure : download simulation files from cache"
-                            },
-                            parsed
-                        )
+            // @param freshlyDownloaded true 면 zip 이 방금 새 version 으로 덮어써져서 기존 extracted/ 는
+            //   stale — 반드시 재-extract. false 는 disk cache hit 로 zip 내용이 안 바뀐 상태 → 기존 extract 재사용 가능.
+            fun onZipReady(zipFile: File, freshlyDownloaded: Boolean) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
+                    val assetsRoot = if (!freshlyDownloaded && marker.exists() && marker.length() > 0) {
+                        extractRoot
+                    } else {
+                        extractBundleZipToDisk(application, sectorId, zipFile)
                     }
-                    return@requestBundleMeta
+                    val bundleJson = readBundleJsonFromFile(bundleType, sectorId, zipFile, useLegacyEndpoint = false, extractedRoot = assetsRoot)
+                    if (bundleJson.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            completion(false, "(TJLabsResource) Error : read bundle.json from zip", null)
+                        }
+                        return@launch
+                    }
+                    val parsed = parseSimulationsFromRaw(bundleJson)
+                    if (parsed == null) {
+                        withContext(Dispatchers.Main) {
+                            completion(false, "(TJLabsResource) Error : simulations not found", null)
+                        }
+                        return@launch
+                    }
+                    val extracted = extractSimulationsFromZip(application, sectorId, zipFile, assetsRoot, parsed)
+                    withContext(Dispatchers.Main) {
+                        completion(true, "(TJLabsResource) Success : load simulation", extracted)
+                    }
                 }
             }
 
-            requestBundleRaw(bundleType, meta.url) { rawStatus, rawMsg, raw ->
-                if ((rawStatus in 200 until 300) == false || raw.isNullOrBlank()) {
-                    completion(false, rawMsg, null)
-                    return@requestBundleRaw
-                }
+            // 1) 캐시된 zip 재사용 (version 매치 확정 → zip 내용 안 바뀜 → extract 재사용 OK)
+            loadBundleRawFromCache(application, bundleType, sectorId, meta)?.let { cachedZip ->
+                onZipReady(cachedZip, freshlyDownloaded = false)
+                return@requestBundleMeta
+            }
 
-                saveBundleRawCache(application, bundleType, sectorId, meta.version_id, meta.url, raw)
-                val parsed = parseSimulationsFromRaw(raw)
-                if (parsed != null) {
-                    downloadSimulationFiles(application, sectorId, meta.version_id, parsed) { downloadSuccess ->
-                        completion(
-                            downloadSuccess,
-                            if (downloadSuccess) {
-                                "(TJLabsResource) Success : load simulation"
-                            } else {
-                                "(TJLabsResource) Failure : download simulation files"
-                            },
-                            parsed
-                        )
-                    }
-                } else {
-                    completion(false, "(TJLabsResource) Error : simulations not found", null)
+            // 2) 새로 다운로드 (zip 이 새 version 으로 덮어써짐 → 기존 extract 는 stale)
+            downloadBundleFile(application, bundleType, sectorId, meta.url) { rawStatus, rawMsg, downloadedFile ->
+                if ((rawStatus in 200 until 300) == false || downloadedFile == null) {
+                    completion(false, rawMsg, null)
+                    return@downloadBundleFile
                 }
+                // 다운로드 완료 → prefs 를 즉시 갱신해 다음 호출이 캐시 히트하도록.
+                saveBundleMetaPrefs(application, bundleType, sectorId, meta.version_id, meta.url, downloadedFile.absolutePath)
+                onZipReady(downloadedFile, freshlyDownloaded = true)
             }
         }
     }
 
+    /**
+     * @param retriesLeft transient 실패 (502/503/504/IOException) 시 자동 재시도 회수. 기본 1회.
+     *  proxy 뒤 upstream 이 first-request 빌드로 timeout 걸린 케이스는 대부분 다음 호출에서 캐시 히트해 성공.
+     *  auth 실패나 4xx (권한/스펙 오류) 는 재시도 무의미 → skip.
+     */
     private fun requestBundleMeta(
         bundleType: ResourceBundleType,
         sectorId: Int,
+        useLegacyEndpoint: Boolean = false,
+        retriesLeft: Int = 1,
         completion: (Int, String, SectorBundleMetaOutput?) -> Unit
     ) {
         val baseUrl = TJLabsResourceNetworkConstants.getBaseUrl(bundleType)
-        val serverVersion = TJLabsResourceNetworkConstants.getBundleServerVersion(bundleType)
+        val serverVersion = if (useLegacyEndpoint && bundleType == ResourceBundleType.JUPITER) {
+            // v1 강제 — 프리즈된 2026-09-10 버전으로 legacy /sectors/{pk}/bundle JSON endpoint 호출.
+            LEGACY_JUPITER_SECTOR_BUNDLE_SERVER_VERSION
+        } else {
+            TJLabsResourceNetworkConstants.getBundleServerVersion(bundleType)
+        }
         val env = TJLabsResourceNetworkConstants.getCurrentEnv()
         TJResourceLogger.d(
             "(TJLabsResource) request bundle meta // type=$bundleType // env=$env // baseUrl=$baseUrl // version=$serverVersion // sectorId=$sectorId"
@@ -571,12 +775,39 @@ internal class TJLabsBundleDataManager {
             } else {
                 when (bundleType) {
                     ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
-                    ResourceBundleType.JUPITER, ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+                    ResourceBundleType.JUPITER -> if (useLegacyEndpoint) {
+                        // v1 강제: 프리즈된 legacy JSON endpoint (`/{2026-09-10}/sectors/{pk}/bundle`).
+                        api.getSectorBundle(serverVersion, sectorId)
+                    } else {
+                        // 2026-09-28+: 신 통합 endpoint (`/sectors/bundle?sector_ids=...`) + zip 응답.
+                        // SDK 는 sector 단위 API 이므로 `[sectorId]` 단일 원소 배열로 요청 — 조합 고정 원칙(문서 6번)
+                        // 을 준수해 조합별 재빌드 지연을 피한다.
+                        api.getSectorBundleV2(serverVersion, listOf(sectorId))
+                    }
+                    // WARP 는 별도 인프라(.warp.tjlabs.dev, server_version=2026-04-27) 라 zip 스펙 미적용 → 기존 endpoint 유지.
+                    ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
                 }
             }
+            fun scheduleRetry(reason: String) {
+                TJResourceLogger.w(
+                    "(TJLabsResource) request bundle meta transient failure → retry in ${META_RETRY_BACKOFF_MS}ms // sectorId=$sectorId // reason=$reason // retriesLeft=$retriesLeft"
+                )
+                CoroutineScope(Dispatchers.IO).launch {
+                    delay(META_RETRY_BACKOFF_MS)
+                    requestBundleMeta(bundleType, sectorId, useLegacyEndpoint, retriesLeft - 1, completion)
+                }
+            }
+
             call.enqueue(object : Callback<SectorBundleMetaOutput> {
                 override fun onFailure(call: Call<SectorBundleMetaOutput>, t: Throwable) {
-                    TJResourceLogger.d("(TJLabsResource) request bundle meta fail // type=$bundleType // sectorId=$sectorId // error=${t.localizedMessage}")
+                    // network exception (socket timeout / dns / unreachable) — 대개 transient. 남은 재시도 있으면 시도.
+                    if (retriesLeft > 0) {
+                        scheduleRetry("onFailure: ${t.javaClass.simpleName}: ${t.localizedMessage}")
+                        return
+                    }
+                    TJResourceLogger.w(
+                        "(TJLabsResource) request bundle meta fail // type=$bundleType // sectorId=$sectorId // error=${t.javaClass.simpleName}: ${t.localizedMessage}"
+                    )
                     completion(500, "(TJLabsResource) Failure : getSectorBundleMeta", null)
                 }
 
@@ -588,22 +819,42 @@ internal class TJLabsBundleDataManager {
                             "(TJLabsResource) request bundle meta success // type=$bundleType // sectorId=$sectorId // status=$status // versionId=${body?.version_id} // url=${body?.url}"
                         )
                         completion(status, "(TJLabsResource) Success : getSectorBundleMeta", body)
-                    } else {
-                        val errorBody = try { response.errorBody()?.string() } catch (_: Exception) { "read_error" }
-                        TJResourceLogger.d(
-                            "(TJLabsResource) request bundle meta error // type=$bundleType // sectorId=$sectorId // status=$status // errorBody=$errorBody"
-                        )
-                        completion(status, "(TJLabsResource) Error : getSectorBundleMeta", null)
+                        return
                     }
+                    val errorBody = (try { response.errorBody()?.string() } catch (_: Exception) { null }).orEmpty()
+                    // 502 Bad Gateway / 503 Service Unavailable / 504 Gateway Timeout — proxy 앞단이 upstream 응답을
+                    // 못 기다리고 끊었을 때. 다음 요청은 upstream rebuild 가 끝나 캐시 히트할 확률이 높으므로 재시도.
+                    val isTransient = status in 502..504
+                    if (isTransient && retriesLeft > 0) {
+                        scheduleRetry("status=$status errorBody=${errorBody.take(200)}")
+                        return
+                    }
+                    TJResourceLogger.w(
+                        "(TJLabsResource) request bundle meta error // type=$bundleType // sectorId=$sectorId // status=$status // errorBody=${errorBody.take(300)}"
+                    )
+                    completion(status, "(TJLabsResource) Error : getSectorBundleMeta", null)
                 }
             })
         }
     }
 
-    private fun requestBundleRaw(
+    /**
+     * bundle 파일(JUPITER: zip, VENUS/WARP: JSON) 을 원격 URL 로부터 로컬 캐시 파일로 스트리밍한다.
+     *
+     * zip 은 sector 당 40MB 급이라 `ResponseBody.string()` 으로 메모리에 통째로 올리면 부담이 크다.
+     * 여기선 [Retrofit] 을 거치지 않고 [HttpURLConnection] 으로 직접 열어 InputStream 을 파일로 흘려보낸다.
+     * (인증 헤더 · path prefix 는 meta 응답의 url 이 이미 온전히 포함하고 있어 재조립 불필요.)
+     *
+     * 성공 시 target [File] 을 그대로 넘기고, 이후 소비자가 [readBundleJsonFromFile] 로 bundle.json 을 얻는다.
+     */
+    private fun downloadBundleFile(
+        application: Application,
         bundleType: ResourceBundleType,
+        sectorId: Int,
         bundleUrl: String,
-        completion: (Int, String, String?) -> Unit
+        useLegacyEndpoint: Boolean = false,
+        retriesLeft: Int = 1,
+        completion: (Int, String, File?) -> Unit
     ) {
         val env = TJLabsResourceNetworkConstants.getCurrentEnv()
         val effectiveUrl = applyBaseUrlPathPrefix(TJLabsResourceNetworkConstants.getBaseUrl(bundleType), bundleUrl)
@@ -611,36 +862,79 @@ internal class TJLabsBundleDataManager {
             TJResourceLogger.d("(TJLabsResource) request bundle raw url rewrite: $bundleUrl -> $effectiveUrl")
         }
         TJResourceLogger.d("(TJLabsResource) request bundle raw // type=$bundleType // env=$env // url=$effectiveUrl")
-        val retrofit = TJLabsResourceNetworkConstants.genPlainRetrofit(TJLabsResourceNetworkConstants.getBaseUrl(bundleType))
-        val api = retrofit.create(PostInput::class.java)
-        api.getSectorBundleJsonRaw(effectiveUrl).enqueue(object : Callback<okhttp3.ResponseBody> {
-            override fun onFailure(call: Call<okhttp3.ResponseBody>, t: Throwable) {
-                TJResourceLogger.d("(TJLabsResource) request bundle raw fail // url=$bundleUrl // error=${t.localizedMessage}")
-                completion(500, "(TJLabsResource) Failure : getSectorBundleJsonRaw", null)
+
+        val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
+        if (cacheDir.exists().not()) cacheDir.mkdirs()
+        val dstFile = File(cacheDir, buildBundleRawFileName(bundleType, sectorId, useLegacyEndpoint))
+
+        fun scheduleRawRetry(reason: String) {
+            TJResourceLogger.w(
+                "(TJLabsResource) request bundle raw transient failure → retry in ${RAW_RETRY_BACKOFF_MS}ms // sectorId=$sectorId // reason=$reason // retriesLeft=$retriesLeft"
+            )
+            CoroutineScope(Dispatchers.IO).launch {
+                delay(RAW_RETRY_BACKOFF_MS)
+                downloadBundleFile(application, bundleType, sectorId, bundleUrl, useLegacyEndpoint, retriesLeft - 1, completion)
+            }
+        }
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = URL(effectiveUrl).openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 60_000
+            connection.connect()
+            val status = connection.responseCode
+            if ((status in 200 until 300).not()) {
+                val errorBody = try {
+                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                } catch (_: Exception) {
+                    ""
+                }
+                // 502/503/504 는 대개 proxy 앞단이 upstream 을 못 기다린 케이스 → 다음 요청은 캐시 히트 확률 높음.
+                if (status in 502..504 && retriesLeft > 0) {
+                    runCatching { connection.disconnect() }
+                    scheduleRawRetry("status=$status errorBody=${errorBody.take(200)}")
+                    return
+                }
+                TJResourceLogger.w(
+                    "(TJLabsResource) request bundle raw error // status=$status // url=$effectiveUrl // errorBody=${errorBody.take(300)}"
+                )
+                completion(status, "(TJLabsResource) Error : downloadBundleFile", null)
+                return
             }
 
-            override fun onResponse(call: Call<okhttp3.ResponseBody>, response: Response<okhttp3.ResponseBody>) {
-                val status = response.code()
-                if (status in 200 until 300) {
-                    val raw = response.body()?.string()
+            connection.inputStream.use { input ->
+                FileOutputStream(dstFile).use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var totalRead = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        output.write(buf, 0, n)
+                        totalRead += n
+                    }
                     TJResourceLogger.d(
-                        "(TJLabsResource) request bundle raw success // status=$status // url=$effectiveUrl // rawSize=${raw?.length ?: 0}"
+                        "(TJLabsResource) request bundle raw success // status=$status // url=$effectiveUrl // bytes=$totalRead // dst=${dstFile.absolutePath}"
                     )
-                    completion(status, "(TJLabsResource) Success : getSectorBundleJsonRaw", raw)
-                } else {
-                    val errorBody = try { response.errorBody()?.string() } catch (_: Exception) { "read_error" }
-
-                    TJResourceLogger.d(
-                        "(TJLabsResource) request bundle raw error // code =${call.request()}"
-                    )
-
-                    TJResourceLogger.d(
-                        "(TJLabsResource) request bundle raw error // status=$status // url=$effectiveUrl // errorBody=$errorBody"
-                    )
-                    completion(status, "(TJLabsResource) Error : getSectorBundleJsonRaw", null)
                 }
             }
-        })
+            completion(status, "(TJLabsResource) Success : downloadBundleFile", dstFile)
+        } catch (e: Exception) {
+            runCatching { if (dstFile.exists()) dstFile.delete() }
+            // socket timeout / dns / unreachable — transient 로 취급, 남은 재시도 있으면 시도.
+            if (retriesLeft > 0) {
+                runCatching { connection?.disconnect() }
+                scheduleRawRetry("exception: ${e.javaClass.simpleName}: ${e.localizedMessage}")
+                return
+            }
+            TJResourceLogger.w(
+                "(TJLabsResource) request bundle raw exception // url=$effectiveUrl // error=${e.javaClass.simpleName}: ${e.localizedMessage}"
+            )
+            completion(500, "(TJLabsResource) Failure : downloadBundleFile", null)
+        } finally {
+            runCatching { connection?.disconnect() }
+        }
     }
 
     /**
@@ -684,17 +978,26 @@ internal class TJLabsBundleDataManager {
 
             // path / entrance / image / parking-matches 를 한 번에 fan-out 시켜 병렬 처리
             val parallelStart = nowMs()
-            val pathDeferred = pathTargets.map { (key, url) ->
-                async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, url) }
+            // 2026-09-28+ JUPITER: 그래프 path CSV · parking_matches JSON 은 zip 안의 entry.
+            // 다운로드 시 zip 을 [BundleDataSnapshot.bundleAssetsRoot] 아래에 실제 파일로 풀어두고
+            // 여기서 그 파일을 직접 읽는다 — ZipFile 를 매 read 마다 다시 열지 않아 IO 효율적이고
+            // 디버깅 시 개별 자원을 파일로 열어볼 수 있다. 압축 해제 실패 시엔 zip 을 fallback.
+            val assetsRoot: File? = snapshot.bundleAssetsRoot?.let { File(it) }?.takeIf { it.exists() }
+            val zipFileFallback: File? = snapshot.bundleZipPath?.let { File(it) }?.takeIf { it.exists() }
+
+            val pathDeferred = pathTargets.map { (key, ref) ->
+                async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, ref, assetsRoot, zipFileFallback) }
             }
+            // entrance route CSV 는 zip 스키마에도 포함되지 않는다 (여전히 절대 URL).
             val entranceDeferred = entranceTargets.map { (key, url) ->
                 async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url) }
             }
+            // map_image 는 도면 PNG → 항상 절대 URL. CDN 캐시가 잘 듣는다.
             val imageDeferred = imageTargets.map { (key, url) ->
                 async { key to loadImageWithCache(application, sectorId, snapshot.versionId, key, url) }
             }
-            val parkingMatchesDeferred = parkingMatchesTargets.map { (levelId, url) ->
-                async { levelId to fetchParkingMatchesData(application, sectorId, snapshot.versionId, levelId, url) }
+            val parkingMatchesDeferred = parkingMatchesTargets.map { (levelId, ref) ->
+                async { levelId to fetchParkingMatchesData(application, sectorId, snapshot.versionId, levelId, ref, assetsRoot, zipFileFallback) }
             }
 
             val pathResults = pathDeferred.awaitAll()
@@ -721,6 +1024,9 @@ internal class TJLabsBundleDataManager {
                 }
             }
 
+            // DR path CSV 실패는 sector 성공 판정에 치명적 (isAllSuccess=false).
+            // 개별 로그 + 마지막에 요약 WARN 을 남겨 어떤 level 이 문제인지 즉시 파악 가능.
+            val failedDrPaths = mutableListOf<String>()
             for ((key, parsed) in pathResults) {
                 if (parsed != null) {
                     pathPixelData[key] = parsed
@@ -728,14 +1034,23 @@ internal class TJLabsBundleDataManager {
                     TJResourceLogger.d { "(TJLabsResource) enrichCsvData optional fail@PathPixelCsv(PDR) // key=$key" }
                 } else {
                     isAllSuccess = false
-                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@PathPixelCsv(DR) // key=$key" }
+                    failedDrPaths.add(key)
+                    TJResourceLogger.w(
+                        "(TJLabsResource) enrichCsvData failed@PathPixelCsv(DR) // key=$key // ref=${snapshot.graphPathUrlsByKey[key]}"
+                    )
                 }
             }
             for ((key, parsed) in entranceResults) {
-                if (parsed != null) entranceRouteData[key] = parsed
-                else {
-                    isAllSuccess = false
-                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData failed@EntranceCsv // key=$key" }
+                if (parsed != null) {
+                    entranceRouteData[key] = parsed
+                } else {
+                    // entrance route CSV 는 zip 밖 절대 URL(2026-09-28+ 에서도 유지) 로 서빙되는
+                    // 보조 자원. 특정 entrance 의 CSV 가 CDN 에 아직 업로드되지 않아 404 로 떨어지는
+                    // 케이스는 실제 운영에서 흔하고 (예: 2026-09-28 DEV 환경에서 sector 111 의
+                    // 몇몇 entrance 파일 누락), 이걸로 sector 로드 전체를 실패시키면 지도·측위·
+                    // 경로탐색까지 못 쓴다. parking_matches 나 PDR path 처럼 optional 로 완화한다.
+                    // 소비자 (jupiter-sdk) 는 entranceRouteDataMap 에 key 부재로 감지 가능.
+                    TJResourceLogger.d { "(TJLabsResource) enrichCsvData optional fail@EntranceCsv // key=$key" }
                 }
             }
             for ((key, image) in imageResults) {
@@ -773,8 +1088,16 @@ internal class TJLabsBundleDataManager {
             )
 
             withContext(Dispatchers.Main) {
-                TJResourceLogger.d {
-                    "(TJLabsResource) enrichCsvData done // success=$isAllSuccess // elapsedMs=${elapsedMs(enrichTotalStartMs)}"
+                if (isAllSuccess) {
+                    TJResourceLogger.d {
+                        "(TJLabsResource) enrichCsvData done // success=true // elapsedMs=${elapsedMs(enrichTotalStartMs)}"
+                    }
+                } else {
+                    // 요약 WARN 으로 어느 자원이 sector 실패를 초래했는지 한 줄 정리 —
+                    // 대부분 DR path CSV 가 zip 안 · extracted 안 · CDN 어디에도 없어 read null 이 원인.
+                    TJResourceLogger.w(
+                        "(TJLabsResource) enrichCsvData done // success=false // elapsedMs=${elapsedMs(enrichTotalStartMs)} // failedDrPaths=${failedDrPaths.size} keys=$failedDrPaths"
+                    )
                 }
                 completion(isAllSuccess, enriched)
             }
@@ -805,7 +1128,7 @@ internal class TJLabsBundleDataManager {
                     val bitmap = BitmapFactory.decodeFile(cachedFile.absolutePath)
                     if (bitmap != null) {
                         bitmapMemoryCache[key] = bitmap
-                        TJResourceLogger.d { "(TJLabsResource) image cache hit // key=$key // path=${cachedFile.absolutePath}" }
+                        // 개별 hit 로그 제거 — enrichCsvData 요약에서 imageCount 로 집계됨.
                         return bitmap
                     }
                 } catch (e: Exception) {
@@ -827,7 +1150,7 @@ internal class TJLabsBundleDataManager {
                 .putString(urlKey, url)
                 .putString(fileKey, outFile.absolutePath)
                 .apply()
-            TJResourceLogger.d { "(TJLabsResource) image cache save // key=$key // path=${outFile.absolutePath}" }
+            // 개별 save 로그 제거 — 반복 노이즈.
         } catch (e: Exception) {
             TJResourceLogger.d { "(TJLabsResource) image cache save fail // key=$key // error=${e.localizedMessage}" }
         }
@@ -845,68 +1168,103 @@ internal class TJLabsBundleDataManager {
         return "$normalized.png"
     }
 
+    /**
+     * path CSV 를 읽어 [PathPixelData] 로 파싱.
+     *
+     * @param ref 스키마별 참조: zip 스키마이면 zip entry 경로(예: `sectors/111/.../dr.csv`),
+     *  legacy 면 절대 URL.
+     * @param assetsRoot 압축 해제된 자원 디렉토리. non-null 이면 `<assetsRoot>/<ref>` 에서 파일로 직접 read.
+     * @param zipFileFallback assetsRoot 에서 파일이 없거나 실패했을 때 열어볼 zip 파일 (동일 zip). 둘 다
+     *  null 이면 URL fetch (legacy 흐름).
+     */
     private fun fetchPathPixelData(
         application: Application,
         sectorId: Int,
         versionId: String,
         key: String,
-        url: String
+        ref: String,
+        assetsRoot: File?,
+        zipFileFallback: File?
     ): PathPixelData? {
         val startMs = nowMs()
-        TJResourceLogger.d("(TJLabsResource) fetchPathPixelData start // key=$key // url=$url")
-        val text = getCsvTextWithCache(
-            application = application,
-            sectorId = sectorId,
-            versionId = versionId,
-            key = key,
-            url = url,
-            source = "pathPixel:$key",
-            versionPrefix = PREF_PATH_VERSION_PREFIX,
-            urlPrefix = PREF_PATH_URL_PREFIX,
-            filePrefix = PREF_PATH_FILE_PREFIX
-        ) ?: run {
-            TJResourceLogger.d("(TJLabsResource) perf fetchPathPixelData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
+        val text = when {
+            assetsRoot != null -> {
+                val f = File(assetsRoot, ref)
+                if (f.exists() && f.length() > 0) f.readText()
+                else zipFileFallback?.let { readZipEntryText(it, ref) }
+            }
+            zipFileFallback != null -> readZipEntryText(zipFileFallback, ref)
+            else -> getCsvTextWithCache(
+                application = application,
+                sectorId = sectorId,
+                versionId = versionId,
+                key = key,
+                url = ref,
+                source = "pathPixel:$key",
+                versionPrefix = PREF_PATH_VERSION_PREFIX,
+                urlPrefix = PREF_PATH_URL_PREFIX,
+                filePrefix = PREF_PATH_FILE_PREFIX
+            )
+        } ?: run {
+            TJResourceLogger.d("(TJLabsResource) fetchPathPixelData FAIL // key=$key // elapsedMs=${elapsedMs(startMs)}")
             return null
         }
-        val parsed = parsePathPixelData(text)
-        TJResourceLogger.d(
-            "(TJLabsResource) fetchPathPixelData success // key=$key // points=${parsed.road.firstOrNull()?.size ?: 0} // elapsedMs=${elapsedMs(startMs)}"
-        )
-        return parsed
+        // Benchmark 토글 — flag OFF 면 production 흐름 (single-pass).
+        val parseStartNs = if (benchmarkTimingEnabled) System.nanoTime() else 0L
+        val result = when (benchmarkCsvParserMode) {
+            com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceBenchmark.CsvParserMode.LEGACY_REGEX ->
+                parsePathPixelDataLegacy(text)
+            com.tjlabs.tjlabsresource_sdk_android.TJLabsResourceBenchmark.CsvParserMode.SINGLE_PASS ->
+                parsePathPixelData(text)
+        }
+        if (benchmarkTimingEnabled) {
+            benchmarkStageTimings.addPathCsvParse((System.nanoTime() - parseStartNs) / 1_000_000)
+        }
+        return result
+        // 성공 케이스는 조용히 진행 — enrichCsvData 최종 요약에서 총계 확인 (`perf enrichCsvData parallel stage`).
     }
 
-    // 2026-08-28 스키마 — level 별 parking-matches JSON 파일을 GET 하여 [ParkingMatchesData] 로 파싱.
-    // url 은 만료 없는 공개 URL 이라 [getCsvTextWithCache] 의 version_id 기반 캐시가 그대로 유효.
+    /**
+     * level 별 parking-matches JSON 을 읽어 [ParkingMatchesData] 로 파싱.
+     * @param ref zip 스키마면 zip entry 경로, legacy 면 절대 URL.
+     * @param assetsRoot 압축 해제된 자원 디렉토리. non-null 이면 파일 read 우선.
+     * @param zipFileFallback extracted 실패 시 fallback zip 파일.
+     */
     private fun fetchParkingMatchesData(
         application: Application,
         sectorId: Int,
         versionId: String,
         levelId: Int,
-        url: String
+        ref: String,
+        assetsRoot: File?,
+        zipFileFallback: File?
     ): ParkingMatchesData? {
         val key = "level_$levelId"
         val startMs = nowMs()
-        TJResourceLogger.d("(TJLabsResource) fetchParkingMatchesData start // levelId=$levelId // url=$url")
-        val text = getCsvTextWithCache(
-            application = application,
-            sectorId = sectorId,
-            versionId = versionId,
-            key = key,
-            url = url,
-            source = "parkingMatches:$key",
-            versionPrefix = PREF_PARKING_MATCHES_VERSION_PREFIX,
-            urlPrefix = PREF_PARKING_MATCHES_URL_PREFIX,
-            filePrefix = PREF_PARKING_MATCHES_FILE_PREFIX,
-            extension = "json"
-        ) ?: run {
-            TJResourceLogger.d("(TJLabsResource) perf fetchParkingMatchesData fail // levelId=$levelId // elapsedMs=${elapsedMs(startMs)}")
+        val text = when {
+            assetsRoot != null -> {
+                val f = File(assetsRoot, ref)
+                if (f.exists() && f.length() > 0) f.readText()
+                else zipFileFallback?.let { readZipEntryText(it, ref) }
+            }
+            zipFileFallback != null -> readZipEntryText(zipFileFallback, ref)
+            else -> getCsvTextWithCache(
+                application = application,
+                sectorId = sectorId,
+                versionId = versionId,
+                key = key,
+                url = ref,
+                source = "parkingMatches:$key",
+                versionPrefix = PREF_PARKING_MATCHES_VERSION_PREFIX,
+                urlPrefix = PREF_PARKING_MATCHES_URL_PREFIX,
+                filePrefix = PREF_PARKING_MATCHES_FILE_PREFIX,
+                extension = "json"
+            )
+        } ?: run {
+            TJResourceLogger.d("(TJLabsResource) fetchParkingMatchesData FAIL // levelId=$levelId // elapsedMs=${elapsedMs(startMs)}")
             return null
         }
-        val parsed = parseParkingMatchesData(text)
-        TJResourceLogger.d(
-            "(TJLabsResource) fetchParkingMatchesData success // levelId=$levelId // count=${parsed?.matches?.size ?: -1} // levelMatch=${parsed?.level_match} // elapsedMs=${elapsedMs(startMs)}"
-        )
-        return parsed
+        return parseParkingMatchesData(text)
     }
 
     // 매칭 파일 포맷: {"level_match":"<user-facing level, e.g., \"3\">", "matches":[{"id":"<uuid>","matchingId":"<string>"}, ...]}
@@ -998,25 +1356,15 @@ internal class TJLabsBundleDataManager {
             val cachedFile = File(savedPath!!)
             if (cachedFile.exists() && cachedFile.length() > 0) {
                 try {
-                    val cachedText = cachedFile.readText()
-                    TJResourceLogger.d(
-                        "(TJLabsResource) csv cache hit // source=$source // key=$key // version=$versionId // path=${cachedFile.absolutePath} // bytes=${cachedText.length}"
-                    )
-                    return cachedText
+                    return cachedFile.readText()
+                    // hit 로그 제거 — 엔트리마다 반복 노이즈. 실패 시에만 로그.
                 } catch (e: Exception) {
                     TJResourceLogger.d(
                         "(TJLabsResource) csv cache read fail // source=$source // key=$key // path=${cachedFile.absolutePath} // error=${e.localizedMessage}"
                     )
                 }
-            } else {
-                TJResourceLogger.d(
-                    "(TJLabsResource) csv cache stale // source=$source // key=$key // path=$savedPath"
-                )
             }
-        } else {
-            TJResourceLogger.d(
-                "(TJLabsResource) csv cache miss // source=$source // key=$key // savedVersion=$savedVersion // newVersion=$versionId"
-            )
+            // stale / miss 개별 로그 제거 — 로드 성공 시 자연스러운 상태.
         }
 
         val downloaded = fetchTextFromUrl(url, source) ?: return null
@@ -1069,9 +1417,7 @@ internal class TJLabsBundleDataManager {
                 .putString(fileKey, csvFile.absolutePath)
                 .apply()
 
-            TJResourceLogger.d(
-                "(TJLabsResource) csv cache save // source=$source // key=$key // version=$versionId // path=${csvFile.absolutePath} // bytes=${content.length}"
-            )
+            // 저장 성공 개별 로그 제거 — 반복 노이즈. 실패만 아래 catch 에서 로그.
         } catch (e: Exception) {
             TJResourceLogger.d(
                 "(TJLabsResource) csv cache save fail // source=$source // key=$key // error=${e.localizedMessage}"
@@ -1114,22 +1460,193 @@ internal class TJLabsBundleDataManager {
         prefs.edit().putLong(tsKey, timestampMs).apply()
     }
 
+    /**
+     * 캐시된 bundle 파일(zip 또는 JSON) 을 반환. version_id / url 이 meta 와 일치할 때만 hit.
+     * JUPITER 는 .zip, VENUS/WARP 는 .json 파일이 반환된다. 호출측이 [readBundleJsonFromFile]
+     * 로 실제 bundle.json 텍스트를 얻는다.
+     */
+    /**
+     * 오프라인 폴백 (iOS `TJLabsMultiResourceManager` 4-2 규칙 포팅).
+     * meta HTTP 또는 raw zip 다운로드가 실패했을 때, 저장된 bundle 메타 (version/path) 로
+     * 디스크 zip 을 그대로 재조립해 snapshot 을 돌려준다. **버전 검증은 하지 않는다**
+     * (서버에 더 새로운 버전이 있을 수 있다는 걸 알면서도 이전 버전으로 서비스를 이어가는 경우).
+     *
+     * 반환:
+     *  - `BundleDataSnapshot` : 재조립 성공. 호출부가 소비자에게 success=true 로 전달
+     *    (message 에 `versionVerified=false` 명시, source 에 `fallback` 포함).
+     *  - `null` : 저장된 캐시 없음 / 파일 손상 / bundle.json 읽기 실패 / parse 실패.
+     *
+     * `enrichCsvData` 는 그대로 호출된다 — zip 안의 자원은 네트워크 없이 읽히고,
+     * zip 밖의 자원 (entrance route CSV, 이미지) 은 optional 로 강등되어 있어 네트워크 끊김
+     * 상황에서도 best-effort 로 enriched snapshot 을 돌려받는다.
+     */
+    private fun loadBundleFromCachedFile(
+        application: Application,
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        useLegacyEndpoint: Boolean,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy,
+        onResult: (BundleDataSnapshot?) -> Unit
+    ) {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val savedVersion = prefs.getString(getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId), null)
+        val savedUrl = prefs.getString(getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId), null)
+        val savedPath = prefs.getString(getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId), null)
+        if (savedVersion.isNullOrBlank() || savedPath.isNullOrBlank()) {
+            TJResourceLogger.w(
+                "(TJLabsResource) fallback: no cached bundle metadata // type=$bundleType // sectorId=$sectorId"
+            )
+            onResult(null)
+            return
+        }
+        val rawFile = File(savedPath)
+        if (!rawFile.exists() || rawFile.length() <= 0) {
+            TJResourceLogger.w(
+                "(TJLabsResource) fallback: cached bundle file missing // type=$bundleType // sectorId=$sectorId // path=$savedPath"
+            )
+            onResult(null)
+            return
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+            val extractedRoot = if (isV2ZipFlow) {
+                val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                val marker = File(root, "sectors/$sectorId/bundle.json")
+                if (marker.exists() && marker.length() > 0) root
+                else extractBundleZipToDisk(application, sectorId, rawFile)
+            } else null
+            val bundleJson = readBundleJsonFromFile(bundleType, sectorId, rawFile, useLegacyEndpoint, extractedRoot)
+            if (bundleJson == null) {
+                TJResourceLogger.w(
+                    "(TJLabsResource) fallback: bundle.json read fail // type=$bundleType // sectorId=$sectorId"
+                )
+                withContext(Dispatchers.Main) { onResult(null) }
+                return@launch
+            }
+            val cachedMeta = SectorBundleMetaOutput(url = savedUrl ?: "", version_id = savedVersion)
+            val parsed = parseBundleRaw(
+                bundleType, sectorId, cachedMeta, bundleJson,
+                if (isV2ZipFlow) rawFile.absolutePath else null,
+                extractedRoot?.absolutePath
+            )
+            if (parsed == null) {
+                TJResourceLogger.w(
+                    "(TJLabsResource) fallback: parseBundleRaw fail // type=$bundleType // sectorId=$sectorId"
+                )
+                withContext(Dispatchers.Main) { onResult(null) }
+                return@launch
+            }
+            TJResourceLogger.i(
+                "(TJLabsResource) fallback: parsed cached bundle // type=$bundleType // sectorId=$sectorId // version=$savedVersion // enriching..."
+            )
+            // enrichCsvData 는 Main-thread 로 콜백을 전달 — 그대로 호출부에 bubble up.
+            enrichCsvData(application, sectorId, parsed, imageLoadPolicy) { csvSuccess, enriched ->
+                TJResourceLogger.i(
+                    "(TJLabsResource) fallback: enrich done // sectorId=$sectorId // csvSuccess=$csvSuccess"
+                )
+                // Best-effort — DR path CSV 가 zip 에 없거나 깨져서 csvSuccess=false 여도 enriched snapshot 반환.
+                // 호출부가 소비자에게 success=true 로 전달 (versionVerified=false 메시지와 함께) — iOS 4-2 와 동일.
+                onResult(enriched)
+            }
+        }
+    }
+
+    /**
+     * 멀티 섹터 번들 로드 (TJLabsMultiResourceManager) 전용 - 조합 zip 안의 특정 섹터 하나를
+     * 처리해 BundleDataSnapshot 을 companion `bundleCache` 에 commit 한다.
+     * iOS `prepareSectorFromArchive + applyPreparedSector` 와 같은 역할.
+     *
+     * extractedRoot/sectors/{sectorId}/bundle.json 을 읽어 기존 [parseBundleRaw] + [enrichCsvData]
+     * 플로우로 재조립 — 단일 섹터 loadBundle 과 결과물은 동일한 BundleDataSnapshot 이라 소비자
+     * (TJLabsResourceManager getter / delegate) 는 변경 없이 사용 가능.
+     *
+     * 섹터별로 호출돼야 하며, 조합의 공유 extracted 디렉토리를 **읽기만** 하므로 섹터간 병렬 안전.
+     */
+    internal suspend fun processSectorFromArchive(
+        application: Application,
+        sectorId: Int,
+        archiveFile: File,
+        extractedRoot: File,
+        versionId: String,
+        imageLoadPolicy: com.tjlabs.tjlabsresource_sdk_android.ImageLoadPolicy
+    ): com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome {
+        val bundleJsonFile = File(extractedRoot, "sectors/$sectorId/bundle.json")
+        if (!bundleJsonFile.exists() || bundleJsonFile.length() <= 0) {
+            TJResourceLogger.w(
+                "(TJLabsResource) multi: bundle.json missing // sectorId=$sectorId // path=${bundleJsonFile.absolutePath}"
+            )
+            return com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome(
+                isSuccess = false,
+                failures = listOf(ResourceLoadStageFailure(ResourceLoadStage.SECTOR_BUNDLE_DOWNLOAD, "$sectorId", true))
+            )
+        }
+        val bundleJson = try {
+            bundleJsonFile.readText()
+        } catch (e: Exception) {
+            TJResourceLogger.w(
+                "(TJLabsResource) multi: bundle.json read fail // sectorId=$sectorId // error=${e.localizedMessage}"
+            )
+            return com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome(
+                isSuccess = false,
+                failures = listOf(ResourceLoadStageFailure(ResourceLoadStage.SECTOR_BUNDLE_DOWNLOAD, "$sectorId", true))
+            )
+        }
+        // Multi archive 의 섹터는 항상 JUPITER / v2 (zip) 스키마.
+        val meta = SectorBundleMetaOutput(url = "", version_id = versionId)
+        val parsed = parseBundleRaw(
+            ResourceBundleType.JUPITER, sectorId, meta, bundleJson,
+            archiveFile.absolutePath, extractedRoot.absolutePath
+        )
+        if (parsed == null) {
+            TJResourceLogger.w(
+                "(TJLabsResource) multi: parseBundleRaw fail // sectorId=$sectorId"
+            )
+            return com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome(
+                isSuccess = false,
+                failures = listOf(ResourceLoadStageFailure(ResourceLoadStage.SECTOR_BUNDLE_DOWNLOAD, "$sectorId", true))
+            )
+        }
+        // enrichCsvData 는 callback-style — 외부 suspend 로 wrap. completion 이 메인 스레드에서
+        // 호출되므로 resume 도 메인에서 재개된다 (호출부가 멀티 처리 전체를 Dispatchers.IO 로
+        // 둘러싸고 있어도 안전).
+        return suspendCoroutine { cont ->
+            enrichCsvData(application, sectorId, parsed, imageLoadPolicy) { csvSuccess, enriched ->
+                val cacheKey = buildSnapshotCacheKey(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
+                bundleCache[cacheKey] = enriched
+                val failures = if (!csvSuccess) {
+                    listOf(ResourceLoadStageFailure(ResourceLoadStage.PATH_PIXEL, "$sectorId", true))
+                } else {
+                    emptyList()
+                }
+                cont.resume(
+                    com.tjlabs.tjlabsresource_sdk_android.SectorProcessOutcome(
+                        isSuccess = csvSuccess,
+                        failures = failures
+                    )
+                )
+            }
+        }
+    }
+
     private fun loadBundleRawFromCache(
         application: Application,
         bundleType: ResourceBundleType,
         sectorId: Int,
         meta: SectorBundleMetaOutput
-    ): String? {
+    ): File? {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         val versionKey = getBundleMetaKey(bundleType, PREF_BUNDLE_VERSION_PREFIX, sectorId)
-        val urlKey = getBundleMetaKey(bundleType, PREF_BUNDLE_URL_PREFIX, sectorId)
         val fileKey = getBundleMetaKey(bundleType, PREF_BUNDLE_FILE_PREFIX, sectorId)
 
         val savedVersion = prefs.getString(versionKey, null)
-        val savedUrl = prefs.getString(urlKey, null)
         val savedPath = prefs.getString(fileKey, null)
 
-        if (savedVersion != meta.version_id || savedUrl != meta.url || savedPath.isNullOrBlank()) {
+        // meta.url 은 GCS presigned URL — X-Goog-Date/X-Goog-Signature 가 매 요청마다 달라져서
+        // 같은 version_id 라도 URL 은 절대 같지 않다. 예전에 savedUrl 도 비교했더니 매 세션마다
+        // cache miss 로 강제 재다운로드가 발생했다 (실측 관측). version_id 는 콘텐츠 해시라
+        // 이 값 하나만 매치해도 원본 정합성이 보장된다.
+        if (savedVersion != meta.version_id || savedPath.isNullOrBlank()) {
             TJResourceLogger.d(
                 "(TJLabsResource) bundle raw cache miss // type=$bundleType // sectorId=$sectorId // savedVersion=$savedVersion // newVersion=${meta.version_id}"
             )
@@ -1144,15 +1661,167 @@ internal class TJLabsBundleDataManager {
             return null
         }
 
+        TJResourceLogger.d(
+            "(TJLabsResource) bundle raw cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${rawFile.length()}"
+        )
+        return rawFile
+    }
+
+    /**
+     * bundle 파일에서 실제 bundle.json 텍스트를 추출한다.
+     * - JUPITER v2 (zip): [extractedRoot] 가 있으면 압축 해제된 파일에서 직접 read, 없으면 zip entry 로 fallback.
+     * - JUPITER v1 (useLegacyEndpoint=true, JSON): 파일 전체를 String 으로 읽음.
+     * - VENUS/WARP (JSON): 파일 전체를 String 으로 읽음.
+     */
+    private fun readBundleJsonFromFile(
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        file: File,
+        useLegacyEndpoint: Boolean = false,
+        extractedRoot: File? = null
+    ): String? {
         return try {
-            val cachedRaw = rawFile.readText()
-            TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${cachedRaw.length}"
-            )
-            cachedRaw
+            when (bundleType) {
+                ResourceBundleType.JUPITER -> when {
+                    useLegacyEndpoint -> file.readText()
+                    extractedRoot != null -> {
+                        val extractedBundleJson = File(extractedRoot, "sectors/$sectorId/bundle.json")
+                        if (extractedBundleJson.exists() && extractedBundleJson.length() > 0) {
+                            extractedBundleJson.readText()
+                        } else {
+                            readZipEntryText(file, "sectors/$sectorId/bundle.json")
+                        }
+                    }
+                    else -> readZipEntryText(file, "sectors/$sectorId/bundle.json")
+                }
+                ResourceBundleType.VENUS, ResourceBundleType.WARP -> file.readText()
+            }
         } catch (e: Exception) {
             TJResourceLogger.d(
-                "(TJLabsResource) bundle raw cache read fail // type=$bundleType // sectorId=$sectorId // path=${rawFile.absolutePath} // error=${e.localizedMessage}"
+                "(TJLabsResource) readBundleJsonFromFile fail // type=$bundleType // sectorId=$sectorId // path=${file.absolutePath} // error=${e.localizedMessage}"
+            )
+            null
+        }
+    }
+
+    /**
+     * 다운로드된 bundle zip 을 로컬 디렉토리에 압축 해제해 개별 자원 파일을 노출한다.
+     *
+     * 해제 위치: `<sectorFolder>/extracted/`. 실행 전에 기존 디렉토리를 삭제해 이전 버전의 stale
+     * 파일을 남기지 않는다 (version_id 는 zip 파일 자체가 관리하므로 별도 marker 는 두지 않음).
+     *
+     * 실패 시 null 반환 — 호출측은 zip 을 직접 여는 fallback 으로 진행할 수 있다.
+     */
+    private fun extractBundleZipToDisk(
+        application: Application,
+        sectorId: Int,
+        zipFile: File
+    ): File? {
+        val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+        // stale 방지 — 이전 version 의 extract 흔적을 완전히 제거.
+        runCatching { if (extractRoot.exists()) extractRoot.deleteRecursively() }
+        if (!extractRoot.mkdirs()) {
+            TJResourceLogger.d("(TJLabsResource) zip extract mkdirs fail // dst=${extractRoot.absolutePath}")
+            return null
+        }
+        return try {
+            val startMs = nowMs()
+            var count = 0
+            var totalBytes = 0L
+            ZipFile(zipFile).use { zf ->
+                val entries = zf.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val outFile = File(extractRoot, entry.name)
+                    if (entry.isDirectory) {
+                        outFile.mkdirs()
+                        continue
+                    }
+                    outFile.parentFile?.mkdirs()
+                    zf.getInputStream(entry).use { input ->
+                        FileOutputStream(outFile).use { output ->
+                            totalBytes += input.copyTo(output)
+                        }
+                    }
+                    count++
+                }
+            }
+            TJResourceLogger.d(
+                "(TJLabsResource) zip extract done // sectorId=$sectorId // files=$count // bytes=$totalBytes // dst=${extractRoot.absolutePath} // elapsedMs=${elapsedMs(startMs)}"
+            )
+            extractRoot
+        } catch (e: Exception) {
+            TJResourceLogger.d(
+                "(TJLabsResource) zip extract fail // sectorId=$sectorId // error=${e.localizedMessage}"
+            )
+            runCatching { extractRoot.deleteRecursively() }
+            null
+        }
+    }
+
+    /**
+     * legacy (2026-09-10 이전) 흐름이 남긴 per-file 캐시 (path CSV / parking-matches JSON / entrance
+     * route CSV) 를 이 sector 범위에서 정리. zip 이 곧 스냅샷이 된 이후로 이 캐시들은 stale 이고
+     * 소비되지 않으므로 디스크·prefs 를 깨끗이 비운다.
+     *
+     * PREF_IMAGE_* / PREF_ENTRANCE_* 는 여전히 URL 기반 자원이라 유지. PREF_BUNDLE_* 는 zip 자체 캐시 유지.
+     */
+    private fun pruneLegacyPerFileCache(application: Application, sectorId: Int) {
+        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        val sectorNamespaceFragment = "_${sectorId}_"  // buildScopedPrefKey 형식: <prefix><namespace>_<sectorId>_<key>
+        var prefRemoved = 0
+        for (k in prefs.all.keys) {
+            if (k.contains(sectorNamespaceFragment) &&
+                (k.startsWith(PREF_PATH_VERSION_PREFIX) || k.startsWith(PREF_PATH_URL_PREFIX) || k.startsWith(PREF_PATH_FILE_PREFIX) ||
+                 k.startsWith(PREF_PARKING_MATCHES_VERSION_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_URL_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_FILE_PREFIX))
+            ) {
+                editor.remove(k)
+                prefRemoved++
+            }
+        }
+        editor.apply()
+
+        // 개별 CSV/JSON 파일 삭제. bundle_{id}.zip / bundle_v1_{id}.json / extracted/ / simulations/ 는 보존.
+        val sectorDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
+        val zipName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
+        val jsonName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = true)
+        val keepDirs = setOf("extracted", "simulations")
+        var fileRemoved = 0
+        runCatching {
+            sectorDir.listFiles()?.forEach { child ->
+                if (child.isDirectory && child.name in keepDirs) return@forEach
+                if (child.isFile && (child.name == zipName || child.name == jsonName)) return@forEach
+                if (child.deleteRecursively()) fileRemoved++
+            }
+        }
+        if (prefRemoved > 0 || fileRemoved > 0) {
+            TJResourceLogger.d(
+                "(TJLabsResource) prune legacy per-file cache // sectorId=$sectorId // prefRemoved=$prefRemoved // fileRemoved=$fileRemoved"
+            )
+        }
+    }
+
+    /**
+     * zip 안 텍스트 entry 를 UTF-8 로 읽는다. entry 부재 시 null.
+     * ZipFile 은 random-access 라 전체 zip 을 메모리에 올리지 않고 필요한 entry 만 스트림한다.
+     * 압축 해제된 파일이 있으면 우선 그것을 사용하고, 없을 때만 zip 열기로 fallback.
+     */
+    private fun readZipEntryText(zipFile: File, entryPath: String): String? {
+        if (zipFile.exists().not()) return null
+        return try {
+            ZipFile(zipFile).use { zf ->
+                val entry = zf.getEntry(entryPath) ?: run {
+                    TJResourceLogger.d("(TJLabsResource) zip entry missing // zip=${zipFile.name} // entry=$entryPath")
+                    return@use null
+                }
+                zf.getInputStream(entry).use { input ->
+                    input.bufferedReader(Charsets.UTF_8).readText()
+                }
+            }
+        } catch (e: Exception) {
+            TJResourceLogger.d(
+                "(TJLabsResource) zip entry read fail // zip=${zipFile.absolutePath} // entry=$entryPath // error=${e.localizedMessage}"
             )
             null
         }
@@ -1183,43 +1852,23 @@ internal class TJLabsBundleDataManager {
         editor.apply()
     }
 
-    private fun saveBundleRawCache(
-        application: Application,
-        bundleType: ResourceBundleType,
-        sectorId: Int,
-        versionId: String,
-        bundleUrl: String,
-        raw: String
-    ) {
-        try {
-            val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
-            if (!cacheDir.exists()) {
-                cacheDir.mkdirs()
-            }
-
-            val rawFile = File(cacheDir, buildBundleRawFileName(bundleType, sectorId))
-            rawFile.writeText(raw)
-
-            saveBundleMetaPrefs(application, bundleType, sectorId, versionId, bundleUrl, rawFile.absolutePath)
-
-            TJResourceLogger.d {
-                "(TJLabsResource) bundle raw cache save // type=$bundleType // sectorId=$sectorId // version=$versionId // path=${rawFile.absolutePath} // bytes=${raw.length}"
-            }
-        } catch (e: Exception) {
-            TJResourceLogger.d {
-                "(TJLabsResource) bundle raw cache save fail // type=$bundleType // sectorId=$sectorId // error=${e.localizedMessage}"
-            }
-        }
-    }
+    // 2026-09-28+: bundle 파일은 [downloadBundleFile] 이 직접 디스크로 스트리밍한다.
+    // 별도의 saveBundleRawCache 는 필요 없고, prefs 만 [saveBundleMetaPrefs] 로 기록.
 
     private fun getBundleMetaKey(bundleType: ResourceBundleType, prefix: String, sectorId: Int): String {
         val bundleTypeKey = bundleType.name.lowercase()
         return "${prefix}${buildCacheNamespace()}_${bundleTypeKey}_$sectorId"
     }
 
-    private fun buildBundleRawFileName(bundleType: ResourceBundleType, sectorId: Int): String {
+    private fun buildBundleRawFileName(
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        useLegacyEndpoint: Boolean = false
+    ): String {
         return when (bundleType) {
-            ResourceBundleType.JUPITER -> "bundle_${sectorId}.json"
+            // 2026-09-28+ JUPITER: 응답이 zip. 확장자를 .zip 으로 저장해 ZipFile 로 random-access 하기 좋게 한다.
+            // v1 (useLegacyEndpoint=true) 은 JSON 응답이므로 별도 파일명(.json) 으로 저장해 v2 캐시와 격리.
+            ResourceBundleType.JUPITER -> if (useLegacyEndpoint) "bundle_v1_${sectorId}.json" else "bundle_${sectorId}.zip"
             ResourceBundleType.VENUS -> "bundle_venus_${sectorId}.json"
             ResourceBundleType.WARP -> "bundle_warp_${sectorId}.json"
         }
@@ -1312,9 +1961,7 @@ internal class TJLabsBundleDataManager {
             }
 
             val text = connection.inputStream.bufferedReader().use { it.readText() }
-            TJResourceLogger.d(
-                "(TJLabsResource) fetchTextFromUrl http success // source=$source // status=$status // bytes=${text.length}"
-            )
+            // 성공 로그 제거 — 파일 fetch 마다 반복 노이즈. 실패만 위 http error / 아래 exception 블록.
             connection.disconnect()
             text
         } catch (e: Exception) {
@@ -1400,9 +2047,8 @@ internal class TJLabsBundleDataManager {
 
             if (bitmap == null) {
                 TJResourceLogger.d("(TJLabsResource) fetchImageFromUrl decode fail // key=$key // url=$urlString")
-            } else {
-                TJResourceLogger.d("(TJLabsResource) fetchImageFromUrl success // key=$key // size=${bitmap.width}x${bitmap.height}")
             }
+            // 성공 케이스 로그는 enrichCsvData 요약에서 imageCount 로 집계됨 — 개별 로그는 생략.
             bitmap
         } catch (e: Exception) {
             TJResourceLogger.d(
@@ -1412,14 +2058,29 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    /**
+     * bundle.json 텍스트를 [BundleDataSnapshot] 으로 파싱한다.
+     *
+     * @param bundleZipPath JUPITER 2026-09-28+ 스키마 전용. 로컬에 저장된 zip 파일 경로.
+     *  이 값이 non-null 이면 `graphs[].path` · `parking_matches` · `simulations[].items[].src`
+     *  는 zip 내부 entry 경로로 해석되어 그대로 [BundleDataSnapshot] 의 `*UrlsByKey` 맵에 실린다.
+     *  null 이면 (VENUS/WARP · legacy JSON) 기존 `{ url: "..." }` 형태의 절대 URL 로 파싱.
+     * @param bundleAssetsRoot 압축 해제된 자원 디렉토리 (있을 때). enrichCsvData 가 여기서 파일을 읽는다.
+     */
     private fun parseBundleRaw(
         bundleType: ResourceBundleType,
         sectorId: Int,
         meta: SectorBundleMetaOutput,
-        raw: String
+        raw: String,
+        bundleZipPath: String? = null,
+        bundleAssetsRoot: String? = null
     ): BundleDataSnapshot? {
         return try {
             val root = JSONObject(raw)
+
+            // 2026-09-28+ 스키마 판별 플래그. true 면 그래프 path · parking_matches · simulations 항목의
+            // 값이 zip 내부 경로(문자열) 로, false 면 legacy 객체 (`{url: "..."}`) 로 실린다.
+            val useZipPath = bundleZipPath != null
 
             val buildings = mutableListOf<BuildingOutput>()
             val levelWardsMap = mutableMapOf<String, List<String>>()
@@ -1435,8 +2096,8 @@ internal class TJLabsBundleDataManager {
             val imageUrlsByKey = mutableMapOf<String, String>()
             val graphPathUrls = mutableMapOf<String, String>()
             val entranceRouteUrls = mutableMapOf<String, String>()
-            // 2026-08-28 스키마 — level 별 parking_matches.url 을 levelId 기준으로 수집.
-            // 파일 미업로드 시 서버가 null 을 보내므로 정상 상태로 취급 (map key 부재).
+            // 2026-08-28 스키마 — level 별 parking_matches 참조를 levelId 기준으로 수집.
+            // 값은 zip 스키마에서는 zip entry 경로, legacy 에서는 절대 URL. 미업로드 층은 key 부재.
             val parkingMatchesUrls = mutableMapOf<Int, String>()
 
             val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
@@ -1458,12 +2119,15 @@ internal class TJLabsBundleDataManager {
                     val imageUrl = mapImage?.optString("url").orEmpty()
                     // 2026-08-06+ 스키마: "floor" | "transition". 이전 스키마엔 필드 없음 → 기본 "floor".
                     val levelType = levelObj.optString("type", "floor").ifBlank { "floor" }
-                    // 2026-08-28 스키마: parking_matches 는 nullable 오브젝트. null 이면 파일 미업로드.
-                    // enrich 단계에서 이 url 을 GET 해 List<ParkingMatch> 로 채운다.
-                    levelObj.optJSONObject("parking_matches")?.let { pmObj ->
-                        val pmUrl = pmObj.optString("url").orEmpty()
-                        if (pmUrl.isNotBlank()) parkingMatchesUrls[levelId] = pmUrl
+                    // parking_matches: 파일 미업로드 시 서버가 null 을 보낸다.
+                    //   - 2026-09-28+ (zip): 문자열 (zip entry 경로) 또는 null.
+                    //   - legacy: `{url: "..."}` 오브젝트 또는 null. enrich 단계에서 이 값을 원본대로 사용.
+                    val parkingMatchesRef: String = if (useZipPath) {
+                        if (levelObj.isNull("parking_matches")) "" else levelObj.optString("parking_matches").orEmpty()
+                    } else {
+                        levelObj.optJSONObject("parking_matches")?.optString("url").orEmpty()
                     }
+                    if (parkingMatchesRef.isNotBlank()) parkingMatchesUrls[levelId] = parkingMatchesRef
                     levels.add(LevelOutput(id = levelId, name = levelName, image = imageUrl, type = levelType))
                     if (isDebugLevel.not() && imageUrl.isNotBlank()) {
                         imageUrlsByKey[levelKey] = imageUrl
@@ -1492,34 +2156,10 @@ internal class TJLabsBundleDataManager {
                         landmarkMap[levelKey] = parseLandmarks(rfLandmarksJson)
                     }
 
-                    if (isDebugLevel.not() && TJResourceLogger.isDebugEnabled()) {
-                        val graphsArray = levelObj.optJSONArray("graphs")
-                        if (graphsArray == null) {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw graphs missing // levelKey=$levelKey"
-                            )
-                        } else {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw graphs count // levelKey=$levelKey // count=${graphsArray.length()}"
-                            )
-                            for (graphIndex in 0 until graphsArray.length()) {
-                                val graphItem = graphsArray.optJSONObject(graphIndex) ?: continue
-                                val drType = graphItem.optString("dead_reckoning")
-                                val pathUrl = graphItem.optJSONObject("path")?.optString("url").orEmpty()
-                                val nodeCount = graphItem.optJSONArray("nodes")?.length() ?: 0
-                                val linkCount = graphItem.optJSONArray("links")?.length() ?: 0
-                                TJResourceLogger.d(
-                                    "(TJLabsResource) parseBundleRaw graph item // levelKey=$levelKey // idx=$graphIndex // dr=$drType // nodes=$nodeCount // links=$linkCount // pathUrl=$pathUrl"
-                                )
-                            }
-                        }
-                    }
-
+                    // 그래프 파싱은 level 마다 반복되는 hot path 라 개별 DEBUG 로그는 폭주 원인.
+                    // 이상 케이스 (graphs 배열 부재, DR 미검출 등) 만 로그 남기고 성공 케이스는 조용히 진행.
                     val drGraphObj = resolveDrGraphObject(levelObj)
                     if (isDebugLevel.not() && drGraphObj != null) {
-                        TJResourceLogger.d(
-                            "(TJLabsResource) parseBundleRaw DR graph selected // levelKey=$levelKey // dead_reckoning=${drGraphObj.optString("dead_reckoning")}"
-                        )
                         val nodes = parseGraphNodes(drGraphObj.optJSONArray("nodes"))
                         val links = parseGraphLinks(drGraphObj.optJSONArray("links"))
                         val linkGroups = parseGraphLinkGroups(drGraphObj.optJSONArray("link_groups"))
@@ -1529,7 +2169,7 @@ internal class TJLabsBundleDataManager {
                             linkMap[levelKey] = buildLinkDict(links, linkGroups ?: emptyList())
                         }
 
-                        val pathUrl = drGraphObj.optJSONObject("path")?.optString("url").orEmpty()
+                        val pathUrl = readGraphPathRef(drGraphObj, useZipPath)
                         // 그래프가 실제로 비어있으면 (nodes=0, links=0) pathUrl 은 서버에 잔존하는
                         // 껍데기일 뿐 실제 CSV 는 없다 — 2026-08-06 스키마부터 순수 floor 의
                         // walkable 데이터가 전이층으로 이동한 경우 이런 상태가 발생. fetch 시도
@@ -1537,18 +2177,8 @@ internal class TJLabsBundleDataManager {
                         val hasGraphContent = (nodes?.isNotEmpty() == true) || (links?.isNotEmpty() == true)
                         if (pathUrl.isNotBlank() && hasGraphContent) {
                             graphPathUrls[levelKey] = pathUrl
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw DR path mapped // levelKey=$levelKey // url=$pathUrl"
-                            )
-                        } else if (pathUrl.isNotBlank()) {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw DR path skipped (empty graph) // levelKey=$levelKey // url=$pathUrl"
-                            )
-                        } else {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw DR path missing // levelKey=$levelKey"
-                            )
                         }
+                        // 그 외 (skipped/missing) 케이스는 조용히 진행 — 정상 상태이며 반복 로그 노이즈만 만듬.
                     } else if (isDebugLevel.not()) {
                         TJResourceLogger.d(
                             "(TJLabsResource) parseBundleRaw DR graph not found // levelKey=$levelKey"
@@ -1557,25 +2187,15 @@ internal class TJLabsBundleDataManager {
 
                     if (isDebugLevel.not()) {
                         val pdrGraphObj = resolvePdrGraphObject(levelObj)
-                        val pdrPathUrl = pdrGraphObj?.optJSONObject("path")?.optString("url").orEmpty()
+                        val pdrPathUrl = if (pdrGraphObj != null) readGraphPathRef(pdrGraphObj, useZipPath) else ""
                         val pdrNodeCount = pdrGraphObj?.optJSONArray("nodes")?.length() ?: 0
                         val pdrLinkCount = pdrGraphObj?.optJSONArray("links")?.length() ?: 0
                         val pdrHasGraphContent = pdrNodeCount > 0 || pdrLinkCount > 0
                         if (pdrPathUrl.isNotBlank() && pdrHasGraphContent) {
                             val pdrLevelKey = "${levelKey}${PDR_LEVEL_KEY_SUFFIX}"
                             graphPathUrls[pdrLevelKey] = pdrPathUrl
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw PDR path mapped // levelKey=$pdrLevelKey // url=$pdrPathUrl"
-                            )
-                        } else if (pdrPathUrl.isNotBlank()) {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw PDR path skipped (empty graph) // levelKey=$levelKey // url=$pdrPathUrl"
-                            )
-                        } else {
-                            TJResourceLogger.d(
-                                "(TJLabsResource) parseBundleRaw PDR path missing // levelKey=$levelKey"
-                            )
                         }
+                        // PDR mapped/missing 개별 로그 제거 — 아래 요약 로그에서 총합으로 확인.
                     }
 
                     val entrancesJson = levelObj.optJSONArray("entrances") ?: JSONArray()
@@ -1605,6 +2225,11 @@ internal class TJLabsBundleDataManager {
 
             val transitions = parseTransitions(root.optJSONArray("transitions"))
 
+            // 파싱 완료 요약 — level 마다 개별 로그 대신 한 줄로 총계 (DEBUG 노이즈 방지).
+            TJResourceLogger.d(
+                "(TJLabsResource) parseBundleRaw done // sectorId=$sectorId // buildings=${buildings.size} // levels=${buildings.sumOf { it.levels.size }} // graphPaths=${graphPathUrls.size} // parkingMatches=${parkingMatchesUrls.size} // entrances=${entranceItemMap.size} // images=${imageUrlsByKey.size} // transitions=${transitions.size}"
+            )
+
             val sectorData = SectorOutput(
                 id = root.optInt("id"),
                 name = root.optString("name"),
@@ -1618,6 +2243,8 @@ internal class TJLabsBundleDataManager {
                 bundleType = bundleType,
                 versionId = meta.version_id,
                 bundleUrl = meta.url,
+                bundleZipPath = bundleZipPath,
+                bundleAssetsRoot = bundleAssetsRoot,
                 sectorData = sectorData,
                 levelWardsDataMap = levelWardsMap,
                 scaleOffsetDataMap = scaleOffsetMap,
@@ -1673,7 +2300,22 @@ internal class TJLabsBundleDataManager {
                     y = levelObj.optInt("y"),
                     heading = levelObj.optFloatOrDefault("heading")
                 )
-            )
+            ),
+            zoom_level = parseZoomLevel(obj.optJSONObject("zoom_level")),
+        )
+    }
+
+    /**
+     * iOS parity (2026-10-02 server, iOS commit `feat: zoom level`) — 섹터 지도 줌 레벨 디코딩.
+     * `default_position.zoom_level` 객체로 서버 전송 — 없으면 null (하위 호환).
+     * 유효성: min <= default <= max 는 서버 검증 통과 가정, 추가 가드 없음.
+     */
+    private fun parseZoomLevel(obj: JSONObject?): com.tjlabs.tjlabsresource_sdk_android.ZoomLevel? {
+        if (obj == null) return null
+        return com.tjlabs.tjlabsresource_sdk_android.ZoomLevel(
+            min = obj.optDouble("min", 0.0),
+            default_value = obj.optDouble("default", 0.0),
+            max = obj.optDouble("max", 0.0),
         )
     }
 
@@ -1696,10 +2338,15 @@ internal class TJLabsBundleDataManager {
             for (j in 0 until itemsJson.length()) {
                 val itemObj = itemsJson.optJSONObject(j) ?: continue
                 val name = itemObj.optString("name").trim()
-                val url = itemObj.optString("url").trim()
-                if (name.isBlank() || url.isBlank()) continue
+                // 2026-09-28+: 필드명이 `src` (zip 내부 경로). legacy: `url` (절대 URL).
+                // 두 필드 모두 확인해 어느 스키마든 안전하게 파싱한다.
+                val ref = itemObj.optString("src").trim().ifEmpty { itemObj.optString("url").trim() }
+                if (name.isBlank() || ref.isBlank()) continue
 
-                val item = SimulationItemOutput(name = name, url = url)
+                // SimulationItemOutput.url 필드에 zip entry 경로/URL 을 그대로 담고, extract 이후에
+                // 로컬 절대 경로로 갱신한다 (2026-09-28+ 흐름). VENUS/WARP 는 simulations 응답이 없어
+                // 실행 경로 자체가 없다.
+                val item = SimulationItemOutput(name = name, url = ref)
                 if (isVehicle) {
                     vehicleItems.add(item)
                 } else {
@@ -1728,173 +2375,52 @@ internal class TJLabsBundleDataManager {
         }
     }
 
-    private fun downloadSimulationFiles(
+    /**
+     * 2026-09-28+ 흐름 — simulation JSON 은 zip 이 이미 압축 해제된 `<assetsRoot>/sectors/{id}/assets/simulations/{kind}/{name}.json`
+     * 에 파일로 존재한다. [SimulationItemOutput.url] 을 그 절대 파일 경로로 갱신한 새 [SimulationBundleOutput] 을 반환.
+     *
+     * `assetsRoot` 가 유효하지 않으면 zip 에서 직접 뽑아 별도 dir 로 복사하는 fallback 을 취한다 (구 흐름 호환).
+     * 소비자 (jupiter-sdk 등) 는 갱신된 url 을 그대로 [File] 로 열어 텍스트를 읽으면 된다.
+     */
+    private fun extractSimulationsFromZip(
         application: Application,
         sectorId: Int,
-        versionId: String,
-        simulationData: SimulationBundleOutput,
-        completion: (Boolean) -> Unit
-    ) {
-        CoroutineScope(Dispatchers.IO).launch {
-            var allSuccess = true
-
-            val vehicleResults = simulationData.vehicle.map { item ->
-                async {
-                    val key = "vehicle_${sanitizeSimulationName(item.name)}"
-                    val saved = cacheSimulationJson(
-                        application = application,
-                        sectorId = sectorId,
-                        versionId = versionId,
-                        key = key,
-                        url = item.url
-                    )
-                    if (!saved) {
-                        TJResourceLogger.d("(TJLabsResource) simulation download fail // type=vehicle // name=${item.name} // url=${item.url}")
-                    } else {
-                        TJResourceLogger.d("(TJLabsResource) simulation download success // type=vehicle // name=${item.name} // url=${item.url}")
-                    }
-                    saved
-                }
-            }
-
-            val pdrResults = simulationData.pdr.map { item ->
-                async {
-                    val key = "pdr_${sanitizeSimulationName(item.name)}"
-                    val saved = cacheSimulationJson(
-                        application = application,
-                        sectorId = sectorId,
-                        versionId = versionId,
-                        key = key,
-                        url = item.url
-                    )
-                    if (!saved) {
-                        TJResourceLogger.d("(TJLabsResource) simulation download fail // type=pdr // name=${item.name} // url=${item.url}")
-                    } else {
-                        TJResourceLogger.d("(TJLabsResource) simulation download success // type=pdr // name=${item.name} // url=${item.url}")
-                    }
-                    saved
-                }
-            }
-
-            val results = (vehicleResults + pdrResults).awaitAll()
-            if (results.any { it.not() }) {
-                allSuccess = false
-            }
-
-            withContext(Dispatchers.Main) {
-                completion(allSuccess)
-            }
-        }
-    }
-
-    private fun cacheSimulationJson(
-        application: Application,
-        sectorId: Int,
-        versionId: String,
-        key: String,
-        url: String
-    ): Boolean {
-        val text = getCachedContentIfValid(
-            application = application,
-            sectorId = sectorId,
-            versionId = versionId,
-            key = key,
-            url = url,
-            source = "simulation:$key",
-            versionPrefix = PREF_SIM_VERSION_PREFIX,
-            urlPrefix = PREF_SIM_URL_PREFIX,
-            filePrefix = PREF_SIM_FILE_PREFIX
-        ) ?: run {
-            val downloaded = fetchTextFromUrl(url, "simulation:$key") ?: return false
-            saveSimulationCache(
-                application = application,
-                sectorId = sectorId,
-                versionId = versionId,
-                key = key,
-                url = url,
-                content = downloaded
-            )
-            downloaded
-        }
-
-        return text.isNotBlank()
-    }
-
-    private fun getCachedContentIfValid(
-        application: Application,
-        sectorId: Int,
-        versionId: String,
-        key: String,
-        url: String,
-        source: String,
-        versionPrefix: String,
-        urlPrefix: String,
-        filePrefix: String
-    ): String? {
-        val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val versionKey = buildScopedPrefKey(versionPrefix, sectorId, key)
-        val urlKey = buildScopedPrefKey(urlPrefix, sectorId, key)
-        val fileKey = buildScopedPrefKey(filePrefix, sectorId, key)
-
-        val savedVersion = prefs.getString(versionKey, null)
-        val savedUrl = prefs.getString(urlKey, null)
-        val savedPath = prefs.getString(fileKey, null)
-        if (savedVersion == versionId && savedUrl == url && savedPath.isNullOrBlank().not()) {
-            val cachedFile = File(savedPath!!)
-            if (cachedFile.exists() && cachedFile.length() > 0) {
-                return try {
-                    cachedFile.readText().also {
-                        TJResourceLogger.d(
-                            "(TJLabsResource) simulation cache hit // source=$source // key=$key // version=$versionId // path=${cachedFile.absolutePath} // bytes=${it.length}"
-                        )
-                    }
-                } catch (e: Exception) {
+        zipFile: File,
+        assetsRoot: File?,
+        simulationData: SimulationBundleOutput
+    ): SimulationBundleOutput {
+        fun mapExtractedPath(kind: String, item: SimulationItemOutput): SimulationItemOutput? {
+            val entryPath = item.url  // parseSimulations 가 zip entry 경로를 url 필드에 채워둔다.
+            if (entryPath.isBlank()) return null
+            if (assetsRoot != null) {
+                val src = File(assetsRoot, entryPath)
+                if (src.exists() && src.length() > 0) {
                     TJResourceLogger.d(
-                        "(TJLabsResource) simulation cache read fail // source=$source // key=$key // error=${e.localizedMessage}"
+                        "(TJLabsResource) simulation extracted // kind=$kind // name=${item.name} // path=${src.absolutePath}"
                     )
-                    null
+                    return item.copy(url = src.absolutePath)
                 }
+                TJResourceLogger.d(
+                    "(TJLabsResource) simulation extract fallback (missing in assets) // kind=$kind // name=${item.name} // entry=$entryPath"
+                )
+            }
+            // Fallback: zip 을 직접 열어 시뮬레이션 하나를 copy. (assetsRoot 실패 케이스 방어)
+            val outDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/simulations")
+            if (outDir.exists().not()) outDir.mkdirs()
+            val text = readZipEntryText(zipFile, entryPath) ?: return null
+            return try {
+                val outFile = File(outDir, "${kind}_${sanitizeSimulationName(item.name)}.json")
+                outFile.writeText(text)
+                item.copy(url = outFile.absolutePath)
+            } catch (e: Exception) {
+                TJResourceLogger.d("(TJLabsResource) simulation extract write fail // kind=$kind // error=${e.localizedMessage}")
+                null
             }
         }
-        return null
-    }
 
-    private fun saveSimulationCache(
-        application: Application,
-        sectorId: Int,
-        versionId: String,
-        key: String,
-        url: String,
-        content: String
-    ) {
-        try {
-            val cacheDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
-            if (!cacheDir.exists()) {
-                cacheDir.mkdirs()
-            }
-
-            val fileName = "${sanitizeSimulationName(key)}.json"
-            val jsonFile = File(cacheDir, fileName)
-            jsonFile.writeText(content)
-
-            val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-            val versionKey = buildScopedPrefKey(PREF_SIM_VERSION_PREFIX, sectorId, key)
-            val urlKey = buildScopedPrefKey(PREF_SIM_URL_PREFIX, sectorId, key)
-            val fileKey = buildScopedPrefKey(PREF_SIM_FILE_PREFIX, sectorId, key)
-            prefs.edit()
-                .putString(versionKey, versionId)
-                .putString(urlKey, url)
-                .putString(fileKey, jsonFile.absolutePath)
-                .apply()
-
-            TJResourceLogger.d(
-                "(TJLabsResource) simulation cache save // key=$key // version=$versionId // path=${jsonFile.absolutePath} // bytes=${content.length}"
-            )
-        } catch (e: Exception) {
-            TJResourceLogger.d(
-                "(TJLabsResource) simulation cache save fail // key=$key // error=${e.localizedMessage}"
-            )
-        }
+        val vehicle = simulationData.vehicle.mapNotNull { mapExtractedPath("vehicle", it) }
+        val pdr = simulationData.pdr.mapNotNull { mapExtractedPath("pdr", it) }
+        return SimulationBundleOutput(vehicle = vehicle, pdr = pdr)
     }
 
     private fun sanitizeSimulationName(name: String): String {
@@ -1910,6 +2436,20 @@ internal class TJLabsBundleDataManager {
             .replace("|", "_")
             .trim()
             .ifEmpty { "unknown" }
+    }
+
+    /**
+     * graph 의 `path` 필드 값을 스키마별로 추출한다.
+     *   - 2026-09-28+ (useZipPath=true): 문자열 (zip entry 경로) 또는 null → 빈 문자열.
+     *   - legacy       (useZipPath=false): `{ "url": "..." }` 오브젝트의 url 필드.
+     * 빈 문자열은 "미지정" 을 의미하고 소비측에서 fetch 시도 자체가 스킵된다.
+     */
+    private fun readGraphPathRef(graphObj: JSONObject, useZipPath: Boolean): String {
+        return if (useZipPath) {
+            if (graphObj.isNull("path")) "" else graphObj.optString("path").orEmpty()
+        } else {
+            graphObj.optJSONObject("path")?.optString("url").orEmpty()
+        }
     }
 
     private fun resolveDrGraphObject(levelObj: JSONObject): JSONObject? {
@@ -2203,10 +2743,52 @@ internal class TJLabsBundleDataManager {
     private fun parseGeofence(obj: JSONObject?): GeofenceData? {
         if (obj == null) return null
         return GeofenceData(
-            entrance_area = parseIntMatrix(obj.optJSONArray("entrance_area")),
-            entrance_matching_area = parseIntMatrix(obj.optJSONArray("entrance_matching_area")),
-            level_change_area = parseIntMatrix(obj.optJSONArray("level_change_area"))
+            entrance_area = parsePolygonList(obj.optJSONArray("entrance_area")),
+            entrance_matching_area = parsePolygonList(obj.optJSONArray("entrance_matching_area")),
+            level_change_area = parsePolygonList(obj.optJSONArray("level_change_area"))
         )
+    }
+
+    /**
+     * 2026-09-28+ 지오펜스 파싱 helper. 서버 응답은 두 포맷을 모두 쓸 수 있다 — iOS parity.
+     *
+     *  - **다각형 리스트** (주 포맷, 2026-09-28+): `[[[x,y],[x,y],...], ...]`
+     *      각 다각형이 꼭짓점 `[x, y]` 쌍의 리스트. 닫힌 다각형, 오목 허용.
+     *  - **AABB 리스트** (legacy 호환): `[[xMin, yMin, xMax, yMax], ...]`
+     *      각 요소가 flat 4-tuple 사각형. 다각형 꼭짓점 4개로 변환해 통일한다 (CW 순).
+     *
+     * iOS `BundleModel.swift` 가 `GeofencePolygon` 디코딩 시 두 포맷을 모두 받는 것과 매핑.
+     * 서버가 포맷 전환 중일 때 Android 가 디코딩 fail 하지 않도록 방어.
+     */
+    private fun parsePolygonList(arr: JSONArray?): List<List<List<Int>>> {
+        if (arr == null) return emptyList()
+        val result = mutableListOf<List<List<Int>>>()
+        for (i in 0 until arr.length()) {
+            val entry = arr.optJSONArray(i) ?: continue
+            val firstEl = entry.opt(0)
+            when {
+                firstEl is JSONArray -> {
+                    // 다각형 꼭짓점 리스트 (`[[x,y], [x,y], ...]`)
+                    val vertices = parseIntMatrix(entry)
+                    if (vertices.size >= 3) result.add(vertices)
+                }
+                firstEl is Number && entry.length() == 4 -> {
+                    // AABB fallback: `[xMin, yMin, xMax, yMax]` → 4 꼭짓점 다각형 변환
+                    val xMin = entry.optInt(0)
+                    val yMin = entry.optInt(1)
+                    val xMax = entry.optInt(2)
+                    val yMax = entry.optInt(3)
+                    result.add(listOf(
+                        listOf(xMin, yMin),
+                        listOf(xMax, yMin),
+                        listOf(xMax, yMax),
+                        listOf(xMin, yMax),
+                    ))
+                }
+                // 그 외 포맷은 skip (파싱 실패 방어)
+            }
+        }
+        return result
     }
 
     private fun parseWards(arr: JSONArray): List<String> {
@@ -2369,7 +2951,13 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
-    private fun parsePathPixelData(data: String): PathPixelData {
+    /**
+     * **Benchmark 전용** — Phase 4 (iOS parity single-pass 파서) 적용 전의 regex 기반 구현.
+     * 운영 경로는 [parsePathPixelData] 를 쓰고, 이 함수는 성능 비교/회귀 체크를 위한 **보존판**.
+     * 삭제하지 말 것 — Benchmark Suite UI 가 두 파서를 교대 호출해 regex vs single-pass 평균
+     * 지연을 수치화한다 (iOS 문서 §9 "경로 CSV 파싱 280ms → 4.9ms" 와 동일 성격의 측정).
+     */
+    internal fun parsePathPixelDataLegacy(data: String): PathPixelData {
         val roadX = mutableListOf<Float>()
         val roadY = mutableListOf<Float>()
         val roadScale = mutableListOf<Float>()
@@ -2428,6 +3016,136 @@ internal class TJLabsBundleDataManager {
             roadScale = roadScale,
             roadHeading = roadHeading
         )
+    }
+
+    /**
+     * Path CSV 파서 (iOS `TJLabsPathPixelManager.parsePathPixelData` single-pass 포팅).
+     *
+     * 입력 포맷: 헤더 1줄 + `x,y,"[h1,h2,...]",scale` 데이터 N줄. heading 그룹 미존재 가능.
+     * UTF-8 바이트 레벨 단일 패스로 처리 — 줄마다 regex 를 새로 컴파일/실행하는 기존 구현의
+     * 비용 (iOS 기준 로드 시간의 ~78%) 을 제거하고, 같은 heading 목록 반복에 대비해 캐시한다.
+     *
+     * 규칙 (문서 TJ-580 §5 와 1:1):
+     *  - 줄 구분자: \n, \r, \r\n. 빈 줄 skip. `encoding=` 포함 줄 skip.
+     *  - x = 첫 콤마 앞, y = 첫·둘째 콤마 사이, scale = **마지막 콤마 뒤**
+     *    (heading 안에도 콤마가 있으므로 마지막 콤마 기준). x/y 빈 문자열이면 데이터 아님.
+     *  - heading = 첫 비어있지 않은 `[...]` 그룹의 각 토큰을 trim → Double → ","로 join.
+     *    숫자 아닌 토큰 drop. 그룹 없거나 `[]` 이면 빈 문자열.
+     *  - x/y/scale 중 하나라도 숫자 아니면 그 행 skip (크래시 대신).
+     */
+    private fun parsePathPixelData(data: String): PathPixelData {
+        val roadX = mutableListOf<Float>()
+        val roadY = mutableListOf<Float>()
+        val roadScale = mutableListOf<Float>()
+        val roadHeading = mutableListOf<String>()
+        // 같은 heading 그룹이 반복되는 경우가 많아 (예: 대부분 "[0,180]") 원문→변환 결과 캐시.
+        val headingCache = HashMap<String, String>()
+
+        val buf = data.toByteArray(Charsets.UTF_8)
+        val count = buf.size
+        var i = 0
+
+        // 헤더 (첫 줄) skip — 데이터 행이 아님.
+        while (i < count && buf[i] != LF && buf[i] != CR) i++
+
+        while (i < count) {
+            // 줄바꿈 소비 (\n, \r, \r\n 혼용 지원). 빈 줄은 자연 skip.
+            while (i < count && (buf[i] == LF || buf[i] == CR)) i++
+            val lineStart = i
+            while (i < count && buf[i] != LF && buf[i] != CR) i++
+            val lineEnd = i
+            if (lineStart == lineEnd) continue
+
+            if (bytesContain(buf, lineStart, lineEnd, ENCODING_MARKER)) continue
+
+            val firstComma = indexOfByte(buf, COMMA, lineStart, lineEnd)
+            if (firstComma < 0) continue
+            val yEnd = indexOfByte(buf, COMMA, firstComma + 1, lineEnd).let { if (it < 0) lineEnd else it }
+            val lastComma = lastIndexOfByte(buf, COMMA, firstComma, lineEnd).let { if (it < 0) firstComma else it }
+
+            // 빈 x 또는 y → 데이터 행이 아님.
+            if (firstComma == lineStart || yEnd == firstComma + 1) continue
+
+            val xStr = utf8String(buf, lineStart, firstComma)
+            val yStr = utf8String(buf, firstComma + 1, yEnd)
+            val scaleStr = utf8String(buf, lastComma + 1, lineEnd)
+            val x = xStr.toFloatOrNull() ?: continue
+            val y = yStr.toFloatOrNull() ?: continue
+            val scale = scaleStr.toFloatOrNull() ?: continue
+
+            // Heading: 첫 `[...]` 그룹. open/close 짝이 안 맞으면 null (빈 문자열).
+            var heading = ""
+            val bracket = firstBracketGroup(buf, lineStart, lineEnd)
+            if (bracket != null) {
+                val (contentStart, contentEnd) = bracket
+                val raw = utf8String(buf, contentStart, contentEnd)
+                heading = headingCache[raw] ?: run {
+                    val formatted = raw.split(',')
+                        .mapNotNull { it.trim().toDoubleOrNull() }
+                        .joinToString(",") { it.toString() }
+                    headingCache[raw] = formatted
+                    formatted
+                }
+            }
+
+            roadX.add(x)
+            roadY.add(y)
+            roadScale.add(scale)
+            roadHeading.add(heading)
+        }
+
+        val road = listOf(roadX, roadY)
+        val minX = roadX.minOrNull() ?: 0f
+        val minY = roadY.minOrNull() ?: 0f
+        val maxX = roadX.maxOrNull() ?: 0f
+        val maxY = roadY.maxOrNull() ?: 0f
+        val roadMinMax = listOf(minX, minY, maxX, maxY)
+
+        return PathPixelData(
+            road = road,
+            roadMinMax = roadMinMax,
+            roadScale = roadScale,
+            roadHeading = roadHeading
+        )
+    }
+
+    /** [parsePathPixelData] 전용 — UTF-8 바이트 레벨 helper. 범위는 half-open [start, end). */
+    private fun utf8String(buf: ByteArray, start: Int, end: Int): String =
+        String(buf, start, end - start, Charsets.UTF_8)
+
+    private fun indexOfByte(buf: ByteArray, b: Byte, start: Int, end: Int): Int {
+        for (idx in start until end) if (buf[idx] == b) return idx
+        return -1
+    }
+
+    private fun lastIndexOfByte(buf: ByteArray, b: Byte, start: Int, end: Int): Int {
+        for (idx in (end - 1) downTo start) if (buf[idx] == b) return idx
+        return -1
+    }
+
+    /** `[...]` 그룹의 **내용** 범위를 open 바로 뒤 ~ close 전 (half-open) 로 리턴. */
+    private fun firstBracketGroup(buf: ByteArray, start: Int, end: Int): Pair<Int, Int>? {
+        var open = -1
+        for (idx in start until end) {
+            val b = buf[idx]
+            if (b == OPEN_BRACKET && open < 0) open = idx
+            else if (b == CLOSE_BRACKET && open >= 0) return (open + 1) to idx
+        }
+        return null
+    }
+
+    private fun bytesContain(buf: ByteArray, start: Int, end: Int, needle: ByteArray): Boolean {
+        val n = needle.size
+        if (n == 0 || end - start < n) return false
+        val lastStart = end - n
+        for (idx in start..lastStart) {
+            var match = true
+            for (j in 0 until n) {
+                if (buf[idx + j] != needle[j]) { match = false; break }
+            }
+            if (match) return true
+        }
+        return false
     }
 
     private fun parseEntranceRouteData(data: String): EntranceRouteData {

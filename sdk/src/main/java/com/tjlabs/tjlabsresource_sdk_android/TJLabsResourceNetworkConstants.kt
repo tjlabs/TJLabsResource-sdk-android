@@ -85,9 +85,15 @@ internal object TJLabsResourceNetworkConstants {
         return buildRetrofit(url)
     }
 
-    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-10"
+    // 2026-09-28: 단일 섹터 신 endpoint (`/{ver}/sectors/{pk}/bundle`, zip 응답).
+    // 이전 (`2026-09-10`) 는 서버 동결 — 스키마 변경(와드/그래프/지오펜스 등) 반영 불가.
+    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-28"
     private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
     private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
+    // 2026-10-02: 멀티 섹터 endpoint (`/{ver}/sectors/bundle?sector_ids=...`) 전용 server version.
+    // 단일 섹터용 `2026-09-28` 과 분리 — 서버가 멀티 엔드포인트를 더 최신 버전 네임스페이스로 노출.
+    // iOS `TJLabsResourceNetworkConstants.USER_MULTI_SECTOR_BUNDLE_SERVER_VERSION` 와 1:1.
+    private const val JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-02"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."
@@ -179,6 +185,9 @@ internal object TJLabsResourceNetworkConstants {
             ResourceBundleType.WARP -> WARP_SECTOR_BUNDLE_SERVER_VERSION
         }
     }
+
+    /** 멀티 섹터 endpoint 전용 server version (JUPITER). iOS 와 1:1 (`2026-10-02`). */
+    fun getMultiBundleServerVersion(): String = JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION
 
     /**
      * on-prem 서버 host 에 한해서만 hostname 검증을 pass 시키는 HostnameVerifier.

@@ -67,10 +67,24 @@ data class ParameterData(
     val standard_rss: List<Int> = listOf()
 )
 
+/**
+ * 층 지오펜스. 2026-09-28+ 스키마에서 세 영역 타입마다 **다각형 목록** 을 담는다.
+ * - 최상단 [List]: 이 영역 안의 다각형들.
+ * - 다각형: 꼭짓점 [Pair] 형식의 [List<Int>] (크기 2, `[x, y]`) 을 시계·반시계 무관하게 나열한 것.
+ *   꼭짓점 3개 이상, 마지막→첫 꼭짓점 자동 연결(닫힌 다각형), 오목 다각형 가능.
+ *   서버가 저장 시 self-intersection 검증을 통과한 유효 폴리곤만 실린다.
+ *
+ * 각 필드는 서버가 항상 세 키 모두 실어 보내므로 부재하면 서버 응답 오류로 취급 — 기본값 emptyList.
+ * 영역이 없는 타입은 빈 배열이다.
+ *
+ * 소비자 (jupiter-sdk 등) 는 이 데이터로 point-in-polygon 판정(ray casting 등) 을 수행해야 한다.
+ * 이전 스키마 (`2026-09-10` 이하) 는 사각형 목록 `[[xMin, yMin, xMax, yMax], ...]` 이었다 —
+ * 두 스키마는 상호 호환되지 않으므로 SDK 버전과 서버 버전을 함께 올려야 한다.
+ */
 data class GeofenceData(
-    val entrance_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val entrance_matching_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
-    val level_change_area: List<List<Int>> = listOf(listOf(0, 0, 0, 0)),
+    val entrance_area: List<List<List<Int>>> = emptyList(),
+    val entrance_matching_area: List<List<List<Int>>> = emptyList(),
+    val level_change_area: List<List<List<Int>>> = emptyList(),
 )
 
 internal data class SectorIdInput(
@@ -97,7 +111,23 @@ data class SectorOutput(
 )
 
 data class DefaultPositionOutput(
-    val building: DefaultPositionBuildingOutput
+    val building: DefaultPositionBuildingOutput,
+    // iOS parity (2026-10-02 server) — 섹터별 지도 줌 레벨. 서버가 nullable 로 보낼 수 있어 Optional.
+    // JSON key 는 `zoom_level`. 소비자 (지도 UI) 가 min/default/max 로 초기 줌 설정.
+    val zoom_level: ZoomLevel? = null,
+)
+
+/**
+ * 섹터별 지도 줌 레벨. iOS `ZoomLevel` struct 매핑.
+ * - [min] : 최소 허용 줌
+ * - [default_value] : 초기/기본 줌. JSON key 는 `default` (Kotlin 식별자로 사용 가능하지만
+ *   Java interop + 명시성 위해 `default_value` 로 두고 Gson `@SerializedName("default")` 매핑).
+ * - [max] : 최대 허용 줌
+ */
+data class ZoomLevel(
+    val min: Double,
+    @com.google.gson.annotations.SerializedName("default") val default_value: Double,
+    val max: Double,
 )
 
 data class DefaultPositionBuildingOutput(
@@ -651,6 +681,17 @@ interface TJLabsResourceManagerDelegate {
     // 동일한 형식이라 소비자는 같은 key 로 상관관계를 잡을 수 있다.
     // 서버 스키마 2026-08-06+ 에서만 발동. 기존 구현체는 override 없이 두면 무시.
     fun onTransitionData(transitionKey: String, data: TransitionOutput) {}
+
+    /**
+     * 멀티 섹터 로드 ([TJLabsMultiResourceManager.loadResources]) 전용 - 섹터별 처리가 끝날
+     * 때마다 1회 호출된다 (요청 섹터 순서). 모든 data callback 이 전달된 뒤 발화되므로 소비자는
+     * 이 시점에 해당 섹터의 상태가 반영 완료라고 가정 가능 (단, 네트워크 자원 — map image,
+     * entrance route CSV — 는 비동기라 그 이후에 도착할 수 있음).
+     * 단일 섹터 `loadJupiterResource` 흐름에서는 호출되지 않는다. 기본 구현이 비어 있어 override 선택.
+     *
+     * iOS `TJLabsResourceManagerDelegate.onSectorResourceLoadFinished(_:sectorId:result:)` 와 매핑.
+     */
+    fun onSectorResourceLoadFinished(sectorId: Int, result: SectorLoadResult) {}
 }
 
 interface TJLabsWarpResourceManagerDelegate {
@@ -665,4 +706,143 @@ interface TJLabsVenusResourceManagerDelegate {
 
 interface TJLabsSimulationResourceManagerDelegate {
     fun onSimulationData(sectorId: Int, data: SimulationBundleOutput)
+}
+
+// ===========================================================================
+// Multi-sector bundle load (TJ-559 / TJ-580) - iOS parity 모델
+// ===========================================================================
+// 멀티 섹터 로드 (TJLabsMultiResourceManager) 가 소비자에게 전달하는 결과 타입들.
+// 단일 섹터 loadJupiterResource 흐름은 영향 받지 않는다 — 추가 모델만 공존.
+
+/**
+ * 섹터 로드가 실패했을 때 어느 단계에서 끊겼는지. iOS `ResourceLoadStage` 와 1:1 매칭.
+ */
+enum class ResourceLoadStage {
+    SECTOR_BUNDLE_METADATA,
+    SECTOR_BUNDLE_DOWNLOAD,
+    IMAGE,
+    GEOFENCE,
+    ENTRANCE,
+    ENTRANCE_ROUTE,
+    UNITS,
+    NODE_LINK,
+    PATH_PIXEL,
+    WARDS,
+    PARKING_MATCHES
+}
+
+/**
+ * 섹터 로드 중 발생한 개별 실패 아이템. `isCritical=true` 이면 그 섹터는 실패로 집계된다
+ * (iOS 와 동일 — DR path CSV 누락, 노드/링크 build 실패, bundle.json 누락 등).
+ * optional 자원 (map image, entrance route CSV 등) 은 `isCritical=false` 로 수집만 되고
+ * 소비자 사이드 UI 에 노출용으로 유용.
+ */
+data class ResourceLoadStageFailure(
+    val stage: ResourceLoadStage,
+    val key: String,
+    val isCritical: Boolean,
+    val statusCode: Int? = null
+)
+
+/**
+ * 단일 섹터 로드 결과 (iOS `SectorLoadResult` 매핑). `versionId` 와 `isCached` 는 조합
+ * zip 전체의 속성이므로 같은 로드의 모든 섹터가 공유.
+ */
+data class SectorLoadResult(
+    val sectorId: Int,
+    val isSuccess: Boolean,
+    val failedStage: ResourceLoadStage?,
+    val failures: List<ResourceLoadStageFailure>,
+    val versionId: String,
+    val isCached: Boolean
+)
+
+/**
+ * 멀티 섹터 로드 입력 — telemetry 용으로 result 에 다시 담겨 반환된다.
+ * 단일 섹터 호환성: `sectorId` 는 첫 번째 요청 섹터.
+ */
+data class MultiResourceLoadInput(
+    val provider: String,
+    val region: String,
+    val env: ResourceServerEnv,
+    val sectorIds: List<Int>,
+    val forceUpdate: Boolean,
+    val imageLoadPolicy: ImageLoadPolicy
+) {
+    val sectorId: Int get() = sectorIds.firstOrNull() ?: 0
+}
+
+/**
+ * 멀티 섹터 로드 완료 콜백 결과 (iOS `ResourceLoadResult` 매핑).
+ * 모든 섹터가 성공한 경우에만 `isSuccess=true`. 섹터별 상세는 `sectorResults`.
+ */
+data class MultiResourceLoadResult(
+    val eventCode: Int,
+    val message: String,
+    val isSuccess: Boolean,
+    val failedStage: ResourceLoadStage?,
+    val failures: List<ResourceLoadStageFailure>,
+    val input: MultiResourceLoadInput,
+    val versionId: String?,
+    val isCached: Boolean,
+    val sectorResults: List<SectorLoadResult>,
+    // ── 2026-10 track payload (문제 발생 시 서버 추적용) ───────────────────────────
+    /** 발화 경로 (FRESH / MULTI_FRESH / MULTI_CACHED / FALLBACK / ...). 소비자가 서버 전송 시 label 포함. */
+    val emitSource: EmitSource = EmitSource.MULTI_FRESH,
+    /** `isCached=true, versionVerified=false` 조합이면 폴백 사용 — 서버 version 과 다를 수 있다는 신호. */
+    val versionVerified: Boolean = true,
+    /** 단계별 wall-clock (ms). 네트워크 jitter / extract / parse 를 분리해서 서버에서 bottleneck 분석 가능. */
+    val stageTimings: MultiResourceStageTimings? = null,
+)
+
+/**
+ * Multi 로더 단일 session 의 단계별 wall-clock 분해. `MultiResourceLoadResult.stageTimings` 로 함께 실려
+ * 소비자가 서버 텔레메트리 payload 에 포함 가능. 모든 값 ms. 측정 안 된 단계는 0 (예: cache HIT 시
+ * zipDownloadMs=0, FALLBACK 시 metadataFetchMs 는 실패까지의 시간, zipDownloadMs=0).
+ */
+data class MultiResourceStageTimings(
+    val metadataFetchMs: Long,
+    val zipDownloadMs: Long,
+    val zipExtractMs: Long,
+    val prepareParallelMs: Long,
+    val totalMs: Long,
+)
+
+/**
+ * Multi 로더 전용 — 각 섹터 처리 결과 ([TJLabsBundleDataManager.processSectorFromArchive]).
+ * SDK internal 레벨에서만 사용.
+ */
+internal data class SectorProcessOutcome(
+    val isSuccess: Boolean,
+    val failures: List<ResourceLoadStageFailure>
+)
+
+/**
+ * loadResource 성공/실패 이벤트 코드. iOS `TJLabsResourceCode` 와 동일한 값.
+ */
+object TJLabsResourceCode {
+    const val LOAD_SUCCESS = 2102
+    const val LOAD_FAILURE = 5101
+    const val UNCLASSIFIED_FAILURE_STATUS = -1
+    fun loadResourcesEventCode(isSuccess: Boolean): Int = if (isSuccess) LOAD_SUCCESS else LOAD_FAILURE
+}
+
+/**
+ * Delegate 데이터 콜백 발화 경로 식별자. `(postLoad timing)` 로그와 소비자 (Jupiter 등) 가
+ * 서버 텔레메트리에 포함할 때 "어느 경로로 데이터가 소비자에게 도달했는지" 를 track 가능.
+ *
+ *  - [FRESH_LOAD]  : bundle 을 서버에서 새로 받아 첫 발화. 단일 섹터 cold load.
+ *  - [CACHE_HIT]   : 디스크/메모리 캐시에서 bundle 재사용. 단일 섹터 warm load.
+ *  - [MULTI_FRESH] : Multi 로더가 조합 zip 을 새로 받아 섹터별 발화. `isCached=false, versionVerified=true`.
+ *  - [MULTI_CACHED]: Multi 로더가 조합 zip 재사용 (버전 일치). `isCached=true, versionVerified=true`.
+ *  - [FALLBACK]    : Phase 1 오프라인 폴백 (meta/raw 실패 → 디스크 bundle 재조립). `versionVerified=false`.
+ *  - [SNAPSHOT_HIT]: 외부가 `emitCachedSnapshot(bundleType, sectorId)` 공개 API 로 재발화 요청.
+ */
+enum class EmitSource(val label: String) {
+    FRESH_LOAD("FRESH"),
+    CACHE_HIT("CACHE_HIT"),
+    MULTI_FRESH("MULTI_FRESH"),
+    MULTI_CACHED("MULTI_CACHED"),
+    FALLBACK("FALLBACK"),
+    SNAPSHOT_HIT("SNAPSHOT_HIT");
 }
