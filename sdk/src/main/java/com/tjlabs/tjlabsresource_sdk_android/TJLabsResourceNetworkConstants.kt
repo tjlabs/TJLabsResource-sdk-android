@@ -85,14 +85,15 @@ internal object TJLabsResourceNetworkConstants {
         return buildRetrofit(url)
     }
 
-    // 2026-09-28: 단일 섹터 신 endpoint (`/{ver}/sectors/{pk}/bundle`, zip 응답).
-    // 이전 (`2026-09-10`) 는 서버 동결 — 스키마 변경(와드/그래프/지오펜스 등) 반영 불가.
-    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-09-28"
+    // 2026-10-02: 단일/멀티 섹터 공통 server version (iOS parity).
+    //  - 단일: `/{ver}/sectors/{pk}/bundle`, zip 응답
+    //  - 멀티: `/{ver}/sectors/bundle?sector_ids=...`
+    // iOS `USER_SECTOR_BUNDLE_SERVER_VERSION` / `USER_MULTI_SECTOR_BUNDLE_SERVER_VERSION` 모두 `2026-10-02`.
+    // 이전 (`2026-09-28`) 는 단일 섹터 전용 네임스페이스였고, 멀티 와 분리돼 있었다. iOS 가 통합한 뒤로
+    // 서버는 동일 네임스페이스에서 두 엔드포인트를 모두 노출.
+    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-02"
     private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
     private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
-    // 2026-10-02: 멀티 섹터 endpoint (`/{ver}/sectors/bundle?sector_ids=...`) 전용 server version.
-    // 단일 섹터용 `2026-09-28` 과 분리 — 서버가 멀티 엔드포인트를 더 최신 버전 네임스페이스로 노출.
-    // iOS `TJLabsResourceNetworkConstants.USER_MULTI_SECTOR_BUNDLE_SERVER_VERSION` 와 1:1.
     private const val JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-02"
 
     private const val HTTP_PREFIX = "https://"

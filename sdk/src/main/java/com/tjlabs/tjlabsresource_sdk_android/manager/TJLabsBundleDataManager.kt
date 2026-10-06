@@ -2078,9 +2078,8 @@ internal class TJLabsBundleDataManager {
         return try {
             val root = JSONObject(raw)
 
-            // 2026-09-28+ 스키마 판별 플래그. true 면 그래프 path · parking_matches · simulations 항목의
-            // 값이 zip 내부 경로(문자열) 로, false 면 legacy 객체 (`{url: "..."}`) 로 실린다.
-            val useZipPath = bundleZipPath != null
+            // iOS parity : path · parking_matches · simulations 는 bare string / `{url: "..."}` 둘 다
+            // 수용 (readStringOrUrl). 스키마 판별 플래그 없이 값 타입만 보고 추출한다.
 
             val buildings = mutableListOf<BuildingOutput>()
             val levelWardsMap = mutableMapOf<String, List<String>>()
@@ -2120,13 +2119,10 @@ internal class TJLabsBundleDataManager {
                     // 2026-08-06+ 스키마: "floor" | "transition". 이전 스키마엔 필드 없음 → 기본 "floor".
                     val levelType = levelObj.optString("type", "floor").ifBlank { "floor" }
                     // parking_matches: 파일 미업로드 시 서버가 null 을 보낸다.
-                    //   - 2026-09-28+ (zip): 문자열 (zip entry 경로) 또는 null.
-                    //   - legacy: `{url: "..."}` 오브젝트 또는 null. enrich 단계에서 이 값을 원본대로 사용.
-                    val parkingMatchesRef: String = if (useZipPath) {
-                        if (levelObj.isNull("parking_matches")) "" else levelObj.optString("parking_matches").orEmpty()
-                    } else {
-                        levelObj.optJSONObject("parking_matches")?.optString("url").orEmpty()
-                    }
+                    // iOS `ParkingMatchesInfo` decoder 와 동일하게 bare string / `{url: "..."}` 오브젝트
+                    // 둘 다 수용. 2026-10-02 통합 네임스페이스에서는 single/multi 경로가 섞여 발화될 수 있어
+                    // useZipPath 분기 대신 값 타입을 보고 추출.
+                    val parkingMatchesRef: String = readStringOrUrl(levelObj, "parking_matches")
                     if (parkingMatchesRef.isNotBlank()) parkingMatchesUrls[levelId] = parkingMatchesRef
                     levels.add(LevelOutput(id = levelId, name = levelName, image = imageUrl, type = levelType))
                     if (isDebugLevel.not() && imageUrl.isNotBlank()) {
@@ -2169,7 +2165,7 @@ internal class TJLabsBundleDataManager {
                             linkMap[levelKey] = buildLinkDict(links, linkGroups ?: emptyList())
                         }
 
-                        val pathUrl = readGraphPathRef(drGraphObj, useZipPath)
+                        val pathUrl = readGraphPathRef(drGraphObj)
                         // 그래프가 실제로 비어있으면 (nodes=0, links=0) pathUrl 은 서버에 잔존하는
                         // 껍데기일 뿐 실제 CSV 는 없다 — 2026-08-06 스키마부터 순수 floor 의
                         // walkable 데이터가 전이층으로 이동한 경우 이런 상태가 발생. fetch 시도
@@ -2187,7 +2183,7 @@ internal class TJLabsBundleDataManager {
 
                     if (isDebugLevel.not()) {
                         val pdrGraphObj = resolvePdrGraphObject(levelObj)
-                        val pdrPathUrl = if (pdrGraphObj != null) readGraphPathRef(pdrGraphObj, useZipPath) else ""
+                        val pdrPathUrl = if (pdrGraphObj != null) readGraphPathRef(pdrGraphObj) else ""
                         val pdrNodeCount = pdrGraphObj?.optJSONArray("nodes")?.length() ?: 0
                         val pdrLinkCount = pdrGraphObj?.optJSONArray("links")?.length() ?: 0
                         val pdrHasGraphContent = pdrNodeCount > 0 || pdrLinkCount > 0
@@ -2439,16 +2435,28 @@ internal class TJLabsBundleDataManager {
     }
 
     /**
-     * graph 의 `path` 필드 값을 스키마별로 추출한다.
-     *   - 2026-09-28+ (useZipPath=true): 문자열 (zip entry 경로) 또는 null → 빈 문자열.
-     *   - legacy       (useZipPath=false): `{ "url": "..." }` 오브젝트의 url 필드.
-     * 빈 문자열은 "미지정" 을 의미하고 소비측에서 fetch 시도 자체가 스킵된다.
+     * graph 의 `path` 필드 값을 스키마와 무관하게 추출한다 (iOS `PathInfo` decoder 매핑).
+     *   - bare string          : zip entry 경로. 2026-09-28+ zip 번들에서 사용.
+     *   - `{ "url": "..." }`   : 절대 URL. 레거시 single-sector 응답 포맷.
+     *   - null / 다른 타입     : "" (미지정) — 소비측에서 fetch 자체가 스킵된다.
+     * 2026-10-02 통합 server version 하에서는 두 포맷이 섞여 올 수 있어 분기 대신 값 타입을 본다.
      */
-    private fun readGraphPathRef(graphObj: JSONObject, useZipPath: Boolean): String {
-        return if (useZipPath) {
-            if (graphObj.isNull("path")) "" else graphObj.optString("path").orEmpty()
-        } else {
-            graphObj.optJSONObject("path")?.optString("url").orEmpty()
+    private fun readGraphPathRef(graphObj: JSONObject): String {
+        return readStringOrUrl(graphObj, "path")
+    }
+
+    /**
+     * [iOS parity · `PathInfo` / `ParkingMatchesInfo` decoder]
+     * 번들 JSON 에서 "object with url" / "bare string" 두 포맷을 모두 수용해 URL 문자열만 뽑는다.
+     * `useZipPath` 분기를 대체해 single/multi/legacy 모든 응답에서 안전하게 동작.
+     */
+    private fun readStringOrUrl(obj: JSONObject, key: String): String {
+        if (obj.isNull(key)) return ""
+        val value = obj.opt(key) ?: return ""
+        return when (value) {
+            is String -> value
+            is JSONObject -> value.optString("url").orEmpty()
+            else -> ""
         }
     }
 
@@ -2464,9 +2472,10 @@ internal class TJLabsBundleDataManager {
         }
 
         // Fallback: if dead_reckoning field is missing/empty, infer DR by path URL.
+        // path 가 bare string / {url: ...} 둘 다일 수 있으므로 readStringOrUrl 로 추출 (iOS parity).
         for (i in 0 until graphsArray.length()) {
             val graphObj = graphsArray.optJSONObject(i) ?: continue
-            val pathUrl = graphObj.optJSONObject("path")?.optString("url").orEmpty()
+            val pathUrl = readStringOrUrl(graphObj, "path")
             if (pathUrl.contains("/paths/dr/", ignoreCase = true)) {
                 return graphObj
             }

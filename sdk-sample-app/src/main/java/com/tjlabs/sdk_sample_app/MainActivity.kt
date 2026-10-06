@@ -1421,9 +1421,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         }
     }
 
-    override fun onSectorData(data: SectorOutput) {
+    override fun onSectorData(sectorId: Int, data: SectorOutput) {
         // 전체 SectorOutput toString 은 수 KB 라 요약만 남긴다. 필요하면 UI callback log 에서 확인.
-        TJResourceLogger.d("onSectorData : id=${data.id} name=${data.name} buildings=${data.buildings.size} transitions=${data.transitions.size}")
+        TJResourceLogger.d("onSectorData : sectorId=$sectorId id=${data.id} name=${data.name} buildings=${data.buildings.size} transitions=${data.transitions.size}")
         populateSourceHints(data)
         // 스키마 2026-08-06+ : level.type == "floor" 인 것만 사용자 층 선택 UI 후보.
         // 전이층("transition") 은 측위·경로탐색 대상이므로 SDK 는 필터링 없이 그대로 전달함.
@@ -1448,9 +1448,9 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         updateCardStatusOnly(jupiterCard, "error=$error • ${nowText()}", false)
     }
 
-    override fun onBuildingsData(data: List<BuildingOutput>) {
-        TJResourceLogger.d("onBuildingsData : count=${data.size} levelsTotal=${data.sumOf { it.levels.size }}")
-        appendCallbackLog("onBuildingsData", "count=${data.size}", "api")
+    override fun onBuildingsData(sectorId: Int, data: List<BuildingOutput>) {
+        TJResourceLogger.d("onBuildingsData : sectorId=$sectorId count=${data.size} levelsTotal=${data.sumOf { it.levels.size }}")
+        appendCallbackLog("onBuildingsData", "sectorId=$sectorId count=${data.size}", "api")
     }
 
     override fun onLevelWardsData(levelKey: String, data: List<String>) {

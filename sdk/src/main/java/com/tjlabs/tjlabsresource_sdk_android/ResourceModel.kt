@@ -654,9 +654,12 @@ enum class ResourceError {
 // delegate 체인은 TJLabsResourceManager → TJLabsResourceManagerDelegate 단일 경로
 
 interface TJLabsResourceManagerDelegate {
-    fun onSectorData(data: SectorOutput)
+    // sectorId 는 멀티 섹터 로드 ([TJLabsMultiResourceManager.loadResources]) 에서 어느 섹터의
+    // 데이터인지 분리하기 위함. 단일 섹터 로드도 자신의 섹터 id 를 전달.
+    // iOS parity : `onSectorBundleData(_:sectorId:data:)` / `onBuildingsData(_:sectorId:data:)`.
+    fun onSectorData(sectorId: Int, data: SectorOutput)
     fun onSectorError(error: ResourceError)
-    fun onBuildingsData(data: List<BuildingOutput>)
+    fun onBuildingsData(sectorId: Int, data: List<BuildingOutput>)
     fun onLevelWardsData(levelKey: String, data : List<String>)
     fun onScaleOffsetData(scaleKey: String, data: List<Float>)
     // levelType: 해당 level 의 type ("floor" | "transition"). 2026-08-06+ 스키마에서 전이층의
@@ -681,6 +684,22 @@ interface TJLabsResourceManagerDelegate {
     // 동일한 형식이라 소비자는 같은 key 로 상관관계를 잡을 수 있다.
     // 서버 스키마 2026-08-06+ 에서만 발동. 기존 구현체는 override 없이 두면 무시.
     fun onTransitionData(transitionKey: String, data: TransitionOutput) {}
+
+    /**
+     * 주차면 매칭 per-level 콜백. key 는 "${sectorId}_${bldg}_${levelName}" — 다른 level-scope
+     * 콜백들과 동일. [levelId] 는 매치 파일의 레벨 식별자(iOS parity : `level_id`), [data] 는
+     * GeoJSON 피처 id ↔ 외부 vendor 주차면 id 매핑 리스트, [levelMatch] 는 파일 root 의
+     * `level_match` (사용자용 층 표기, 없으면 null).
+     *
+     * iOS `TJLabsResourceManagerDelegate.onMatchesData(_:key:levelId:data:levelMatch:)` 매핑.
+     * 기본 구현이 비어 있어 override 선택.
+     */
+    fun onMatchesData(
+        key: String,
+        levelId: Int,
+        data: List<ParkingMatch>,
+        levelMatch: String?
+    ) {}
 
     /**
      * 멀티 섹터 로드 ([TJLabsMultiResourceManager.loadResources]) 전용 - 섹터별 처리가 끝날

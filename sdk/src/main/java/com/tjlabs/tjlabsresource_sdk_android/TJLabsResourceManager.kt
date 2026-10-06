@@ -324,10 +324,10 @@ class TJLabsResourceManager {
         val timer = PostLoadTimer("emit", sectorId)
 
         timer.item("onSectorData", "id=$sectorId buildings=${snapshot.sectorData.buildings.size}") {
-            delegate?.onSectorData(snapshot.sectorData)
+            delegate?.onSectorData(sectorId, snapshot.sectorData)
         }
         timer.item("onBuildingsData", "n=${snapshot.sectorData.buildings.size}") {
-            delegate?.onBuildingsData(snapshot.sectorData.buildings)
+            delegate?.onBuildingsData(sectorId, snapshot.sectorData.buildings)
         }
 
         snapshot.levelWardsDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
@@ -386,6 +386,24 @@ class TJLabsResourceManager {
         if (affine != null) {
             timer.item("onAffineData", "sector=$sectorId") {
                 delegate?.onAffineData(sectorId, affine)
+            }
+        }
+
+        // ParkingMatches per-level emit (iOS parity : TJLabsParkingMatchesManager).
+        // key 는 다른 level-scope 콜백들과 동일 "${sectorId}_${bldg}_${lvName}". levelId → key 매핑은
+        // snapshot.sectorData.buildings 를 1회 순회.
+        if (snapshot.parkingMatchesDataByLevelId.isNotEmpty()) {
+            val levelKeyById = mutableMapOf<Int, String>()
+            for (b in snapshot.sectorData.buildings) {
+                for (lv in b.levels) {
+                    levelKeyById[lv.id] = "${sectorId}_${b.name}_${lv.name}"
+                }
+            }
+            snapshot.parkingMatchesDataByLevelId.forEach { (levelId, pm) ->
+                val key = levelKeyById[levelId] ?: "${sectorId}_?_?"
+                timer.item("onMatchesData", "key=$key levelId=$levelId n=${pm.matches.size}") {
+                    delegate?.onMatchesData(key, levelId, pm.matches, pm.level_match)
+                }
             }
         }
 
