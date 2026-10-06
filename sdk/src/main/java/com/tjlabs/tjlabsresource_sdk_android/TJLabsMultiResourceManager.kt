@@ -348,6 +348,13 @@ object TJLabsMultiResourceManager {
             }
             val tPrepare = nowMs()
             val decodeStartNs = if (TJLabsBundleDataManager.benchmarkTimingEnabled) System.nanoTime() else 0L
+            // iOS parity (TJ-609, 2026-10-06): 조합 캐시 디렉토리 격리.
+            //   엔트런스 route CSV 처럼 zip 안에 포함 안 되고 외부 URL 로 받는 자원을 섹터별
+            //   디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`) 대신 조합 아래
+            //   (`.../multiBundle/enrich/{comboKey}/entrance/sector_{sectorId}/*.csv`) 에 저장.
+            //   조합 변경 시 evictOldCombinations 가 enrich/{구조합} 함께 삭제 → LRU 자동.
+            val comboKey = combinationKey(sectorIds)
+            val comboCacheDir = File(application.cacheDir, "$CSV_DIR/$MULTI_DIR/enrich/$comboKey")
             // 섹터별 병렬 처리 — 각 섹터는 자기 영역만 터치하고 bundleCache 저장을 완료한다.
             val sectorDeferreds = sectorIds.map { sectorId ->
                 async {
@@ -357,7 +364,8 @@ object TJLabsMultiResourceManager {
                         archiveFile = archiveFile,
                         extractedRoot = extractedRoot,
                         versionId = versionId,
-                        imageLoadPolicy = imageLoadPolicy
+                        imageLoadPolicy = imageLoadPolicy,
+                        comboCacheDir = comboCacheDir,
                     )
                 }
             }
@@ -571,14 +579,18 @@ object TJLabsMultiResourceManager {
         val zips = (dir.listFiles() ?: emptyArray()).filter { it.extension == "zip" }
         if (zips.size <= MAX_CACHED_COMBINATIONS) return
         val sorted = zips.sortedByDescending { it.lastModified() }
+        val enrichRoot = File(dir, "enrich")
         for (file in sorted.drop(MAX_CACHED_COMBINATIONS)) {
             val key = file.nameWithoutExtension
             runCatching { file.delete() }
+            // 2026-10-06 (TJ-609): 조합별 enrich 캐시 (entrance CSV 등) 도 함께 지움.
+            // comboCacheDir = `.../multiBundle/enrich/{comboKey}` 를 상위에서 통째로 삭제.
+            runCatching { File(enrichRoot, key).deleteRecursively() }
             application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .remove(PREF_VERSION_PREFIX + key)
                 .apply()
-            TJResourceLogger.d("(TJLabsMultiResourceManager) evict // key=$key // path=${file.absolutePath}")
+            TJResourceLogger.d("(TJLabsMultiResourceManager) evict // key=$key // zip=${file.absolutePath} + enrich/{key}")
         }
     }
 
