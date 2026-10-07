@@ -1,12 +1,10 @@
 package com.tjlabs.tjlabsresource_sdk_android
 
-import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.http.GET
 import retrofit2.http.Headers
 import retrofit2.http.Path
 import retrofit2.http.Query
-import retrofit2.http.Url
 
 internal interface PostInput {
     @Headers(
@@ -14,10 +12,21 @@ internal interface PostInput {
         "content-type: application/json"
     )
 
+    // 2026-09-10 이하 스펙 (single sector, JSON 응답). VENUS lite 및 legacy 소비자 fallback 용.
     @GET("/{server_version}/sectors/{pk}/bundle")
     fun getSectorBundle(
         @Path("server_version") serverVersion: String,
         @Path("pk") pk: Int,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
+    // 2026-09-28+ 스펙: sector_ids 를 반복 키(`sector_ids=42&sector_ids=7`)로 실어 보내는 통합 endpoint.
+    // 응답은 여전히 `{url, version_id}` 이지만 url 은 zip 을 가리킨다. sector_ids 는 1~5개.
+    // Retrofit 의 `@Query("k") List<T>` 는 기본이 반복 키라 서버 요구 형식(OpenAPI 3 배열 기본형)에 부합.
+    @GET("/{server_version}/sectors/bundle")
+    fun getSectorBundleV2(
+        @Path("server_version") serverVersion: String,
+        @Query("sector_ids") sectorIds: List<Int>,
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
@@ -48,8 +57,8 @@ internal interface PostInput {
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
-    @GET
-    fun getSectorBundleJsonRaw(
-        @Url url: String
-    ): Call<ResponseBody>
+    // 2026-09-28+ 흐름에서는 bundle 파일 다운로드가 Retrofit 을 거치지 않고
+    // [TJLabsBundleDataManager.downloadBundleFile] 이 HttpURLConnection 으로 직접 스트리밍한다
+    // (40MB 급 zip 이라 ResponseBody.string() 로 통째로 메모리에 올리면 부담이 크다).
+    // 따라서 `getSectorBundleJsonRaw` 는 더 이상 필요하지 않다.
 }

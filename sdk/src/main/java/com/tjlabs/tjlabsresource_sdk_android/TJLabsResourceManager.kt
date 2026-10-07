@@ -96,10 +96,11 @@ class TJLabsResourceManager {
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
         imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
+        useLegacyEndpoint: Boolean = false,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
         setRegion(provider, region, env)
-        bundleDataManager.loadBundle(application, bundleType, sectorId, imageLoadPolicy) { isSuccess, message, snapshot, source ->
+        bundleDataManager.loadBundle(application, bundleType, sectorId, imageLoadPolicy, useLegacyEndpoint) { isSuccess, message, snapshot, source ->
             TJResourceLogger.d("(TJLabsResource) loadResourceByType callback // type=$bundleType // success=$isSuccess // message=$message // source=$source")
             if (!isSuccess || snapshot == null) {
                 when (bundleType) {
@@ -111,6 +112,7 @@ class TJLabsResourceManager {
                 return@loadBundle
             }
 
+            val emitSource = deriveEmitSource(source)
             val fromCache = isFromCache(source)
             val postLoadStartMs = postLoadNowMs()
             val cacheMs = measurePostLoadMs { cacheSnapshot(sectorId, snapshot) }
@@ -121,11 +123,16 @@ class TJLabsResourceManager {
                     ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
                 }
             }
-            logPostLoadTotal(bundleType, sectorId, fromCache, cacheMs, emitMs, postLoadStartMs)
+            logPostLoadTotal(bundleType, sectorId, emitSource, cacheMs, emitMs, postLoadStartMs)
             completion(true, ResourceLoadInfo(versionId = snapshot.versionId, fromCache = fromCache))
         }
     }
 
+    /**
+     * @param useLegacyEndpoint **벤치마크/비교 전용**. true 면 프리즈된 v1 endpoint (`/2026-09-10/sectors/{pk}/bundle`
+     *  JSON) 를 강제 호출해 zip 스키마와 소요·용량 비교 목적으로 사용한다. 프로덕션 코드는 기본값(false) 을 사용.
+     *  v1 호출은 in-memory / 디스크 캐시를 우회해 매번 fresh fetch 하고, v2 캐시를 오염시키지도 않는다.
+     */
     fun loadJupiterResource(
         application: Application,
         provider: String,
@@ -133,10 +140,11 @@ class TJLabsResourceManager {
         sectorId: Int,
         env: ResourceServerEnv = ResourceServerEnv.PROD,
         imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
+        useLegacyEndpoint: Boolean = false,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env // imagePolicy=$imageLoadPolicy")
-        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, imageLoadPolicy, completion)
+        TJResourceLogger.d("(TJLabsResource) loadJupiterResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env // imagePolicy=$imageLoadPolicy // legacy=$useLegacyEndpoint")
+        loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, imageLoadPolicy, useLegacyEndpoint, completion)
     }
 
     fun loadVenusResource(
@@ -174,7 +182,7 @@ class TJLabsResourceManager {
         imageLoadPolicy: ImageLoadPolicy = ImageLoadPolicy.ALL,
         completion: (Boolean, ResourceLoadInfo?) -> Unit,
     ) {
-        loadJupiterResource(application, provider, region, sectorId, env, imageLoadPolicy, completion)
+        loadJupiterResource(application, provider, region, sectorId, env, imageLoadPolicy, completion = completion)
     }
 
     /**
@@ -190,10 +198,46 @@ class TJLabsResourceManager {
      * @return 캐시 히트 시 [ResourceLoadInfo] (fromCache=true), 미스 시 null. 호출자는 null 이면
      *         일반 [loadResource] 로 fallback 해야 한다.
      */
-    fun emitCachedSnapshot(bundleType: ResourceBundleType, sectorId: Int): ResourceLoadInfo? {
+    /**
+     * 섹터 지정 건물 이름 → ID 조회 (iOS `TJLabsResourceManager.getBuildingId(sectorId:buildingName:)` 매핑).
+     *
+     * 멀티 섹터 로드 (TJLabsMultiResourceManager) 상태에서 섹터 간 건물 이름이 겹칠 수 있으므로
+     * sectorId 지정이 필수. 로드되지 않은 섹터면 null. 건물 이름이 그 섹터 bundle 안에 없어도 null.
+     *
+     * TJLabsBundleDataManager.bundleCache 는 각 섹터의 BundleDataSnapshot 을 보유하므로 추가
+     * 네트워크 IO 없이 즉시 조회.
+     */
+    fun getBuildingId(sectorId: Int, buildingName: String): Int? {
+        val snapshot = bundleDataManager.getCachedSnapshot(ResourceBundleType.JUPITER, sectorId)
+            ?: bundleDataManager.getCachedSnapshot(ResourceBundleType.VENUS, sectorId)
+            ?: bundleDataManager.getCachedSnapshot(ResourceBundleType.WARP, sectorId)
+            ?: return null
+        return snapshot.sectorData.buildings.firstOrNull { it.name == buildingName }?.id
+    }
+
+    /**
+     * bundleCache 안의 섹터 snapshot 을 delegate 로 재발화. 기본 라벨은 [EmitSource.SNAPSHOT_HIT] —
+     * 외부 소비자가 "이미 로드된 섹터의 데이터만 다시 받고 싶다" 는 경우.
+     *
+     * Multi 로더는 섹터 처리 완료 후 이 함수를 호출해 **처음** 발화를 하기 때문에, 그 경로에서는
+     * [emitCachedSnapshot] overload (source 명시) 를 사용 — 로그에 `mode=MULTI_FRESH` /
+     * `MULTI_CACHED` / `FALLBACK` 로 뜬다.
+     */
+    fun emitCachedSnapshot(bundleType: ResourceBundleType, sectorId: Int): ResourceLoadInfo? =
+        emitCachedSnapshot(bundleType, sectorId, EmitSource.SNAPSHOT_HIT)
+
+    /**
+     * [emitCachedSnapshot] source hint overload — Multi 로더가 섹터별 발화 경로를 명시해 로그와
+     * 소비자 텔레메트리에서 FRESH/CACHE/FALLBACK 을 구분 가능하게 한다.
+     */
+    fun emitCachedSnapshot(
+        bundleType: ResourceBundleType,
+        sectorId: Int,
+        source: EmitSource,
+    ): ResourceLoadInfo? {
         val snapshot = bundleDataManager.getCachedSnapshot(bundleType, sectorId) ?: return null
         TJResourceLogger.d(
-            "(TJLabsResource) emitCachedSnapshot hit // type=$bundleType // sectorId=$sectorId // versionId=${snapshot.versionId}"
+            "(TJLabsResource) emitCachedSnapshot hit // type=$bundleType // sectorId=$sectorId // versionId=${snapshot.versionId} // source=${source.label}"
         )
         val postLoadStartMs = postLoadNowMs()
         val cacheMs = measurePostLoadMs { cacheSnapshot(sectorId, snapshot) }
@@ -204,7 +248,7 @@ class TJLabsResourceManager {
                 ResourceBundleType.VENUS -> emitVenusSnapshot(snapshot)
             }
         }
-        logPostLoadTotal(bundleType, sectorId, fromCache = true, cacheMs = cacheMs, emitMs = emitMs, startMs = postLoadStartMs)
+        logPostLoadTotal(bundleType, sectorId, source, cacheMs, emitMs, postLoadStartMs)
         return ResourceLoadInfo(versionId = snapshot.versionId, fromCache = true)
     }
 
@@ -280,10 +324,10 @@ class TJLabsResourceManager {
         val timer = PostLoadTimer("emit", sectorId)
 
         timer.item("onSectorData", "id=$sectorId buildings=${snapshot.sectorData.buildings.size}") {
-            delegate?.onSectorData(snapshot.sectorData)
+            delegate?.onSectorData(sectorId, snapshot.sectorData)
         }
         timer.item("onBuildingsData", "n=${snapshot.sectorData.buildings.size}") {
-            delegate?.onBuildingsData(snapshot.sectorData.buildings)
+            delegate?.onBuildingsData(sectorId, snapshot.sectorData.buildings)
         }
 
         snapshot.levelWardsDataMap.filterKeys { it.contains("_D").not() }.forEach { (key, value) ->
@@ -342,6 +386,24 @@ class TJLabsResourceManager {
         if (affine != null) {
             timer.item("onAffineData", "sector=$sectorId") {
                 delegate?.onAffineData(sectorId, affine)
+            }
+        }
+
+        // ParkingMatches per-level emit (iOS parity : TJLabsParkingMatchesManager).
+        // key 는 다른 level-scope 콜백들과 동일 "${sectorId}_${bldg}_${lvName}". levelId → key 매핑은
+        // snapshot.sectorData.buildings 를 1회 순회.
+        if (snapshot.parkingMatchesDataByLevelId.isNotEmpty()) {
+            val levelKeyById = mutableMapOf<Int, String>()
+            for (b in snapshot.sectorData.buildings) {
+                for (lv in b.levels) {
+                    levelKeyById[lv.id] = "${sectorId}_${b.name}_${lv.name}"
+                }
+            }
+            snapshot.parkingMatchesDataByLevelId.forEach { (levelId, pm) ->
+                val key = levelKeyById[levelId] ?: "${sectorId}_?_?"
+                timer.item("onMatchesData", "key=$key levelId=$levelId n=${pm.matches.size}") {
+                    delegate?.onMatchesData(key, levelId, pm.matches, pm.level_match)
+                }
             }
         }
 
@@ -526,6 +588,139 @@ class TJLabsResourceManager {
      * 전체 층이동 구간을 key 기반으로 조회. key 형식은 [getTransition] 참고.
      */
     fun getTransitionsByKey(): Map<String, TransitionOutput> = transitionsByKey
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // iOS parity — 섹터 지정 semantic getter (2026-10 멀티 섹터 지원 확장)
+    //
+    // 멀티 섹터 로드 상태에서 섹터별 데이터를 명시적으로 조회하도록 한다. 기존 전역 map
+    // getter 는 그대로 유지 (하위 호환) 하되, 섹터 지정 overload 로 소비자가 멀티 섹터
+    // 환경에서 명확히 쓸 수 있게 한다. iOS `TJLabsResourceManager.swift` 매칭.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** iOS `getSectorBundle(sectorId:)` alias — 기존 [getSectorData] 와 동일. */
+    fun getSectorBundle(sectorId: Int): SectorOutput? = sectorDataMap[sectorId]
+
+    /** 섹터 지정 affine 변환 파라미터 (WGS84 변환). iOS `getWGS84Transform(sectorId:)` 매칭. */
+    fun getWGS84Transform(sectorId: Int): AffineTransParamOutput? = affineParamMap[sectorId]
+
+    /** 섹터 지정 기본 위치 (default_position). iOS `getDefaultPosition(sectorId:)` 매칭. */
+    fun getDefaultPosition(sectorId: Int): DefaultPositionOutput? =
+        sectorDataMap[sectorId]?.default_position
+
+    /**
+     * buildingId → buildingName 역조회. iOS `getBuildingName(buildingId:)` 매칭.
+     * 모든 로드된 섹터를 traverse — 섹터 수가 많지 않아 성능 OK (수십 건물 이내).
+     */
+    fun getBuildingName(buildingId: Int): String? {
+        for (sector in sectorDataMap.values) {
+            sector.buildings.firstOrNull { it.id == buildingId }?.let { return it.name }
+        }
+        return null
+    }
+
+    /**
+     * levelId → levelName 역조회. iOS `getLevelName(levelId:)` 매칭.
+     * 섹터 간 levelId 는 유일 (서버 DB id) 이라 섹터 인자 불필요.
+     */
+    fun getLevelName(levelId: Int): String? {
+        for (sector in sectorDataMap.values) {
+            for (building in sector.buildings) {
+                building.levels.firstOrNull { it.id == levelId }?.let { return it.name }
+            }
+        }
+        return null
+    }
+
+    /**
+     * (sectorId, buildingName, levelName) → levelId. iOS `getLevelId(sectorId:buildingName:levelName:)` 매칭.
+     * 섹터 지정 lookup — 섹터 간 레벨 이름이 겹칠 수 있어 섹터 인자 필요.
+     */
+    fun getLevelId(sectorId: Int, buildingName: String, levelName: String): Int? {
+        val sector = sectorDataMap[sectorId] ?: return null
+        val building = sector.buildings.firstOrNull { it.name == buildingName } ?: return null
+        return building.levels.firstOrNull { it.name == levelName }?.id
+    }
+
+    /**
+     * 섹터 지정 pathPixel 조회. isVehicle=true 면 DR path, false 면 PDR path (`_PDR` 접미사).
+     * iOS `getPathPixelData(sectorId:building:level:isVehicle:)` 매칭.
+     */
+    fun getPathPixelData(
+        sectorId: Int, buildingName: String, levelName: String, isVehicle: Boolean
+    ): PathPixelData? {
+        val key = buildLevelKey(sectorId, buildingName, levelName, isVehicle)
+        return pathPixelDataMap[key]
+    }
+
+    /**
+     * 섹터 지정 node 조회. isVehicle=true 면 DR 그래프, false 면 PDR 그래프.
+     * iOS `getNodeData(sectorId:building:level:isVehicle:)` 매칭.
+     */
+    fun getNodeData(
+        sectorId: Int, buildingName: String, levelName: String, isVehicle: Boolean
+    ): Map<Int, NodeData>? {
+        val key = buildLevelKey(sectorId, buildingName, levelName, isVehicle)
+        return nodeDataMap[key]
+    }
+
+    /**
+     * 섹터 지정 link 조회. isVehicle=true 면 DR 그래프, false 면 PDR 그래프.
+     * iOS `getLinkData(sectorId:building:level:isVehicle:)` 매칭.
+     */
+    fun getLinkData(
+        sectorId: Int, buildingName: String, levelName: String, isVehicle: Boolean
+    ): Map<Int, LinkData>? {
+        val key = buildLevelKey(sectorId, buildingName, levelName, isVehicle)
+        return linkDataMap[key]
+    }
+
+    /** 섹터 지정 geofence 조회. */
+    fun getGeofenceData(sectorId: Int, buildingName: String, levelName: String): GeofenceData? =
+        geofenceDataMap[buildBaseLevelKey(sectorId, buildingName, levelName)]
+
+    /** 섹터 지정 landmark 조회 (ward id → LandmarkData 맵). */
+    fun getLandmarkData(
+        sectorId: Int, buildingName: String, levelName: String
+    ): Map<String, LandmarkData>? =
+        landmarkDataMap[buildBaseLevelKey(sectorId, buildingName, levelName)]
+
+    /** 섹터 지정 ward 목록 조회. */
+    fun getLevelWards(sectorId: Int, buildingName: String, levelName: String): List<String>? =
+        levelWardsDataMap[buildBaseLevelKey(sectorId, buildingName, levelName)]
+
+    /** 섹터 지정 scale/offset 조회 (`[scaleX, scaleY, offsetX, offsetY]`). */
+    fun getScaleOffset(sectorId: Int, buildingName: String, levelName: String): List<Float>? =
+        scaleOffsetDataMap[buildBaseLevelKey(sectorId, buildingName, levelName)]
+
+    /** 섹터 지정 맵 이미지 비트맵 조회. */
+    fun getBuildingLevelImage(sectorId: Int, buildingName: String, levelName: String): Bitmap? =
+        imageDataMap[buildBaseLevelKey(sectorId, buildingName, levelName)]
+
+    /** 섹터 지정 Multi 로더가 로드한 섹터 목록 조회. iOS `getLoadedSectorIds()` 매칭. */
+    fun getLoadedSectorIds(): List<Int> = sectorDataMap.keys.toList()
+
+    /**
+     * zip 내부 임의 경로의 파일 바이트 조회 — 가장 최근 Multi 로드의 zip 참조.
+     * iOS `TJLabsResourceManager.getBundleArchiveFileData(path:)` 매핑 — proxy to Multi 로더.
+     */
+    fun getBundleArchiveFileData(path: String): ByteArray? =
+        TJLabsMultiResourceManager.getBundleArchiveFileData(path)
+
+    // ── 내부 helper: level key 조립 ───────────────────────────────────────────
+    //
+    // key 포맷 — 자원 콜백 (`onPathPixelData`, `onNodeLinkData` 등) 과 통일:
+    //   base:    "${sectorId}_${buildingName}_${levelName}"      (geofence, landmark, ward, scale, image)
+    //   DR/PDR:  "${base}" (DR) 또는 "${base}_PDR" (PDR)          (pathPixel, node, link)
+
+    private fun buildBaseLevelKey(sectorId: Int, buildingName: String, levelName: String): String =
+        "${sectorId}_${buildingName}_$levelName"
+
+    private fun buildLevelKey(
+        sectorId: Int, buildingName: String, levelName: String, isVehicle: Boolean
+    ): String {
+        val base = buildBaseLevelKey(sectorId, buildingName, levelName)
+        return if (isVehicle) base else "${base}_PDR"
+    }
 
     /**
      * levelKey ("${sectorId}_${bldg}_${level}") 로부터 level.type ("floor" | "transition") 을
@@ -762,17 +957,28 @@ class TJLabsResourceManager {
     private fun logPostLoadTotal(
         bundleType: ResourceBundleType,
         sectorId: Int,
-        fromCache: Boolean,
+        source: EmitSource,
         cacheMs: Long,
         emitMs: Long,
         startMs: Long,
     ) {
         if (!TJResourceLogger.isDebugEnabled()) return
         val totalMs = (System.nanoTime() / 1_000_000L) - startMs
-        val mode = if (fromCache) "CACHE" else "FRESH"
         TJResourceLogger.i(
-            "(postLoad timing) TOTAL = ${totalMs}ms (cache ${cacheMs}ms + emit ${emitMs}ms) // sectorId=$sectorId, type=$bundleType, mode=$mode"
+            "(postLoad timing) TOTAL = ${totalMs}ms (cache ${cacheMs}ms + emit ${emitMs}ms) // sectorId=$sectorId, type=$bundleType, mode=${source.label}"
         )
+    }
+
+    /**
+     * 단일 섹터 loadBundle 콜백 source 문자열 (TJLabsBundleDataManager 의 분기 식별자) 을
+     * delegate 발화 경로 [EmitSource] 로 매핑. 서버 텔레메트리/로그 라벨에서 "어떤 경로로 소비자가
+     * 받았는지" 를 보여주기 위함.
+     */
+    private fun deriveEmitSource(source: String): EmitSource = when {
+        source.contains("fallback") -> EmitSource.FALLBACK
+        source.contains("memory_cache") || source == "memory_fastpath" -> EmitSource.CACHE_HIT
+        source.contains("disk_raw") -> EmitSource.CACHE_HIT
+        else -> EmitSource.FRESH_LOAD
     }
 
     /**
@@ -785,6 +991,11 @@ class TJLabsResourceManager {
      * TJResourceLogger.isDebugEnabled() = false 이면 전부 no-op (측정 자체도 skip).
      */
     private class PostLoadTimer(private val phase: String, private val sectorId: Int) {
+        companion object {
+            // 이 값 이상이 걸린 콜백만 개별 DEBUG 로그를 남긴다. 대부분의 delegate 콜백은 μs 단위라
+            // 로그 노이즈만 만들 뿐 이득이 없다. 5ms 는 UI 프레임 (16.6ms) 대비 유의미한 임계.
+            private const val SLOW_ITEM_LOG_THRESHOLD_MS = 5L
+        }
         private val enabled: Boolean = TJResourceLogger.isDebugEnabled()
         private val startNs: Long = if (enabled) System.nanoTime() else 0L
         private val counts = LinkedHashMap<String, Int>()
@@ -815,14 +1026,17 @@ class TJLabsResourceManager {
                 TJResourceLogger.i("(postLoad timing) [$phase] sectorId=$sectorId total=${totalMs}ms (no items)")
                 return
             }
-            TJResourceLogger.i(
-                "(postLoad timing) [$phase] sectorId=$sectorId total=${totalMs}ms items=${counts.values.sum()} categories=${counts.size}"
-            )
-            for ((name, count) in counts) {
+            // 카테고리 중 sumMs>=1 인 것만 인라인으로 압축 (나머지는 μs 단위라 노이즈).
+            // 예: `[emit] total=91ms items=124 categories=13 | onSectorData=23ms(1) onBuildingsData=8ms(1)`
+            val notable = counts.entries.mapNotNull { (name, count) ->
                 val sumMs = (totalsNs[name] ?: 0L) / 1_000_000L
-                val avgUs = if (count > 0) ((totalsNs[name] ?: 0L) / count) / 1_000L else 0L
-                TJResourceLogger.i("(postLoad timing)   [$phase] $name count=$count sumMs=$sumMs avgUs=$avgUs")
-            }
+                if (sumMs >= 1L) Triple(name, count, sumMs) else null
+            }.sortedByDescending { it.third }
+            val notableStr = if (notable.isEmpty()) "all <1ms"
+                else notable.joinToString(" ") { (n, c, ms) -> "$n=${ms}ms($c)" }
+            TJResourceLogger.i(
+                "(postLoad timing) [$phase] sectorId=$sectorId total=${totalMs}ms items=${counts.values.sum()} categories=${counts.size} | $notableStr"
+            )
         }
 
         @PublishedApi internal fun recordStart(name: String) {
@@ -833,17 +1047,14 @@ class TJLabsResourceManager {
             counts[name] = (counts[name] ?: 0) + 1
             totalsNs[name] = (totalsNs[name] ?: 0L) + deltaNs
             itemsNs[name] = (itemsNs[name] ?: 0L) + deltaNs
-            if (itemGranular) {
+            // per-item DEBUG 로그는 로그 폭주 원인이라 slowPathLoggingThresholdMs 초과 항목만 남긴다.
+            // 아주 느린 콜백만 눈에 띄게 표시 → 요약(logSummary) 이 나머지를 대신 처리.
+            val deltaMs = deltaNs / 1_000_000L
+            if (deltaMs >= SLOW_ITEM_LOG_THRESHOLD_MS) {
                 val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
-                val dMicros = deltaNs / 1_000L
+                val kind = if (itemGranular) "" else "step "
                 TJResourceLogger.d(
-                    "(postLoad timing) [$phase] +${elapsedMs}ms (Δ${dMicros}us) $name $detail"
-                )
-            } else {
-                val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
-                val dMicros = deltaNs / 1_000L
-                TJResourceLogger.d(
-                    "(postLoad timing) [$phase] +${elapsedMs}ms (Δ${dMicros}us) step $name $detail"
+                    "(postLoad timing) [$phase] SLOW +${elapsedMs}ms Δ${deltaMs}ms $kind$name $detail"
                 )
             }
         }

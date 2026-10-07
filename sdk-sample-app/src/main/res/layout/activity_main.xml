@@ -133,6 +133,26 @@
                 android:textSize="12sp"
                 android:textStyle="italic" />
 
+            <!-- 단일 섹터 로드 테스트에서 사용할 섹터 ID.
+                 Load Jupiter Resource / Load Venus / Load Warp / Load Simulation / Clear Cache /
+                 Benchmark Jupiter 등 모든 단일 섹터 흐름이 이 EditText 값을 사용한다.
+                 Multi Load 쪽은 별도 EditText (editMultiSectorIds) 사용. -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Jupiter / Venus / Warp Sector ID (단일 섹터 로드용)"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/editSectorId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="섹터 ID (예: 111 / 20 / 112)"
+                android:inputType="number"
+                android:text="111"
+                android:textSize="14sp" />
+
             <Button
                 android:id="@+id/buttonAuthOnly"
                 android:layout_width="match_parent"
@@ -155,6 +175,24 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="Load Jupiter Resource" />
+
+            <!-- 벤치마크 전용: 프리즈된 v1 (2026-09-10 JSON) endpoint 강제 호출. 캐시 우회. -->
+            <Button
+                android:id="@+id/buttonTestJupiterBundleV1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Load Jupiter v1 (2026-09-10 JSON, no cache)" />
+
+            <TextView
+                android:id="@+id/textJupiterCompare"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:fontFamily="monospace"
+                android:text="v1 vs v2: idle (Load Jupiter Resource / Load Jupiter v1 을 각각 눌러 비교)"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
 
             <Button
                 android:id="@+id/buttonTestVenusBundle"
@@ -199,6 +237,182 @@
                 android:text="Benchmark: idle"
                 android:textColor="@color/text_muted"
                 android:textSize="13sp" />
+
+            <!-- 2026-09-28+ zip 스키마 검증 전용 진단 버튼. 마지막 loadJupiterResource
+                 성공 후 in-memory 스냅샷을 요약한다 (geofence 다각형/꼭짓점, parking_matches,
+                 simulation url 이 로컬 파일인지, path pixel 카운트 등). -->
+            <Button
+                android:id="@+id/buttonBundleReport"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Bundle Report (2026-09-28 zip)" />
+
+            <TextView
+                android:id="@+id/textBundleReport"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Bundle Report: idle"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
+
+            <!-- Multi-sector bundle loader (TJLabsMultiResourceManager, TJ-559/580).
+                 조합 캐시(LRU 3) + 오프라인 폴백 (exact → superset) 테스트 전용 섹션.
+                 sectorIds 는 쉼표로 구분, 1~5개. 서버가 하나라도 없거나 권한 없으면 422/404 로 전체 fail. -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="— Multi-sector load (TJLabsMultiResourceManager) —"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/editMultiSectorIds"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:hint="sectorIds (쉼표 구분, 예: 111 또는 20, 112, 113)"
+                android:inputType="text"
+                android:text="111"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/buttonMultiLoad"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Multi Load" />
+
+                <Button
+                    android:id="@+id/buttonMultiLoadForce"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Multi Load (force)" />
+
+                <Button
+                    android:id="@+id/buttonMultiClearCache"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Multi Clear Cache" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/textMultiResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Multi Load: idle\n폴백 테스트: 평시 한 번 로드 (cold) → airplane mode → 다시 눌러 fallback 발화"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
+
+            <!-- Sequential Load — 단일 섹터 loadJupiterResource 를 N 섹터에 대해 **순차로** 호출해
+                 각 TOTAL 과 합산을 Multi 로더 1회 TOTAL 과 비교하기 위한 UI. 같은 바이너리 안에서
+                 "조합 zip 사용 안 하고 섹터별 네트워크 왕복" 흐름이 Multi 로더보다 얼마나 느린지 확인. -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="— Sequential Load (단일 섹터 N번 순차, Multi vs 비교용) —"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/editSeqSectorIds"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:hint="sectorIds (쉼표 구분, 예: 111, 112, 20)"
+                android:inputType="text"
+                android:text="111, 112, 20"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/buttonSeqLoad"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Sequential Load (loadJupiterResource × N)" />
+
+            <TextView
+                android:id="@+id/textSeqResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Sequential Load: idle\n각 섹터 clearCache + loadJupiterResource → TOTAL 수집 후 합산 → Multi 로더 TOTAL 과 비교"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
+
+            <!-- Benchmark Suite (iOS 문서 §9 "성능 측정" 포맷 매핑).
+                 LEGACY_REGEX vs SINGLE_PASS CSV 파서를 cold load N 회로 반복 측정해 단계별
+                 평균/median/p95 를 테이블로 비교. 네트워크 jitter 영향 줄이려면 iterations 를
+                 10 이상, 가능하면 wifi 안정 환경에서 측정. -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="— Benchmark Suite (legacy regex vs single-pass CSV parser) —"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/editBenchSectorIds"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="3"
+                    android:hint="sectorIds (쉼표 구분, 예: 111)"
+                    android:inputType="text"
+                    android:text="111"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/editBenchIterations"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:hint="N"
+                    android:inputType="number"
+                    android:text="10"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/buttonRunBenchmark"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Run Benchmark (legacy + current)" />
+
+            <TextView
+                android:id="@+id/textCsvBenchmarkResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:fontFamily="monospace"
+                android:text="Benchmark: idle\n벤치는 각 모드로 cold load N 회 반복 (forceUpdate=true) → iOS §9 포맷 결과 테이블 생성"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
 
             <LinearLayout
                 android:id="@+id/cardJupiter"
