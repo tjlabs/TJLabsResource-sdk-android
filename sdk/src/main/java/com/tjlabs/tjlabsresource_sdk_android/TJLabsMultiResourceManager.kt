@@ -34,8 +34,8 @@ import java.net.URL
  *    (ⅰ) 정확한 조합 키의 캐시 → (ⅱ) 요청 섹터를 **모두 포함하는 상위집합 조합** 캐시를 순서대로 탐색해
  *    버전 검증 없이 재사용. 조합 로드 전체를 실패시키지 않는다.
  *  - **처리는 각 섹터별로 기존 [TJLabsBundleDataManager.processSectorFromArchive] 를 호출**.
- *    섹터 bundle.json / 그래프 path CSV / parking_matches JSON 은 zip 안에서 직접 read 하고,
- *    map image / entrance route CSV 는 네트워크 fetch 로 보존 (zip 밖 자원).
+ *    2026-10-12+ 스키마에서는 섹터 bundle.json / 그래프 path CSV / parking_matches JSON /
+ *    entrance route CSV 모두 zip 안에서 직접 read 하고, map image PNG 만 네트워크 fetch (zip 밖).
  *
  * ── 결과 전달
  *  - 섹터별 결과: [MultiResourceLoadResult.sectorResults] (per-sector `isSuccess`, `failedStage`, 등)
@@ -348,10 +348,9 @@ object TJLabsMultiResourceManager {
             }
             val tPrepare = nowMs()
             val decodeStartNs = if (TJLabsBundleDataManager.benchmarkTimingEnabled) System.nanoTime() else 0L
-            // iOS parity (TJ-609, 2026-10-06): 외부 URL 로 받는 자원 (entrance route CSV 등) 을
-            //   bundle schema 와 동일 레이아웃 (`sectors/{sectorId}/assets/{category}/`) 아래
-            //   저장한다. 섹터별 "aws_korea_X" 디렉토리 생성 없음, extracted 가 version marker 로
-            //   조건부 재추출되므로 재시작 시 캐시된 CSV 도 그대로 유지 → 오프라인 재구동 지원.
+            // 2026-10-12+ 에서는 entrance route CSV 도 zip entry 라 외부 URL fetch 는 평상시 발생 X.
+            //   sectorAssetsRoot 는 10-02 호환성/edge-case 대비로 유지 — fetchEntranceRouteData 가
+            //   assetsRoot/zip 을 먼저 보고, 그걸로 못 읽을 때만 HTTP fallback 으로 이 디렉토리를 쓴다.
             //   섹터 scoped 디렉토리이므로 조합 변경 → extract 재추출 → stale 섹터 CSV 자동 cleanup.
             // 섹터별 병렬 처리 — 각 섹터는 자기 영역만 터치하고 bundleCache 저장을 완료한다.
             val sectorDeferreds = sectorIds.map { sectorId ->
@@ -581,10 +580,10 @@ object TJLabsMultiResourceManager {
         for (file in sorted.drop(MAX_CACHED_COMBINATIONS)) {
             val key = file.nameWithoutExtension
             runCatching { file.delete() }
-            // 2026-10-06 (TJ-609): entrance CSV 등 외부 URL 로 받은 자원은 `extracted/sectors/
-            // {sectorId}/assets/{category}/` 안에 저장된다. extractArchive 가 version marker
-            // 기반 조건부 재추출이므로 조합 변경 시 다음 로드에서 자동 재구성. extract 자체는
-            // 공용 디렉토리 (`multiBundle/extracted`) 라 LRU 와 무관.
+            // 2026-10-12+ 에서는 entrance CSV 를 포함한 모든 CSV/JSON 자원이 zip entry 라
+            // extract 디렉토리에 직접 풀린다 (`extracted/sectors/{sectorId}/assets/...`).
+            // extractArchive 가 version marker 기반 조건부 재추출이므로 조합 변경 시 다음 로드에서
+            // 자동 재구성. extract 자체는 공용 디렉토리 (`multiBundle/extracted`) 라 LRU 와 무관.
             application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .remove(PREF_VERSION_PREFIX + key)
@@ -605,8 +604,9 @@ object TJLabsMultiResourceManager {
      *   일치하고 요청 섹터 bundle.json 들이 모두 존재하면 extract skip (디스크 hit). 그렇지 않으면
      *   삭제 후 재추출.
      *
-     * 이렇게 하면 enrichCsvData 가 extract 디렉토리 안에 저장한 entrance CSV 등도 재시작/재로드
-     * 시 유지되어 외부 URL 재다운로드 없이 재사용 가능 → 오프라인 재구동 지원.
+     * 2026-10-12+ 에서는 bundle.json / 그래프 path CSV / parking_matches / entrance route CSV /
+     * simulations 모두 zip entry 라 extract 디렉토리 하나로 모든 자원이 노출된다. 재시작 시 조합이
+     * 같으면 extract 를 그대로 재사용 → 네트워크 왕복 없이 오프라인 재구동.
      */
     private fun extractArchive(
         archiveFile: File,

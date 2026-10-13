@@ -85,16 +85,16 @@ internal object TJLabsResourceNetworkConstants {
         return buildRetrofit(url)
     }
 
-    // 2026-10-02: 단일/멀티 섹터 공통 server version (iOS parity).
-    //  - 단일: `/{ver}/sectors/{pk}/bundle`, zip 응답
+    // 2026-10-12: entrance route CSV 가 zip entry 로 들어오면서 단일/멀티 공통 네임스페이스.
+    //  - 단일: `/{ver}/sectors/{pk}/bundle`, zip 응답 (10-02 때부터)
     //  - 멀티: `/{ver}/sectors/bundle?sector_ids=...`
-    // iOS `USER_SECTOR_BUNDLE_SERVER_VERSION` / `USER_MULTI_SECTOR_BUNDLE_SERVER_VERSION` 모두 `2026-10-02`.
-    // 이전 (`2026-09-28`) 는 단일 섹터 전용 네임스페이스였고, 멀티 와 분리돼 있었다. iOS 가 통합한 뒤로
-    // 서버는 동일 네임스페이스에서 두 엔드포인트를 모두 노출.
-    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-02"
+    // 10-02 와 비교해 bundle.json 필드가 바뀌었다 — entrances[].url → entrances[].src.
+    // 10-02 는 deprecated (TJ-628). 이전 (`2026-09-28`) 는 단일 섹터 전용 네임스페이스였고,
+    // 멀티 와 분리돼 있었다. iOS 가 통합한 뒤로 서버는 동일 네임스페이스에서 두 엔드포인트를 모두 노출.
+    private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-12"
     private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
     private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
-    private const val JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-02"
+    private const val JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-12"
 
     private const val HTTP_PREFIX = "https://"
     private var REGION_PREFIX = "ap-northeast-2."

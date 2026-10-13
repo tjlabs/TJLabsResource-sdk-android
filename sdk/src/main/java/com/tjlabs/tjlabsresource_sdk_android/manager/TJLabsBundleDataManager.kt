@@ -988,13 +988,13 @@ internal class TJLabsBundleDataManager {
     /**
      * CSV 디스크 캐시 저장 위치 선택.
      *
+     * 2026-10-12+ 에서는 entrance 포함 모든 CSV 가 zip entry 라 HTTP fallback 경로에서만 호출된다.
+     * (10-02 호환성/edge-case 대비로 남겨둠.)
+     *
      * - [sectorAssetsRoot] 가 null → 섹터별 디렉토리 (`cache/tj_bundle_csv/{namespace}_{sectorId}/`)
      *   에 저장. 기존 단일 섹터 `loadBundle` 흐름.
      * - [sectorAssetsRoot] 가 non-null → bundle schema 와 동일 레이아웃으로 그 섹터 assets
      *   디렉토리 아래 저장 (`{sectorAssetsRoot}/entrance/{filename}`). Multi 로더 흐름 전용.
-     *   조합이 바뀌어 `extractArchive` 가 version marker 불일치로 재추출하면 자동 무효화.
-     *   재시작 시 조합 zip 과 extract 가 재사용되면 entrance CSV 도 디스크 hit → **외부 URL
-     *   재다운로드 skip** → 오프라인 재구동 가능.
      */
     private fun enrichCsvData(
         application: Application,
@@ -1037,12 +1037,14 @@ internal class TJLabsBundleDataManager {
             val pathDeferred = pathTargets.map { (key, ref) ->
                 async { key to fetchPathPixelData(application, sectorId, snapshot.versionId, key, ref, assetsRoot, zipFileFallback) }
             }
-            // entrance route CSV 는 zip 스키마에도 포함되지 않는다 (여전히 절대 URL).
-            // sectorAssetsRoot != null (Multi 로더 흐름) 이면 bundle schema 와 동일 레이아웃으로
-            // 섹터 assets 아래 저장 — 섹터별 side-effect 디렉토리 없음, extract 가 유지되는 한
-            // 재시작 시 디스크 hit 가능.
-            val entranceDeferred = entranceTargets.map { (key, url) ->
-                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, url, sectorAssetsRoot) }
+            // 2026-10-12+ JUPITER: entrance route CSV 도 zip entry 로 들어온다
+            //   (`sectors/{id}/assets/levels/{level_id}/entrances/{entrance_id}.csv`).
+            //   path CSV / parking_matches 와 동일하게 assetsRoot → zip → HTTP 3단 fallback.
+            // 2026-10-02 (deprecated) 흐름: ref 가 절대 URL 이면 HTTP fallback 으로 가고,
+            //   sectorAssetsRoot != null (Multi 로더) 이면 bundle schema 와 동일 레이아웃으로
+            //   섹터 assets 아래 저장. 서버 cutover 이후엔 이 경로가 dead-code.
+            val entranceDeferred = entranceTargets.map { (key, ref) ->
+                async { key to fetchEntranceRouteData(application, sectorId, snapshot.versionId, key, ref, assetsRoot, zipFileFallback, sectorAssetsRoot) }
             }
             // map_image 는 도면 PNG → 항상 절대 URL. CDN 캐시가 잘 듣는다.
             val imageDeferred = imageTargets.map { (key, url) ->
@@ -1096,11 +1098,11 @@ internal class TJLabsBundleDataManager {
                 if (parsed != null) {
                     entranceRouteData[key] = parsed
                 } else {
-                    // entrance route CSV 는 zip 밖 절대 URL(2026-09-28+ 에서도 유지) 로 서빙되는
-                    // 보조 자원. 특정 entrance 의 CSV 가 CDN 에 아직 업로드되지 않아 404 로 떨어지는
-                    // 케이스는 실제 운영에서 흔하고 (예: 2026-09-28 DEV 환경에서 sector 111 의
-                    // 몇몇 entrance 파일 누락), 이걸로 sector 로드 전체를 실패시키면 지도·측위·
-                    // 경로탐색까지 못 쓴다. parking_matches 나 PDR path 처럼 optional 로 완화한다.
+                    // 2026-10-12+ 에서는 entrance route CSV 도 zip 안이지만, 특정 entrance 파일이
+                    // 서버에 아직 업로드되지 않아 zip entry 자체가 없는 케이스는 실제 운영에서 흔하다
+                    // (예: 2026-09-28 DEV 환경에서 sector 111 의 몇몇 entrance 파일 누락). bundle.json
+                    // 의 src 가 null 이면 애초에 entranceRouteUrlsByKey 에 안 담기지만, 서버에서 경로는
+                    // 내려줬는데 zip 안에 파일이 빠진 edge case 도 있을 수 있어 optional 로 완화한다.
                     // 소비자 (jupiter-sdk) 는 entranceRouteDataMap 에 key 부재로 감지 가능.
                     TJResourceLogger.d { "(TJLabsResource) enrichCsvData optional fail@EntranceCsv // key=$key" }
                 }
@@ -1354,31 +1356,57 @@ internal class TJLabsBundleDataManager {
         }
     }
 
+    /**
+     * entrance route CSV 를 읽어 [EntranceRouteData] 로 파싱.
+     *
+     * 2026-10-12 스키마: `ref` 는 zip entry 상대경로 — assetsRoot 아래 압축 해제된 파일을 직접 read.
+     * 2026-10-02 (deprecated): `ref` 는 절대 URL — HTTP fallback 으로 getCsvTextWithCache 호출.
+     *
+     * @param ref zip 상대경로(10-12) 또는 절대 URL(10-02).
+     * @param assetsRoot 압축 해제된 자원 디렉토리. non-null 이면 파일 read 우선.
+     * @param zipFileFallback extracted 실패 시 fallback zip 파일.
+     * @param sectorAssetsRoot Multi 로더 흐름 — HTTP fallback 경로일 때만 의미. 10-12 cutover 이후엔 미사용.
+     */
     private fun fetchEntranceRouteData(
         application: Application,
         sectorId: Int,
         versionId: String,
         key: String,
-        url: String,
+        ref: String,
+        assetsRoot: File?,
+        zipFileFallback: File?,
         sectorAssetsRoot: File? = null,
     ): EntranceRouteData? {
         val startMs = nowMs()
-        val cacheModeLabel = if (sectorAssetsRoot != null) "bundle:${sectorAssetsRoot.absolutePath}" else "sector"
+        val cacheModeLabel = when {
+            assetsRoot != null -> "zip-assets:${assetsRoot.absolutePath}"
+            zipFileFallback != null -> "zip-fallback:${zipFileFallback.name}"
+            sectorAssetsRoot != null -> "bundle:${sectorAssetsRoot.absolutePath}"
+            else -> "sector"
+        }
         TJResourceLogger.d(
-            "(TJLabsResource) fetchEntranceRouteData start // key=$key // url=$url // cacheMode=$cacheModeLabel"
+            "(TJLabsResource) fetchEntranceRouteData start // key=$key // ref=$ref // cacheMode=$cacheModeLabel"
         )
-        val text = getCsvTextWithCache(
-            application = application,
-            sectorId = sectorId,
-            versionId = versionId,
-            key = key,
-            url = url,
-            source = "entrance:$key",
-            versionPrefix = PREF_ENTRANCE_VERSION_PREFIX,
-            urlPrefix = PREF_ENTRANCE_URL_PREFIX,
-            filePrefix = PREF_ENTRANCE_FILE_PREFIX,
-            sectorAssetsRoot = sectorAssetsRoot,
-        ) ?: run {
+        val text = when {
+            assetsRoot != null -> {
+                val f = File(assetsRoot, ref)
+                if (f.exists() && f.length() > 0) f.readText()
+                else zipFileFallback?.let { readZipEntryText(it, ref) }
+            }
+            zipFileFallback != null -> readZipEntryText(zipFileFallback, ref)
+            else -> getCsvTextWithCache(
+                application = application,
+                sectorId = sectorId,
+                versionId = versionId,
+                key = key,
+                url = ref,
+                source = "entrance:$key",
+                versionPrefix = PREF_ENTRANCE_VERSION_PREFIX,
+                urlPrefix = PREF_ENTRANCE_URL_PREFIX,
+                filePrefix = PREF_ENTRANCE_FILE_PREFIX,
+                sectorAssetsRoot = sectorAssetsRoot,
+            )
+        } ?: run {
             TJResourceLogger.d("(TJLabsResource) perf fetchEntranceRouteData fail // key=$key // elapsedMs=${elapsedMs(startMs)}")
             return null
         }
@@ -1853,7 +1881,8 @@ internal class TJLabsBundleDataManager {
      * route CSV) 를 이 sector 범위에서 정리. zip 이 곧 스냅샷이 된 이후로 이 캐시들은 stale 이고
      * 소비되지 않으므로 디스크·prefs 를 깨끗이 비운다.
      *
-     * PREF_IMAGE_* / PREF_ENTRANCE_* 는 여전히 URL 기반 자원이라 유지. PREF_BUNDLE_* 는 zip 자체 캐시 유지.
+     * 2026-10-12+ 에서는 entrance route CSV 도 zip entry 가 됐으므로 PREF_ENTRANCE_* 도 prune 대상.
+     * PREF_IMAGE_* 는 여전히 URL 기반 자원이라 유지. PREF_BUNDLE_* 는 zip 자체 캐시 유지.
      */
     private fun pruneLegacyPerFileCache(application: Application, sectorId: Int) {
         val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -1863,7 +1892,8 @@ internal class TJLabsBundleDataManager {
         for (k in prefs.all.keys) {
             if (k.contains(sectorNamespaceFragment) &&
                 (k.startsWith(PREF_PATH_VERSION_PREFIX) || k.startsWith(PREF_PATH_URL_PREFIX) || k.startsWith(PREF_PATH_FILE_PREFIX) ||
-                 k.startsWith(PREF_PARKING_MATCHES_VERSION_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_URL_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_FILE_PREFIX))
+                 k.startsWith(PREF_PARKING_MATCHES_VERSION_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_URL_PREFIX) || k.startsWith(PREF_PARKING_MATCHES_FILE_PREFIX) ||
+                 k.startsWith(PREF_ENTRANCE_VERSION_PREFIX) || k.startsWith(PREF_ENTRANCE_URL_PREFIX) || k.startsWith(PREF_ENTRANCE_FILE_PREFIX))
             ) {
                 editor.remove(k)
                 prefRemoved++
@@ -2292,9 +2322,12 @@ internal class TJLabsBundleDataManager {
                         entranceItemMap[entKey] = entData
                         entranceLevelMap[levelKey] = entData
 
-                        val routeUrl = entObj.optString("url")
-                        if (routeUrl.isNotBlank()) {
-                            entranceRouteUrls[entKey] = routeUrl
+                        // 2026-10-12 스키마: `src` 가 zip 내부 상대경로.
+                        // 2026-10-02 (deprecated) 는 `url` 로 절대 URL — fallback 유지.
+                        val routeRef = entObj.optString("src")
+                            .ifBlank { entObj.optString("url") }
+                        if (routeRef.isNotBlank()) {
+                            entranceRouteUrls[entKey] = routeRef
                         }
                     }
                 }
