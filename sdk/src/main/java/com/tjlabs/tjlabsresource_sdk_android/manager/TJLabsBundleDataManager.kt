@@ -583,8 +583,12 @@ internal class TJLabsBundleDataManager {
                             // v1 은 pref 캐시 오염 방지 — v2 만 다음 호출을 위한 shortcut 을 심는다.
                             if (!useLegacyEndpoint) {
                                 saveBundleMetaPrefs(application, bundleType, sectorId, meta.version_id, meta.url, downloadedFile.absolutePath)
-                                // v2 network_raw 성공 시점에 legacy per-file 캐시(orphan) 를 정리.
-                                pruneLegacyPerFileCache(application, sectorId)
+                                // v2 JUPITER network_raw 성공 시점에만 legacy per-file 캐시(orphan) 를 정리.
+                                // WARP/VENUS 는 bundle_warp/venus_{id}.json 자체가 raw 캐시라
+                                // prune 돌리면 방금 쓴 자신을 collateral 로 지워 매 세션 재다운로드가 됨.
+                                if (bundleType == ResourceBundleType.JUPITER) {
+                                    pruneLegacyPerFileCache(application, sectorId)
+                                }
                             }
                             val statusLabel = if (csvSuccess) "Success" else "Partial-fail(DR path CSV missing)"
                             finish(csvSuccess, "(TJLabsResource) $statusLabel : load bundle", enriched, "${metaSource}+network_raw")
@@ -1901,16 +1905,22 @@ internal class TJLabsBundleDataManager {
         }
         editor.apply()
 
-        // 개별 CSV/JSON 파일 삭제. bundle_{id}.zip / bundle_v1_{id}.json / extracted/ / simulations/ 는 보존.
+        // 개별 CSV/JSON 파일 삭제. bundle_{id}.zip / bundle_v1_{id}.json / bundle_warp_{id}.json /
+        // bundle_venus_{id}.json / extracted/ / simulations/ 는 보존.
+        // (WARP/VENUS on-prem 캐시는 호출부 가드에서 이미 prune 자체가 안 돌지만, 코드 경로가 재-entry
+        //  될 가능성을 대비한 double-safety 로 keep-list 에도 포함.)
         val sectorDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
         val zipName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
         val jsonName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = true)
+        val warpName = buildBundleRawFileName(ResourceBundleType.WARP, sectorId)
+        val venusName = buildBundleRawFileName(ResourceBundleType.VENUS, sectorId)
+        val keepFiles = setOf(zipName, jsonName, warpName, venusName)
         val keepDirs = setOf("extracted", "simulations")
         var fileRemoved = 0
         runCatching {
             sectorDir.listFiles()?.forEach { child ->
                 if (child.isDirectory && child.name in keepDirs) return@forEach
-                if (child.isFile && (child.name == zipName || child.name == jsonName)) return@forEach
+                if (child.isFile && child.name in keepFiles) return@forEach
                 if (child.deleteRecursively()) fileRemoved++
             }
         }
