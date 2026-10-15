@@ -93,7 +93,10 @@ internal object TJLabsResourceNetworkConstants {
     // 멀티 와 분리돼 있었다. iOS 가 통합한 뒤로 서버는 동일 네임스페이스에서 두 엔드포인트를 모두 노출.
     private const val JUPITER_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-12"
     private const val VENUS_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
-    private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-04-27"
+    // TJ-620 (2026-10): Warp 번들이 Jupiter 통합 도메인 + 신규 endpoint 로 이전됨.
+    // 변경 전: `.warp.tjlabs.dev` + `/{2026-04-27}/sectors/{pk}/bundle`
+    // 변경 후: `.jupiter.tjlabs(corp.com|.dev)` + `/{2026-10-07}/sectors/warp-bundle?sector_ids=...`
+    private const val WARP_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-07"
     private const val JUPITER_MULTI_SECTOR_BUNDLE_SERVER_VERSION = "2026-10-12"
 
     private const val HTTP_PREFIX = "https://"
@@ -104,8 +107,8 @@ internal object TJLabsResourceNetworkConstants {
     private const val OLYMPUS_SUFFIX_PROD = ".jupiter.tjlabscorp.com"
     private const val OLYMPUS_SUFFIX_DEV  = ".jupiter.tjlabs.dev"
     private var currentOlympusSuffix = OLYMPUS_SUFFIX_PROD  // 기본 PROD
-    // WARP : AWS 기반 별도 인프라 — env 스위칭 대상 아님.
-    private const val WARP_SUFFIX = ".warp.tjlabs.dev"
+    // TJ-620 이후 Warp 도 Jupiter 와 같은 올림푸스 도메인(=currentOlympusSuffix)을 공유한다.
+    // 과거 별도 `.warp.tjlabs.dev` 인프라는 폐기 예정.
     private var currentProvider : String = ServerProvider.AWS.value
     private var currentRegion : String = ResourceRegion.KOREA.value
     // 마지막으로 세팅된 env. `setServerURL` 이 호출될 때마다 갱신되고, env 를 명시하지 않는
@@ -115,7 +118,8 @@ internal object TJLabsResourceNetworkConstants {
     private var currentEnv: ResourceServerEnv = ResourceServerEnv.PROD
 
     private var USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
-    private var WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
+    // TJ-620: WARP 도 Jupiter 와 동일 호스트.
+    private var WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
 
 
     fun setServerURL(provider: String, region: String, env: ResourceServerEnv = ResourceServerEnv.PROD) {
@@ -145,7 +149,7 @@ internal object TJLabsResourceNetworkConstants {
         }
 
         USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
-        WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + WARP_SUFFIX
+        WARP_USER_URL = HTTP_PREFIX + REGION_PREFIX + "user" + currentOlympusSuffix
         TJResourceLogger.d("(TJLabsResource) USER_URL : $USER_URL")
         TJResourceLogger.d("(TJLabsResource) WARP_USER_URL : $WARP_USER_URL")
 
@@ -167,9 +171,8 @@ internal object TJLabsResourceNetworkConstants {
     }
 
     fun getBaseUrl(bundleType: ResourceBundleType): String {
-        // On-prem 모드는 세 서비스 모두 단일 base URL. cloud 의 Warp 만 별도 도메인
-        // (.warp.tjlabs.dev) 로 분리하는 규칙도 여기선 적용하지 않는다 (on-prem 은
-        // API·번들 파일·도면이 전부 같은 호스트에서 나옴).
+        // On-prem 모드는 세 서비스 모두 단일 base URL. TJ-620 이후 cloud 의 Warp 도 Jupiter
+        // 와 동일 도메인(USER_URL) 을 공유한다 — 과거 `.warp.tjlabs.dev` 로 분리하던 규칙은 폐기.
         if (OnPremRoutingState.isEnabled) {
             return OnPremRoutingState.baseUrl
         }

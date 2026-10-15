@@ -30,6 +30,17 @@ internal interface PostInput {
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
+    // TJ-620 (2026-10-07+): Warp 전용 신규 endpoint. Jupiter 통합 도메인에서 `/sectors/warp-bundle`
+    //   을 호출하고, zip 응답(`{url, version_id}`) 을 돌려받는다. Jupiter V2 와 달리 단일 sector 만
+    //   필요한 K-BOS·Hana 소비자를 위해 호출측이 `[sectorId]` 로 넣어 쓴다.
+    @GET("/{server_version}/sectors/warp-bundle")
+    fun getSectorWarpBundle(
+        @Path("server_version") serverVersion: String,
+        @Query("sector_ids") sectorIds: List<Int>,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
+
     @GET("/{server_version}/sectors/{pk}/bundle/lite")
     fun getSectorLiteBundle(
         @Path("server_version") serverVersion: String,

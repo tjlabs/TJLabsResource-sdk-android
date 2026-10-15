@@ -826,7 +826,7 @@ internal class TJLabsBundleDataManager {
                         api.getSectorBundleV2(serverVersion, listOf(sectorId))
                     }
                     // WARP 는 별도 인프라(.warp.tjlabs.dev, server_version=2026-04-27) 라 zip 스펙 미적용 → 기존 endpoint 유지.
-                    ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+                    ResourceBundleType.WARP -> api.getSectorWarpBundle(serverVersion, listOf(sectorId))
                 }
             }
             fun scheduleRetry(reason: String) {
