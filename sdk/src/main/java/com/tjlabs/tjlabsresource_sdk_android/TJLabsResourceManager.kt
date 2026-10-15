@@ -133,6 +133,7 @@ class TJLabsResourceManager {
      *  JSON) 를 강제 호출해 zip 스키마와 소요·용량 비교 목적으로 사용한다. 프로덕션 코드는 기본값(false) 을 사용.
      *  v1 호출은 in-memory / 디스크 캐시를 우회해 매번 fresh fetch 하고, v2 캐시를 오염시키지도 않는다.
      */
+    @JvmOverloads
     fun loadJupiterResource(
         application: Application,
         provider: String,
@@ -147,6 +148,7 @@ class TJLabsResourceManager {
         loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, imageLoadPolicy, useLegacyEndpoint, completion)
     }
 
+    @JvmOverloads
     fun loadVenusResource(
         application: Application,
         provider: String,
@@ -181,6 +183,10 @@ class TJLabsResourceManager {
      *
      * loadJupiter·loadVenus 와 동일한 시그니처.
      */
+    // @JvmOverloads: Kotlin default param (env=PROD) 가 Java/Kotlin bytecode 호환성을 깨므로
+    //   env 생략한 과거 arity 를 explicit JVM overload 로 노출. Hana SDK 1.1.7 등 과거 시그니처로
+    //   compile 된 소비자들이 재컴파일 없이 그대로 호출 가능 (TJ-620 이전과 동일).
+    @JvmOverloads
     fun loadWarpResource(
         application: Application,
         provider: String,
@@ -193,6 +199,7 @@ class TJLabsResourceManager {
         loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, env, completion = completion)
     }
 
+    @JvmOverloads
     fun loadResource(
         application: Application,
         provider: String,
