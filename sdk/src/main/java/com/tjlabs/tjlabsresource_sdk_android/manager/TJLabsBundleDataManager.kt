@@ -473,7 +473,7 @@ internal class TJLabsBundleDataManager {
 
             // 파싱/네트워크 IO 는 IO 스레드에서 수행, 메인 스레드 점유 제거.
             CoroutineScope(Dispatchers.IO).launch {
-                val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+                val isV2ZipFlow = (bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint) || bundleType == ResourceBundleType.WARP
 
                 // v2 zip 흐름 전용: zip 을 로컬 디렉토리에 풀어 개별 자원 파일로 노출. 실패 시 null →
                 // enrichCsvData 가 zipPath fallback (또는 URL fetch) 로 진행한다.
@@ -1640,7 +1640,7 @@ internal class TJLabsBundleDataManager {
         }
 
         CoroutineScope(Dispatchers.IO).launch {
-            val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+            val isV2ZipFlow = (bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint) || bundleType == ResourceBundleType.WARP
             val extractedRoot = if (isV2ZipFlow) {
                 val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
                 val marker = File(root, "sectors/$sectorId/bundle.json")
