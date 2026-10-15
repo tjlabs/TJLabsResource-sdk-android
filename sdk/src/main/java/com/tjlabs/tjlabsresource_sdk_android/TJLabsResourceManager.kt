@@ -160,17 +160,19 @@ class TJLabsResourceManager {
     }
 
     /**
-     * WARP 는 AWS 기반 별도 인프라라 env 스위칭 대상 아님 → env 파라미터 없음.
+     * TJ-620 이후 WARP 는 Jupiter 와 동일한 올림푸스 도메인에서 서빙 → env (PROD/DEV) 전환이
+     * 적용된다. loadJupiter·loadVenus 와 동일한 시그니처.
      */
     fun loadWarpResource(
         application: Application,
         provider: String,
         region: String,
         sectorId: Int,
+        env: ResourceServerEnv = ResourceServerEnv.PROD,
         completion: (Boolean, ResourceLoadInfo?) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion = completion)
+        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, env, completion = completion)
     }
 
     fun loadResource(

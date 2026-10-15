@@ -9,7 +9,7 @@ plugins {
 
 val versionMajor = 1
 val versionMinor = 1
-val versionPatch = 23
+val versionPatch = 24
 
 // 진단 배포용 publish 좌표 override.
 // 2026-10-06 전환 (TJ-609): Jupiter SDK 2.0.37 작업과 함께 Resource SDK 1.1.20 코드를

@@ -1075,7 +1075,8 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                 application = application,
                 provider = provider,
                 region = getSelectedRegion(),
-                sectorId = sectorId
+                sectorId = sectorId,
+                env = getSelectedResourceEnv(),
             ) { isSuccess, info ->
                 appendCallbackLog(
                     "loadWarpResource",
