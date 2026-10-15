@@ -1832,7 +1832,19 @@ internal class TJLabsBundleDataManager {
                     }
                     else -> readZipEntryText(file, "sectors/$sectorId/bundle.json")
                 }
-                ResourceBundleType.VENUS, ResourceBundleType.WARP -> file.readText()
+                // TJ-620: WARP cloud 응답은 Jupiter V2 처럼 zip (단일 entry `sectors/{id}/bundle.json`).
+                //   확장자로 cloud/on-prem 을 분기 — cloud zip 은 ZipFile 로 열고, on-prem (JSON) 은 raw text.
+                //   On-prem 경로에서는 `getWarpBundleOnPrem` 이 flat JSON 을 반환하고 downloadBundleFile 이
+                //   그대로 디스크에 저장하지만 파일명 자체는 `bundle_warp_{id}.zip` 로 공통이라, 확장자가 아닌
+                //   파일 머리 부분 (ZIP 매직 `PK`) 유무로 판정하는 게 가장 안전.
+                ResourceBundleType.WARP -> {
+                    if (looksLikeZip(file)) {
+                        readZipEntryText(file, "sectors/$sectorId/bundle.json")
+                    } else {
+                        file.readText()
+                    }
+                }
+                ResourceBundleType.VENUS -> file.readText()
             }
         } catch (e: Exception) {
             TJResourceLogger.d(
@@ -1953,6 +1965,24 @@ internal class TJLabsBundleDataManager {
      * ZipFile 은 random-access 라 전체 zip 을 메모리에 올리지 않고 필요한 entry 만 스트림한다.
      * 압축 해제된 파일이 있으면 우선 그것을 사용하고, 없을 때만 zip 열기로 fallback.
      */
+    /**
+     * ZIP 매직 넘버 (`PK\x03\x04`) 로 파일을 식별. WARP 처럼 cloud(zip) 와 on-prem(json) 응답이
+     * 동일 파일명을 공유하는 경우 확장자가 아닌 실제 바이트로 분기해야 안전.
+     */
+    private fun looksLikeZip(file: File): Boolean {
+        if (!file.isFile || file.length() < 4) return false
+        return try {
+            file.inputStream().use { input ->
+                val b = ByteArray(4)
+                val n = input.read(b)
+                n >= 4 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte()
+                    && (b[2] == 0x03.toByte() || b[2] == 0x05.toByte() || b[2] == 0x07.toByte())
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun readZipEntryText(zipFile: File, entryPath: String): String? {
         if (zipFile.exists().not()) return null
         return try {
@@ -2016,7 +2046,12 @@ internal class TJLabsBundleDataManager {
             // v1 (useLegacyEndpoint=true) 은 JSON 응답이므로 별도 파일명(.json) 으로 저장해 v2 캐시와 격리.
             ResourceBundleType.JUPITER -> if (useLegacyEndpoint) "bundle_v1_${sectorId}.json" else "bundle_${sectorId}.zip"
             ResourceBundleType.VENUS -> "bundle_venus_${sectorId}.json"
-            ResourceBundleType.WARP -> "bundle_warp_${sectorId}.json"
+            // TJ-620 (2026-10-07+): WARP cloud 응답도 zip. ZipFile 로 random-access 하기 위해 .zip 확장자로 저장.
+            //   On-prem 경로(v2/warp/.../bundle)는 여전히 JSON 응답이지만 OnPremRoutingState 분기에서
+            //   이 함수에 도달하기 전 processing path 가 다르므로 — 실제로 이 파일명은
+            //   downloadBundleFile 흐름에서만 쓰이고, on-prem 은 readBundleJsonFromFile(WARP)
+            //   에서 cloud/on-prem 분기 처리 (아래 함수 참조).
+            ResourceBundleType.WARP -> "bundle_warp_${sectorId}.zip"
         }
     }
 
