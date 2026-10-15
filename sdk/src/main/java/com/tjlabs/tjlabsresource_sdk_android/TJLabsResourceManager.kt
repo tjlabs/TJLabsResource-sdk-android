@@ -183,16 +183,43 @@ class TJLabsResourceManager {
      *
      * loadJupiter·loadVenus 와 동일한 시그니처.
      */
-    // @JvmOverloads: Kotlin default param (env=PROD) 가 Java/Kotlin bytecode 호환성을 깨므로
-    //   env 생략한 과거 arity 를 explicit JVM overload 로 노출. Hana SDK 1.1.7 등 과거 시그니처로
-    //   compile 된 소비자들이 재컴파일 없이 그대로 호출 가능 (TJ-620 이전과 동일).
-    @JvmOverloads
+    /**
+     * Legacy arity — [env] 없는 호출. Hana SDK 1.1.7 등 과거 시그니처로 compile 된 소비자가 이쪽으로 들어온다.
+     *
+     * ⚠️ `@JvmOverloads` 로 자동 생성한 overload 가 아니라 **명시적 overload** 로 두는 이유:
+     * `@JvmOverloads` 는 생성 overload 안에서 default (`env = PROD`) 를 그대로 넘겨
+     * [TJLabsResourceNetworkConstants.setServerURL] 이 PROD 로 **덮어쓴다**.
+     * K-BOS/Hana 데모처럼 cloud auth 전에 `TJJupiterAuth.setServerConfigForDevelopment(DEV)` 로
+     * constants 를 DEV 로 세팅해둔 상태에서 legacy 호출이 들어오면 Warp 호스트가 PROD 로 바뀌어
+     * DEV 토큰 → PROD 호스트 미스매치 → 401 "Token is invalid or expired".
+     *
+     * 그래서 여기선 [TJLabsResourceNetworkConstants.getCurrentEnv] 로 **마지막으로 세팅된 env** 를
+     * 복원해 그대로 넘긴다 — K-BOS 가 사전에 DEV 로 설정했다면 그 상태를 유지.
+     */
     fun loadWarpResource(
         application: Application,
         provider: String,
         region: String,
         sectorId: Int,
-        env: ResourceServerEnv = ResourceServerEnv.PROD,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit
+    ) {
+        val inherited = TJLabsResourceNetworkConstants.getCurrentEnv()
+        TJResourceLogger.d(
+            "(TJLabsResource) loadWarpResource request (legacy arity, inherit env=$inherited) // provider=$provider // region=$region // sectorId=$sectorId"
+        )
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, inherited, completion = completion)
+    }
+
+    /**
+     * 명시적 [env] arity — 신규 소비자. (default 를 두면 위 legacy overload 와 ambiguous 호출이 되므로
+     * 여기선 default 없이 필수 파라미터로 둔다.)
+     */
+    fun loadWarpResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        env: ResourceServerEnv,
         completion: (Boolean, ResourceLoadInfo?) -> Unit
     ) {
         TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
