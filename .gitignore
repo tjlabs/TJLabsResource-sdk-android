@@ -14,3 +14,6 @@
 .cxx
 local.properties
 /.idea
+
+# 설계 문서 — 저장소 외부 관리. docs/README.md 는 유지하되 ARCHITECTURE.md 등 내부 문서는 ignore.
+docs/
