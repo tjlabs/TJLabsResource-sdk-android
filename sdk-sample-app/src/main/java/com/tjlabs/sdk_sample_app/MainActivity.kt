@@ -65,6 +65,12 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
     private lateinit var multiLoadForceButton: Button
     private lateinit var multiClearCacheButton: Button
     private lateinit var multiResultText: TextView
+    // Warp Multi (TJ-620) — TJLabsWarpMultiResourceManager.loadResources 테스트용.
+    private lateinit var warpMultiSectorIdsInput: EditText
+    private lateinit var warpMultiLoadButton: Button
+    private lateinit var warpMultiLoadForceButton: Button
+    private lateinit var warpMultiClearCacheButton: Button
+    private lateinit var warpMultiResultText: TextView
     // Sequential Load — 단일 섹터 loadJupiterResource N 번 순차 호출 (Multi vs 비교).
     private lateinit var seqSectorIdsInput: EditText
     private lateinit var runSeqLoadButton: Button
@@ -213,6 +219,11 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
         multiLoadForceButton = findViewById(R.id.buttonMultiLoadForce)
         multiClearCacheButton = findViewById(R.id.buttonMultiClearCache)
         multiResultText = findViewById(R.id.textMultiResult)
+        warpMultiSectorIdsInput = findViewById(R.id.editWarpMultiSectorIds)
+        warpMultiLoadButton = findViewById(R.id.buttonWarpMultiLoad)
+        warpMultiLoadForceButton = findViewById(R.id.buttonWarpMultiLoadForce)
+        warpMultiClearCacheButton = findViewById(R.id.buttonWarpMultiClearCache)
+        warpMultiResultText = findViewById(R.id.textWarpMultiResult)
         seqSectorIdsInput = findViewById(R.id.editSeqSectorIds)
         runSeqLoadButton = findViewById(R.id.buttonSeqLoad)
         seqResultText = findViewById(R.id.textSeqResult)
@@ -316,6 +327,14 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
             TJLabsMultiResourceManager.clearCache(application)
             multiResultText.text = "Multi cache cleared @ ${nowText()}"
             appendCallbackLog("clearCache", "multi", "api")
+        }
+        warpMultiLoadButton.setOnClickListener { runWarpMultiLoad(forceUpdate = false) }
+        warpMultiLoadForceButton.setOnClickListener { runWarpMultiLoad(forceUpdate = true) }
+        warpMultiClearCacheButton.setOnClickListener {
+            logButtonPress("Warp Multi Clear Cache")
+            TJLabsWarpMultiResourceManager.clearCache(application)
+            warpMultiResultText.text = "Warp Multi cache cleared @ ${nowText()}"
+            appendCallbackLog("warpMultiClearCache", "cleared", "api")
         }
         runBenchmarkButton.setOnClickListener { runBenchmarkSuite() }
         runSeqLoadButton.setOnClickListener { runSequentialLoad() }
@@ -1056,6 +1075,81 @@ class MainActivity : AppCompatActivity(), TJLabsResourceManagerDelegate, TJLabsW
                     scope,
                     "sectorId=$sectorId • ${nowText()}",
                     isSuccess
+                )
+            }
+        }
+    }
+
+    private fun runWarpMultiLoad(forceUpdate: Boolean) {
+        val raw = warpMultiSectorIdsInput.text?.toString().orEmpty()
+        val sectorIds = raw.split(",", " ")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { it.toIntOrNull() }
+        if (sectorIds.isEmpty()) {
+            warpMultiResultText.text = "Enter sectorIds (쉼표 구분, 1~5개 — 예: 1 또는 1, 3, 5)"
+            return
+        }
+        if (sectorIds.size > 5) {
+            warpMultiResultText.text = "sectorIds 는 최대 5개 (TJ-620 서버 제약) — 받은 ${sectorIds.size}개"
+            return
+        }
+        val provider = getSelectedProvider()
+        val region = getSelectedRegion()
+        val env = getSelectedResourceEnv()
+        val tag = if (forceUpdate) "Warp Multi Load (force)" else "Warp Multi Load"
+        logButtonPress(tag, "sectorIds=$sectorIds provider=$provider region=$region env=$env")
+
+        // 섹터별 콜백도 받고 싶으면 delegate 설정. completion 만으로도 결과 집계 가능.
+        TJLabsWarpMultiResourceManager.delegate = object : TJLabsWarpMultiResourceManagerDelegate {
+            override fun onWarpMultiSectorData(sectorId: Int, data: WarpSectorOutput) {
+                val wards = data.buildings.sumOf { b -> b.levels.sumOf { it.wards.size } }
+                appendCallbackLog("warpMulti", "sector=$sectorId wards=$wards", "api")
+            }
+            override fun onWarpMultiError(sectorId: Int?, error: ResourceError) {
+                appendCallbackLog("warpMulti", "error sector=$sectorId error=$error", "api")
+            }
+        }
+
+        warpMultiResultText.text = "Warp Multi Load: authenticating..."
+        authenticate(provider) { authSuccess ->
+            if (!authSuccess) {
+                runOnUiThread {
+                    warpMultiResultText.text = "Warp Multi Load: auth failed — local.properties 의 AUTH_ACCESS_KEY_${region.uppercase()}_${env.name.substringBefore("_")} 확인"
+                }
+                return@authenticate
+            }
+            runOnUiThread {
+                warpMultiResultText.text = "Warp Multi Load: in flight — sectorIds=$sectorIds (forceUpdate=$forceUpdate)"
+            }
+            val startMs = System.currentTimeMillis()
+            TJLabsWarpMultiResourceManager.loadResources(
+                application = application,
+                provider = provider,
+                region = region,
+                env = env,
+                sectorIds = sectorIds,
+                forceUpdate = forceUpdate,
+            ) { result ->
+                val elapsed = System.currentTimeMillis() - startMs
+                val sb = StringBuilder()
+                sb.append("Warp Multi Load Done @ ${nowText()} — elapsedMs=$elapsed\n")
+                sb.append("  success=${result.isSuccess} isCached=${result.isCached} version=${result.versionId ?: "-"}\n")
+                sb.append("  stages: meta=${result.metadataFetchMs}ms zip=${result.zipDownloadMs}ms total=${result.totalMs}ms\n")
+                sb.append("  msg: ${result.message}\n")
+                sb.append("sectorResults:\n")
+                for (sr in result.sectorResults) {
+                    val wardsPart = sr.data?.let { d ->
+                        val wards = d.buildings.sumOf { b -> b.levels.sumOf { it.wards.size } }
+                        "wards=$wards"
+                    } ?: "data=null"
+                    sb.append("  • sector=${sr.sectorId} ok=${sr.isSuccess} $wardsPart error=${sr.error ?: "-"}\n")
+                }
+                runOnUiThread { warpMultiResultText.text = sb.toString() }
+                appendCallbackLog(
+                    "warpMultiLoad",
+                    "success=${result.isSuccess} sectors=$sectorIds versionId=${result.versionId ?: "-"} elapsed=$elapsed ms",
+                    "api"
                 )
             }
         }

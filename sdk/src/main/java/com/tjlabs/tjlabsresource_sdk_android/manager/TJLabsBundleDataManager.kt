@@ -483,12 +483,12 @@ internal class TJLabsBundleDataManager {
                 //   disk-cache hit (같은 version 이 확정된 zip) 경우에만 marker 존재 시 재사용 최적화가 유효.
                 fun ensureExtractedAssetsRoot(zipFile: File, forceReExtract: Boolean = false): File? {
                     if (!isV2ZipFlow) return null
-                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                     if (!forceReExtract) {
                         val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
                         if (marker.exists() && marker.length() > 0) return extractRoot
                     }
-                    return extractBundleZipToDisk(application, sectorId, zipFile)
+                    return extractBundleZipToDisk(application, bundleType, sectorId, zipFile)
                 }
 
                 fun bundleZipPathIfJupiter(file: File): String? =
@@ -721,12 +721,12 @@ internal class TJLabsBundleDataManager {
             //   stale — 반드시 재-extract. false 는 disk cache hit 로 zip 내용이 안 바뀐 상태 → 기존 extract 재사용 가능.
             fun onZipReady(zipFile: File, freshlyDownloaded: Boolean) {
                 CoroutineScope(Dispatchers.IO).launch {
-                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                     val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
                     val assetsRoot = if (!freshlyDownloaded && marker.exists() && marker.length() > 0) {
                         extractRoot
                     } else {
-                        extractBundleZipToDisk(application, sectorId, zipFile)
+                        extractBundleZipToDisk(application, bundleType, sectorId, zipFile)
                     }
                     val bundleJson = readBundleJsonFromFile(bundleType, sectorId, zipFile, useLegacyEndpoint = false, extractedRoot = assetsRoot)
                     if (bundleJson.isNullOrBlank()) {
@@ -1642,10 +1642,10 @@ internal class TJLabsBundleDataManager {
         CoroutineScope(Dispatchers.IO).launch {
             val isV2ZipFlow = (bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint) || bundleType == ResourceBundleType.WARP
             val extractedRoot = if (isV2ZipFlow) {
-                val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                 val marker = File(root, "sectors/$sectorId/bundle.json")
                 if (marker.exists() && marker.length() > 0) root
-                else extractBundleZipToDisk(application, sectorId, rawFile)
+                else extractBundleZipToDisk(application, bundleType, sectorId, rawFile)
             } else null
             val bundleJson = readBundleJsonFromFile(bundleType, sectorId, rawFile, useLegacyEndpoint, extractedRoot)
             if (bundleJson == null) {
@@ -1864,10 +1864,11 @@ internal class TJLabsBundleDataManager {
      */
     private fun extractBundleZipToDisk(
         application: Application,
+        bundleType: ResourceBundleType,
         sectorId: Int,
         zipFile: File
     ): File? {
-        val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+        val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
         // stale 방지 — 이전 version 의 extract 흔적을 완전히 제거.
         runCatching { if (extractRoot.exists()) extractRoot.deleteRecursively() }
         if (!extractRoot.mkdirs()) {
@@ -1944,7 +1945,7 @@ internal class TJLabsBundleDataManager {
         val warpName = buildBundleRawFileName(ResourceBundleType.WARP, sectorId)
         val venusName = buildBundleRawFileName(ResourceBundleType.VENUS, sectorId)
         val keepFiles = setOf(zipName, jsonName, warpName, venusName)
-        val keepDirs = setOf("extracted", "simulations")
+        val keepDirs = setOf("extracted", "extracted_jupiter", "extracted_warp", "extracted_venus", "simulations")
         var fileRemoved = 0
         runCatching {
             sectorDir.listFiles()?.forEach { child ->
