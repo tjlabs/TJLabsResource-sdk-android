@@ -6,6 +6,23 @@ import retrofit2.http.Headers
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+/**
+ * Resource SDK 가 사용하는 Retrofit 엔드포인트 모음. **cloud 와 on-prem (하나 PMS) 두 경로** 가
+ * 공존한다 — 어떤 함수를 호출할지는 [TJLabsBundleDataManager.requestBundleMeta] 가
+ * `OnPremRoutingState.isEnabled` 로 분기해서 결정.
+ *
+ * - **Cloud 경로**: `getSectorBundle`, `getSectorBundleV2`, `getSectorWarpBundle`,
+ *   `getSectorLiteBundle`. baseUrl 은 `TJLabsResourceNetworkConstants.USER_URL` 또는
+ *   `WARP_USER_URL` (TJ-620 이후 둘 다 Jupiter 올림푸스 도메인).
+ *
+ * - **On-prem (하나 PMS) 경로**: `getWarpBundleOnPrem`, `getVenusBundleOnPrem`. baseUrl 은
+ *   `OnPremRoutingState.baseUrl` (= `TJHanaEnvironment.setBaseUrl(...)` 값).
+ *   `v2/warp/...` / `v2/venus/...` 접두어 고정이고 TJ-620 변경과 무관. 하나은행 PMS 서버 쪽에서
+ *   deprecate 되지 않는 한 그대로 유지한다.
+ *
+ * 두 그룹을 섞어 호출하면 안 된다 — baseUrl 과 토큰 체계가 다르므로 반드시 분기 블록 안에서만
+ * 사용. 신규 cloud endpoint 추가 시 기존 on-prem 함수에 영향 없는지 확인.
+ */
 internal interface PostInput {
     @Headers(
         "accept: application/json",

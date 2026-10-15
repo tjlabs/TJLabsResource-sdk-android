@@ -160,8 +160,26 @@ class TJLabsResourceManager {
     }
 
     /**
-     * TJ-620 이후 WARP 는 Jupiter 와 동일한 올림푸스 도메인에서 서빙 → env (PROD/DEV) 전환이
-     * 적용된다. loadJupiter·loadVenus 와 동일한 시그니처.
+     * Warp 섹터 번들을 로드한다.
+     *
+     * ## 라우팅 (2026-10 TJ-620 반영)
+     * - **Cloud 경로** (Hana 데모·K-BOS 등 cloud auth 사용자):
+     *   `{host}/{WARP_SECTOR_BUNDLE_SERVER_VERSION}/sectors/warp-bundle?sector_ids=X&operating_system=Android`
+     *   host 는 `TJLabsResourceNetworkConstants.setServerURL(provider, region, env)` 로 결정되고
+     *   Jupiter 와 동일한 올림푸스 도메인 (`.jupiter.tjlabs(corp.com|.dev)`) 을 공유. env (PROD/DEV)
+     *   스위칭이 적용된다 — 이 함수의 [env] 파라미터가 그 분기를 결정.
+     *
+     * - **On-prem 경로** (하나은행 PMS 등 `OnPremRoutingState.isEnabled == true` 상태):
+     *   `{on-prem baseUrl}/v2/warp/sectors/{pk}/bundle`
+     *   이 함수의 [provider] / [region] / [env] 는 무시되고 (on-prem baseUrl 이 모든 라우팅을 결정)
+     *   `TJHanaEnvironment.setBaseUrl(...)` 호출 시점에 세팅된 서버로 간다. 토큰은 jupiter-sdk 가
+     *   on-prem auth 로 발급한 값을 `TJLabsResourceNetworkConstants.genRetrofit` 가 자동 주입.
+     *
+     * **TJ-620 수정은 cloud 경로만 바꿨고 on-prem 경로는 완전히 분리되어 영향 없음.**
+     * On-prem 소비자는 이 SDK 를 bump 해도 기존 동작을 그대로 유지한다. 신규 [env] 파라미터는
+     * default (`ResourceServerEnv.PROD`) 가 있어 기존 호출부도 재컴파일 없이 호환.
+     *
+     * loadJupiter·loadVenus 와 동일한 시그니처.
      */
     fun loadWarpResource(
         application: Application,

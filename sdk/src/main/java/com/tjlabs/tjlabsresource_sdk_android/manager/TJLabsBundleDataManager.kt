@@ -801,10 +801,22 @@ internal class TJLabsBundleDataManager {
             }
 
             val api = retrofit.create(PostInput::class.java)
+            // ============================================================
+            //  Cloud 와 On-prem (하나 PMS) 라우팅은 완전히 분리된 두 경로.
+            //  OnPremRoutingState.isEnabled 는 `TJHanaEnvironment.setBaseUrl(...)` 가 호출된 뒤에만
+            //  true 가 되고, cloud 소비자 (`TJHanaEnvironment.useCloudForTesting` 또는 SDK 를 직접
+            //  쓰는 K-BOS 등) 에서는 항상 false. 양 분기가 서로 영향 주지 않도록 동일 bundleType 에
+            //  대해 완전히 다른 endpoint 를 사용한다 — TJ-620 변경은 cloud 분기만 수정.
+            // ============================================================
             val call = if (OnPremRoutingState.isEnabled) {
-                // On-prem PMS 는 서비스별 접두어 endpoint (`/v2/warp`, `/v2/venus`) 를 쓴다.
-                // 응답 body 는 cloud 와 동일 (`SectorBundleMetaOutput` 재사용). JUPITER 는
-                // on-prem 스펙 미확정이라 실패시킴 — 호출측이 warp/venus 만 로드하도록 스코프.
+                // ---- On-prem (하나 PMS) 경로 — TJ-620 수정 영향 없음 ----
+                // 서비스별 접두어 endpoint (`/v2/warp`, `/v2/venus`) 를 쓴다. baseUrl 은
+                // `TJHanaEnvironment.DEFAULT_HANA_BASE_URL` 또는 `setBaseUrl(...)` 에서 지정한 값.
+                // 응답 body 는 cloud 와 동일 (`SectorBundleMetaOutput` 재사용). JUPITER 는 on-prem
+                // 스펙 미확정이라 실패시킴 — 호출측이 warp/venus 만 로드하도록 스코프.
+                // ⚠ 이 블록을 수정할 때는 하나 데모앱 (TJHana-sdk-android/app) 과 하나 PMS 서버의
+                //    실측 호환을 반드시 유지해야 한다. 레거시 endpoint 는 PMS 운영 서버 쪽에서
+                //    deprecate 되지 않는 한 그대로 유지.
                 when (bundleType) {
                     ResourceBundleType.WARP -> api.getWarpBundleOnPrem(sectorId)
                     ResourceBundleType.VENUS -> api.getVenusBundleOnPrem(sectorId)
@@ -814,6 +826,7 @@ internal class TJLabsBundleDataManager {
                     }
                 }
             } else {
+                // ---- Cloud 경로 ----
                 when (bundleType) {
                     ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
                     ResourceBundleType.JUPITER -> if (useLegacyEndpoint) {
@@ -825,7 +838,11 @@ internal class TJLabsBundleDataManager {
                         // 을 준수해 조합별 재빌드 지연을 피한다.
                         api.getSectorBundleV2(serverVersion, listOf(sectorId))
                     }
-                    // WARP 는 별도 인프라(.warp.tjlabs.dev, server_version=2026-04-27) 라 zip 스펙 미적용 → 기존 endpoint 유지.
+                    // TJ-620 (2026-10): WARP cloud 전용 신 endpoint — Jupiter 통합 올림푸스 도메인
+                    //   + `/sectors/warp-bundle?sector_ids=...&operating_system=Android`.
+                    //   On-prem 경로는 위 if 블록의 getWarpBundleOnPrem 이 전담하므로 이 라인은
+                    //   cloud 트래픽에만 영향. (레거시 cloud `getSectorBundle` 로 호출하던 코드는
+                    //   TJ-620 이전 자료를 반환하는 서버 쪽 엔드포인트가 더 이상 보장되지 않음.)
                     ResourceBundleType.WARP -> api.getSectorWarpBundle(serverVersion, listOf(sectorId))
                 }
             }

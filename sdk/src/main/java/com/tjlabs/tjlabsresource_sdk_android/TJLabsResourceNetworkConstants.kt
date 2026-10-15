@@ -18,6 +18,18 @@ const val CONNECT_TIMEOUT = 10L
 const val READ_TIMEOUT = 30L
 const val WRITE_TIMEOUT = 30L
 
+/**
+ * Cloud 경로 전용 네트워크 상수/URL 조립.
+ *
+ * On-prem (하나 PMS) 경로는 이 object 의 URL 를 사용하지 않고 `OnPremRoutingState.baseUrl`
+ * 로 직접 라우팅된다. [getBaseUrl] 가 `OnPremRoutingState.isEnabled` 가 true 일 때 그 값을
+ * 돌려주고, cloud 분기는 아래 USER_URL / WARP_USER_URL 를 사용. 두 모드는 **상호 배타** —
+ * `TJHanaEnvironment.setBaseUrl` 과 `TJLabsAuthManager.setClientSecret + setServerURL` 중
+ * 마지막에 호출된 쪽이 활성화된다.
+ *
+ * TJ-620 (2026-10): cloud WARP 가 Jupiter 와 동일한 올림푸스 도메인으로 통합. on-prem 경로
+ * (`v2/warp/sectors/{pk}/bundle`) 는 변경 없음.
+ */
 internal object TJLabsResourceNetworkConstants {
     private fun buildRetrofit(url: String, token: String? = null): Retrofit {
         val okHttpBuilder = OkHttpClient.Builder()
