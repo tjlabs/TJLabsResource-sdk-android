@@ -3,6 +3,9 @@ package com.tjlabs.tjlabsresource_sdk_android
 import android.app.Application
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
@@ -123,65 +126,72 @@ object TJLabsWarpMultiResourceManager {
                 return@requestMultiMeta
             }
 
-            // 2) 캐시 hit 여부 — version_id 가 같고 디스크 파일 존재하면 재다운로드 skip
-            val cachedZip = loadCachedZipFile(application, comboKey)
-            val useCache = !forceUpdate && cachedZip != null && cachedVersion == meta.version_id
-            if (useCache) {
-                TJResourceLogger.i(
-                    "(TJLabsWarpMultiResourceManager) cache HIT // comboKey=$comboKey // versionId=${meta.version_id}"
-                )
+            // 2~4) 는 모두 IO 스레드에서 실행. Retrofit 콜백이 메인 스레드로 들어오므로 여기서
+            // downloadZip (HttpURLConnection) 과 zip 파싱 (disk I/O) 을 그대로 호출하면
+            // StrictMode 에서 NetworkOnMainThreadException. Jupiter multi
+            // (TJLabsMultiResourceManager.downloadZip 의 CoroutineScope(Dispatchers.IO).launch) 와
+            // 동일한 패턴.
+            CoroutineScope(Dispatchers.IO).launch {
+                // 2) 캐시 hit 여부 — version_id 가 같고 디스크 파일 존재하면 재다운로드 skip
+                val cachedZip = loadCachedZipFile(application, comboKey)
+                val useCache = !forceUpdate && cachedZip != null && cachedVersion == meta.version_id
+                if (useCache) {
+                    TJResourceLogger.i(
+                        "(TJLabsWarpMultiResourceManager) cache HIT // comboKey=$comboKey // versionId=${meta.version_id}"
+                    )
+                    processArchive(
+                        application = application,
+                        archiveFile = cachedZip!!,
+                        sectorIds = sectorIds,
+                        versionId = meta.version_id,
+                        isCached = true,
+                        input = input,
+                        tStart = tStart,
+                        metadataFetchMs = metadataFetchMs,
+                        zipDownloadMs = 0L,
+                        completion = completion,
+                    )
+                    return@launch
+                }
+
+                // 3) zip 다운로드
+                val downloadStart = System.currentTimeMillis()
+                val downloaded = downloadZip(application, comboKey, meta.url)
+                val zipDownloadMs = System.currentTimeMillis() - downloadStart
+                if (downloaded == null) {
+                    TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip download failed")
+                    delegate?.onWarpMultiError(null, ResourceError.Sector)
+                    completion(
+                        MultiWarpResourceLoadResult(
+                            isSuccess = false,
+                            message = "zip download failed",
+                            input = input, versionId = meta.version_id, isCached = false,
+                            sectorResults = emptyList(),
+                            metadataFetchMs = metadataFetchMs,
+                            zipDownloadMs = zipDownloadMs,
+                            totalMs = System.currentTimeMillis() - tStart,
+                        )
+                    )
+                    return@launch
+                }
+
+                // 4) version 저장 + LRU prune
+                saveCachedVersion(application, comboKey, meta.version_id)
+                pruneLruCombinations(application)
+
                 processArchive(
                     application = application,
-                    archiveFile = cachedZip!!,
+                    archiveFile = downloaded,
                     sectorIds = sectorIds,
                     versionId = meta.version_id,
-                    isCached = true,
+                    isCached = false,
                     input = input,
                     tStart = tStart,
                     metadataFetchMs = metadataFetchMs,
-                    zipDownloadMs = 0L,
+                    zipDownloadMs = zipDownloadMs,
                     completion = completion,
                 )
-                return@requestMultiMeta
             }
-
-            // 3) zip 다운로드
-            val downloadStart = System.currentTimeMillis()
-            val downloaded = downloadZip(application, comboKey, meta.url)
-            val zipDownloadMs = System.currentTimeMillis() - downloadStart
-            if (downloaded == null) {
-                TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip download failed")
-                delegate?.onWarpMultiError(null, ResourceError.Sector)
-                completion(
-                    MultiWarpResourceLoadResult(
-                        isSuccess = false,
-                        message = "zip download failed",
-                        input = input, versionId = meta.version_id, isCached = false,
-                        sectorResults = emptyList(),
-                        metadataFetchMs = metadataFetchMs,
-                        zipDownloadMs = zipDownloadMs,
-                        totalMs = System.currentTimeMillis() - tStart,
-                    )
-                )
-                return@requestMultiMeta
-            }
-
-            // 4) version 저장 + LRU prune
-            saveCachedVersion(application, comboKey, meta.version_id)
-            pruneLruCombinations(application)
-
-            processArchive(
-                application = application,
-                archiveFile = downloaded,
-                sectorIds = sectorIds,
-                versionId = meta.version_id,
-                isCached = false,
-                input = input,
-                tStart = tStart,
-                metadataFetchMs = metadataFetchMs,
-                zipDownloadMs = zipDownloadMs,
-                completion = completion,
-            )
         }
     }
 
