@@ -142,6 +142,7 @@ object TJLabsWarpMultiResourceManager {
                     processArchive(
                         application = application,
                         archiveFile = cachedZip!!,
+                        comboKey = comboKey,
                         sectorIds = sectorIds,
                         versionId = meta.version_id,
                         isCached = true,
@@ -182,6 +183,7 @@ object TJLabsWarpMultiResourceManager {
                 processArchive(
                     application = application,
                     archiveFile = downloaded,
+                    comboKey = comboKey,
                     sectorIds = sectorIds,
                     versionId = meta.version_id,
                     isCached = false,
@@ -282,10 +284,16 @@ object TJLabsWarpMultiResourceManager {
         }
     }
 
-    /** zip 안의 각 섹터 `sectors/{id}/bundle.json` 을 꺼내 WarpSectorOutput 로 파싱 → delegate/completion. */
+    /**
+     * zip 안의 각 섹터 `sectors/{id}/bundle.json` 을 꺼내 WarpSectorOutput 로 파싱 → delegate/completion.
+     * 또한 single-sector 흐름 (`extracted_warp/sectors/{id}/bundle.json`) 과 동일한 레이아웃으로
+     * 디스크에 extract — 멀티는 `multiWarpBundle/extracted/{comboKey}/sectors/{id}/bundle.json`.
+     * (단일 extracted_warp 와 네임스페이스 겹치지 않게 분리.)
+     */
     private fun processArchive(
         application: Application,
         archiveFile: File,
+        comboKey: String,
         sectorIds: List<Int>,
         versionId: String,
         isCached: Boolean,
@@ -296,6 +304,8 @@ object TJLabsWarpMultiResourceManager {
         completion: (MultiWarpResourceLoadResult) -> Unit
     ) {
         val sectorResults = mutableListOf<WarpSectorLoadResult>()
+        val extractedRoot = multiExtractedDirFor(application, comboKey, createIfNeeded = true)
+        var extractedCount = 0
         try {
             ZipFile(archiveFile).use { zf ->
                 for (sid in sectorIds) {
@@ -319,6 +329,19 @@ object TJLabsWarpMultiResourceManager {
                         )
                         continue
                     }
+                    // 디스크 extract — single-sector 와 동일한 상대 경로 (`sectors/{id}/bundle.json`)
+                    if (extractedRoot != null) {
+                        runCatching {
+                            val outFile = File(extractedRoot, "sectors/$sid/bundle.json")
+                            outFile.parentFile?.mkdirs()
+                            outFile.writeText(jsonText)
+                            extractedCount++
+                        }.onFailure { ex ->
+                            TJResourceLogger.w(
+                                "(TJLabsWarpMultiResourceManager) extract write fail // sector=$sid // ${ex.javaClass.simpleName}: ${ex.message}"
+                            )
+                        }
+                    }
                     val parsed = runCatching {
                         val root = JSONObject(jsonText)
                         bundleDataManager.parseWarpSector(root)
@@ -336,6 +359,9 @@ object TJLabsWarpMultiResourceManager {
                     )
                 }
             }
+            TJResourceLogger.i(
+                "(TJLabsWarpMultiResourceManager) zip extract done // comboKey=$comboKey // files=$extractedCount // dst=${extractedRoot?.absolutePath}"
+            )
         } catch (e: Exception) {
             TJResourceLogger.e("(TJLabsWarpMultiResourceManager) processArchive fatal: ${e.localizedMessage}")
             delegate?.onWarpMultiError(null, ResourceError.Sector)
@@ -387,6 +413,19 @@ object TJLabsWarpMultiResourceManager {
         return File(dir, "$comboKey.zip")
     }
 
+    /**
+     * `multiWarpBundle/extracted/{comboKey}/` — zip 안의 `sectors/{id}/bundle.json` 들을 풀어두는 곳.
+     * single-sector 의 `extracted_warp/` 와 혼동 피하려고 `multiWarpBundle` 하위에만 둔다.
+     */
+    private fun multiExtractedDirFor(application: Application, comboKey: String, createIfNeeded: Boolean): File? {
+        val base = multiBundleDir(application, createIfNeeded = createIfNeeded) ?: return null
+        val dir = File(base, "extracted/$comboKey")
+        if (createIfNeeded && !dir.exists()) {
+            if (!dir.mkdirs()) return null
+        }
+        return dir
+    }
+
     private fun loadCachedZipFile(application: Application, comboKey: String): File? {
         val f = zipFileFor(application, comboKey, createDir = false) ?: return null
         return if (f.exists() && f.length() > 0) f else null
@@ -414,6 +453,10 @@ object TJLabsWarpMultiResourceManager {
             val combo = f.nameWithoutExtension
             editor.remove(PREF_VERSION_PREFIX + combo)
             f.delete()
+            // zip 과 함께 extract 디렉토리도 정리 (`extracted/{combo}` 통째 삭제).
+            multiExtractedDirFor(application, combo, createIfNeeded = false)
+                ?.takeIf { it.isDirectory }
+                ?.deleteRecursively()
             TJResourceLogger.d("(TJLabsWarpMultiResourceManager) LRU prune // combo=$combo")
         }
         editor.apply()
