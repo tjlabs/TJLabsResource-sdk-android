@@ -3,14 +3,14 @@ package com.tjlabs.tjlabsresource_sdk_android
 import android.app.Application
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 import java.io.File
-import java.util.concurrent.TimeUnit
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.zip.ZipFile
 
 /**
@@ -54,12 +54,6 @@ object TJLabsWarpMultiResourceManager {
 
     /** 섹터별 콜백을 받고 싶으면 세팅. completion 만으로 집계 결과를 받으려면 null 로 둬도 됨. */
     @Volatile var delegate: TJLabsWarpMultiResourceManagerDelegate? = null
-
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     /**
      * 멀티 섹터 Warp 번들 로드. sectorIds 는 1~5개 (서버 제약).
@@ -237,27 +231,42 @@ object TJLabsWarpMultiResourceManager {
         }
     }
 
+    /**
+     * signed URL 로부터 zip 을 HttpURLConnection 으로 스트리밍 다운로드. Jupiter multi
+     * (`TJLabsMultiResourceManager.downloadZip`) 와 동일한 성공 패턴 — OkHttp 는 공유 interceptor
+     * 체인에 걸릴 가능성이 있어 바닐라 HttpURLConnection 로 분리.
+     */
     private fun downloadZip(application: Application, comboKey: String, url: String): File? {
         val target = zipFileFor(application, comboKey, createDir = true) ?: return null
-        val tmp = File(target.parentFile, "${target.name}.part")
+        val tmp = File(target.parentFile, "${target.name}.tmp")
         return try {
-            val req = Request.Builder().url(url).get().build()
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip download HTTP ${'$'}{resp.code()}")
-                    return null
-                }
-                val body = resp.body() ?: return null
-                tmp.outputStream().use { out -> body.byteStream().use { it.copyTo(out) } }
-                if (target.exists()) target.delete()
-                if (!tmp.renameTo(target)) {
-                    TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip rename fail")
-                    return null
-                }
-                target
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10_000
+                readTimeout = 60_000
+                requestMethod = "GET"
             }
+            val status = conn.responseCode
+            if (status !in 200..299) {
+                conn.disconnect()
+                TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip download HTTP $status")
+                return null
+            }
+            conn.inputStream.use { input ->
+                FileOutputStream(tmp).use { out ->
+                    input.copyTo(out, bufferSize = 32 * 1024)
+                }
+            }
+            conn.disconnect()
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) {
+                TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip rename fail // ${tmp.absolutePath} -> ${target.absolutePath}")
+                return null
+            }
+            target
         } catch (e: Exception) {
-            TJResourceLogger.w("(TJLabsWarpMultiResourceManager) zip download exception: ${e.localizedMessage}")
+            TJResourceLogger.w(
+                "(TJLabsWarpMultiResourceManager) zip download exception: ${e.javaClass.simpleName}: ${e.message ?: e.toString()}"
+            )
             runCatching { tmp.delete() }
             null
         }
