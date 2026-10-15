@@ -718,6 +718,57 @@ interface TJLabsWarpResourceManagerDelegate {
     fun onWarpError(error: ResourceError)
 }
 
+/**
+ * Warp 멀티 섹터 로드 (TJ-620) 결과를 받는 delegate. 섹터별 콜백이 분기되는 점이 single
+ * delegate 와 다르다 — 하나의 조합 요청에서 1~5개 섹터가 각각 성공/실패할 수 있다.
+ *
+ * [TJLabsWarpMultiResourceManager.loadResources] 가 섹터별로 1회 호출. 모든 섹터 처리가
+ * 끝나면 completion 콜백으로 집계 결과 전달.
+ */
+interface TJLabsWarpMultiResourceManagerDelegate {
+    /** 성공한 섹터의 Warp 번들 데이터. */
+    fun onWarpMultiSectorData(sectorId: Int, data: WarpSectorOutput)
+
+    /** 섹터별 실패. [sectorId] 가 null 이면 조합 전체 실패 (metadata/zip 다운로드 실패 등). */
+    fun onWarpMultiError(sectorId: Int?, error: ResourceError)
+}
+
+/**
+ * Warp 멀티 섹터 로드 입력 — telemetry 용으로 result 에 다시 담겨 반환.
+ */
+data class MultiWarpResourceLoadInput(
+    val provider: String,
+    val region: String,
+    val env: ResourceServerEnv,
+    val sectorIds: List<Int>,
+    val forceUpdate: Boolean
+)
+
+/** Warp 멀티 섹터 로드 중 섹터 단위 결과 (iOS 와 동일 개념). */
+data class WarpSectorLoadResult(
+    val sectorId: Int,
+    val isSuccess: Boolean,
+    val data: WarpSectorOutput?,
+    val error: ResourceError?,
+    val versionId: String,
+    val isCached: Boolean
+)
+
+/**
+ * Warp 멀티 섹터 로드 완료 콜백 결과. 모든 섹터가 성공한 경우에만 `isSuccess=true`.
+ */
+data class MultiWarpResourceLoadResult(
+    val isSuccess: Boolean,
+    val message: String,
+    val input: MultiWarpResourceLoadInput,
+    val versionId: String?,
+    val isCached: Boolean,
+    val sectorResults: List<WarpSectorLoadResult>,
+    val metadataFetchMs: Long = 0L,
+    val zipDownloadMs: Long = 0L,
+    val totalMs: Long = 0L
+)
+
 interface TJLabsVenusResourceManagerDelegate {
     fun onVenusSectorData(data: VenusSectorOutput)
     fun onVenusError(error: ResourceError)

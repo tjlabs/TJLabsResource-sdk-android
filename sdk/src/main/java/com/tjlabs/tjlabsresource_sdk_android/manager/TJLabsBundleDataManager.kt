@@ -2759,7 +2759,7 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
-    private fun parseWarpSector(root: JSONObject): WarpSectorOutput {
+    internal fun parseWarpSector(root: JSONObject): WarpSectorOutput {
         val buildings = mutableListOf<WarpBuildingOutput>()
         val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
         for (i in 0 until buildingsJson.length()) {
