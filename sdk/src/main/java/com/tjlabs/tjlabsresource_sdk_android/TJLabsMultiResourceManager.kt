@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.tjlabs.tjlabsresource_sdk_android.manager.BundleDataSnapshot
 import com.tjlabs.tjlabsresource_sdk_android.manager.TJLabsBundleDataManager
+import com.tjlabs.tjlabsresource_sdk_android.onprem.OnPremRoutingState
 import com.tjlabs.tjlabsresource_sdk_android.util.TJResourceLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -247,7 +248,16 @@ object TJLabsMultiResourceManager {
             // 서버 요구 (`sector_ids=20&sector_ids=112`) 를 그대로 만족. forceUpdate 는 아직
             // 쿼리 반영 안 함 — iOS 는 `_rt=<now>` + Cache-Control 로 중간 캐시 우회하나,
             // Android 는 OkHttp 캐시를 쓰지 않아 (Retrofit 기본) 생략.
-            val call: Call<SectorBundleMetaOutput> = api.getSectorBundleV2(serverVersion, sectorIds)
+            // On-prem (하나 PMS): cloud 의 `{server_version}/sectors/bundle` 은 존재하지 않는다 → on-prem 명세
+            //   (Notion TJ-360 § 1. 번들) `v2/jupiter/sectors/bundle?sector_ids=...` 로 분기. 응답 shape
+            //   (`{url, version_id}` + zip) 이 동일해서 이후 다운로드 · processArchive 는 그대로 공유.
+            //   Jupiter SDK 는 단일 섹터 init 도 이 로더를 경유하므로 이 분기가 없으면 on-prem Jupiter init 이
+            //   `stage=SECTOR_BUNDLE_METADATA` 로 실패한다.
+            val call: Call<SectorBundleMetaOutput> = if (OnPremRoutingState.isEnabled) {
+                api.getJupiterBundleOnPrem(sectorIds)
+            } else {
+                api.getSectorBundleV2(serverVersion, sectorIds)
+            }
             call.enqueue(object : Callback<SectorBundleMetaOutput> {
                 override fun onResponse(call: Call<SectorBundleMetaOutput>, response: Response<SectorBundleMetaOutput>) {
                     if (response.isSuccessful) {

@@ -85,6 +85,18 @@ internal interface PostInput {
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 
+    // 2026-10-19 추가: 하나 운영 Jupiter bundle endpoint (Notion TJ-360 § 1. 번들).
+    //   `GET /api/v2/jupiter/sectors/bundle?sector_ids=X&operating_system=Android` — baseUrl 에 `/api`
+    //   prefix 가 포함되므로 relative path 는 `v2/jupiter/...` 로 시작 (`v2/warp` / `v2/venus` 와 동일 convention).
+    //   응답 shape 은 cloud `getSectorBundleV2` 와 동일 (`{url, version_id}` + zip 다운로드).
+    //   sectorIds 는 반복 키로 (`sector_ids=1&sector_ids=2`), 1~10개 지원. SDK 는 단일 sector 호출 (`[sectorId]`)
+    //   을 쓰므로 `List<Int>` 로 받는다.
+    @GET("v2/jupiter/sectors/bundle")
+    fun getJupiterBundleOnPrem(
+        @Query("sector_ids") sectorIds: List<Int>,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
     // 2026-09-28+ 흐름에서는 bundle 파일 다운로드가 Retrofit 을 거치지 않고
     // [TJLabsBundleDataManager.downloadBundleFile] 이 HttpURLConnection 으로 직접 스트리밍한다
     // (40MB 급 zip 이라 ResponseBody.string() 로 통째로 메모리에 올리면 부담이 크다).
