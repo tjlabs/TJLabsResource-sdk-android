@@ -6,6 +6,23 @@ import retrofit2.http.Headers
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+/**
+ * Resource SDK 가 사용하는 Retrofit 엔드포인트 모음. **cloud 와 on-prem (하나 PMS) 두 경로** 가
+ * 공존한다 — 어떤 함수를 호출할지는 [TJLabsBundleDataManager.requestBundleMeta] 가
+ * `OnPremRoutingState.isEnabled` 로 분기해서 결정.
+ *
+ * - **Cloud 경로**: `getSectorBundle`, `getSectorBundleV2`, `getSectorWarpBundle`,
+ *   `getSectorLiteBundle`. baseUrl 은 `TJLabsResourceNetworkConstants.USER_URL` 또는
+ *   `WARP_USER_URL` (TJ-620 이후 둘 다 Jupiter 올림푸스 도메인).
+ *
+ * - **On-prem (하나 PMS) 경로**: `getWarpBundleOnPrem`, `getVenusBundleOnPrem`. baseUrl 은
+ *   `OnPremRoutingState.baseUrl` (= `TJHanaEnvironment.setBaseUrl(...)` 값).
+ *   `v2/warp/...` / `v2/venus/...` 접두어 고정이고 TJ-620 변경과 무관. 하나은행 PMS 서버 쪽에서
+ *   deprecate 되지 않는 한 그대로 유지한다.
+ *
+ * 두 그룹을 섞어 호출하면 안 된다 — baseUrl 과 토큰 체계가 다르므로 반드시 분기 블록 안에서만
+ * 사용. 신규 cloud endpoint 추가 시 기존 on-prem 함수에 영향 없는지 확인.
+ */
 internal interface PostInput {
     @Headers(
         "accept: application/json",
@@ -29,6 +46,17 @@ internal interface PostInput {
         @Query("sector_ids") sectorIds: List<Int>,
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
+
+    // TJ-620 (2026-10-07+): Warp 전용 신규 endpoint. Jupiter 통합 도메인에서 `/sectors/warp-bundle`
+    //   을 호출하고, zip 응답(`{url, version_id}`) 을 돌려받는다. Jupiter V2 와 달리 단일 sector 만
+    //   필요한 K-BOS·Hana 소비자를 위해 호출측이 `[sectorId]` 로 넣어 쓴다.
+    @GET("/{server_version}/sectors/warp-bundle")
+    fun getSectorWarpBundle(
+        @Path("server_version") serverVersion: String,
+        @Query("sector_ids") sectorIds: List<Int>,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
 
     @GET("/{server_version}/sectors/{pk}/bundle/lite")
     fun getSectorLiteBundle(
@@ -54,6 +82,18 @@ internal interface PostInput {
     @GET("v2/venus/sectors/{pk}/bundle")
     fun getVenusBundleOnPrem(
         @Path("pk") pk: Int,
+        @Query("operating_system") os: String = "Android",
+    ): Call<SectorBundleMetaOutput>
+
+    // 2026-10-19 추가: 하나 운영 Jupiter bundle endpoint (Notion TJ-360 § 1. 번들).
+    //   `GET /api/v2/jupiter/sectors/bundle?sector_ids=X&operating_system=Android` — baseUrl 에 `/api`
+    //   prefix 가 포함되므로 relative path 는 `v2/jupiter/...` 로 시작 (`v2/warp` / `v2/venus` 와 동일 convention).
+    //   응답 shape 은 cloud `getSectorBundleV2` 와 동일 (`{url, version_id}` + zip 다운로드).
+    //   sectorIds 는 반복 키로 (`sector_ids=1&sector_ids=2`), 1~10개 지원. SDK 는 단일 sector 호출 (`[sectorId]`)
+    //   을 쓰므로 `List<Int>` 로 받는다.
+    @GET("v2/jupiter/sectors/bundle")
+    fun getJupiterBundleOnPrem(
+        @Query("sector_ids") sectorIds: List<Int>,
         @Query("operating_system") os: String = "Android",
     ): Call<SectorBundleMetaOutput>
 

@@ -473,7 +473,7 @@ internal class TJLabsBundleDataManager {
 
             // 파싱/네트워크 IO 는 IO 스레드에서 수행, 메인 스레드 점유 제거.
             CoroutineScope(Dispatchers.IO).launch {
-                val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+                val isV2ZipFlow = isZipBundleFlow(bundleType, useLegacyEndpoint)
 
                 // v2 zip 흐름 전용: zip 을 로컬 디렉토리에 풀어 개별 자원 파일로 노출. 실패 시 null →
                 // enrichCsvData 가 zipPath fallback (또는 URL fetch) 로 진행한다.
@@ -483,12 +483,12 @@ internal class TJLabsBundleDataManager {
                 //   disk-cache hit (같은 version 이 확정된 zip) 경우에만 marker 존재 시 재사용 최적화가 유효.
                 fun ensureExtractedAssetsRoot(zipFile: File, forceReExtract: Boolean = false): File? {
                     if (!isV2ZipFlow) return null
-                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                     if (!forceReExtract) {
                         val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
                         if (marker.exists() && marker.length() > 0) return extractRoot
                     }
-                    return extractBundleZipToDisk(application, sectorId, zipFile)
+                    return extractBundleZipToDisk(application, bundleType, sectorId, zipFile)
                 }
 
                 fun bundleZipPathIfJupiter(file: File): String? =
@@ -721,12 +721,12 @@ internal class TJLabsBundleDataManager {
             //   stale — 반드시 재-extract. false 는 disk cache hit 로 zip 내용이 안 바뀐 상태 → 기존 extract 재사용 가능.
             fun onZipReady(zipFile: File, freshlyDownloaded: Boolean) {
                 CoroutineScope(Dispatchers.IO).launch {
-                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                    val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                     val marker = File(extractRoot, "sectors/$sectorId/bundle.json")
                     val assetsRoot = if (!freshlyDownloaded && marker.exists() && marker.length() > 0) {
                         extractRoot
                     } else {
-                        extractBundleZipToDisk(application, sectorId, zipFile)
+                        extractBundleZipToDisk(application, bundleType, sectorId, zipFile)
                     }
                     val bundleJson = readBundleJsonFromFile(bundleType, sectorId, zipFile, useLegacyEndpoint = false, extractedRoot = assetsRoot)
                     if (bundleJson.isNullOrBlank()) {
@@ -801,19 +801,32 @@ internal class TJLabsBundleDataManager {
             }
 
             val api = retrofit.create(PostInput::class.java)
+            // ============================================================
+            //  Cloud 와 On-prem (하나 PMS) 라우팅은 완전히 분리된 두 경로.
+            //  OnPremRoutingState.isEnabled 는 `TJHanaEnvironment.setBaseUrl(...)` 가 호출된 뒤에만
+            //  true 가 되고, cloud 소비자 (`TJHanaEnvironment.useCloudForTesting` 또는 SDK 를 직접
+            //  쓰는 K-BOS 등) 에서는 항상 false. 양 분기가 서로 영향 주지 않도록 동일 bundleType 에
+            //  대해 완전히 다른 endpoint 를 사용한다 — TJ-620 변경은 cloud 분기만 수정.
+            // ============================================================
             val call = if (OnPremRoutingState.isEnabled) {
-                // On-prem PMS 는 서비스별 접두어 endpoint (`/v2/warp`, `/v2/venus`) 를 쓴다.
-                // 응답 body 는 cloud 와 동일 (`SectorBundleMetaOutput` 재사용). JUPITER 는
-                // on-prem 스펙 미확정이라 실패시킴 — 호출측이 warp/venus 만 로드하도록 스코프.
+                // ---- On-prem (하나 PMS) 경로 — TJ-620 수정 영향 없음 ----
+                // 서비스별 접두어 endpoint (`/v2/warp`, `/v2/venus`) 를 쓴다. baseUrl 은
+                // `TJHanaEnvironment.DEFAULT_HANA_BASE_URL` 또는 `setBaseUrl(...)` 에서 지정한 값.
+                // 응답 body 는 cloud 와 동일 (`SectorBundleMetaOutput` 재사용). WARP/VENUS 는 flat JSON,
+                // JUPITER 는 `v2/jupiter/sectors/bundle` zip (멀티 로더 requestMultiMeta 와 동일 endpoint).
+                // ⚠ 이 블록을 수정할 때는 하나 데모앱 (TJHana-sdk-android/app) 과 하나 PMS 서버의
+                //    실측 호환을 반드시 유지해야 한다. 레거시 endpoint 는 PMS 운영 서버 쪽에서
+                //    deprecate 되지 않는 한 그대로 유지.
                 when (bundleType) {
                     ResourceBundleType.WARP -> api.getWarpBundleOnPrem(sectorId)
                     ResourceBundleType.VENUS -> api.getVenusBundleOnPrem(sectorId)
-                    ResourceBundleType.JUPITER -> {
-                        completion(501, "(TJLabsResource) on-prem JUPITER endpoint not implemented", null)
-                        return@genRetrofit
-                    }
+                    // 2026-10-19: 하나 운영 Jupiter bundle (Notion TJ-360 § 1. 번들).
+                    //   `v2/jupiter/sectors/bundle?sector_ids=X&operating_system=Android` zip 응답.
+                    //   SDK 는 단일 sector 호출이므로 `[sectorId]` 로 wrap. 응답 shape 은 cloud V2 와 동일.
+                    ResourceBundleType.JUPITER -> api.getJupiterBundleOnPrem(listOf(sectorId))
                 }
             } else {
+                // ---- Cloud 경로 ----
                 when (bundleType) {
                     ResourceBundleType.VENUS -> api.getSectorLiteBundle(serverVersion, sectorId)
                     ResourceBundleType.JUPITER -> if (useLegacyEndpoint) {
@@ -825,8 +838,12 @@ internal class TJLabsBundleDataManager {
                         // 을 준수해 조합별 재빌드 지연을 피한다.
                         api.getSectorBundleV2(serverVersion, listOf(sectorId))
                     }
-                    // WARP 는 별도 인프라(.warp.tjlabs.dev, server_version=2026-04-27) 라 zip 스펙 미적용 → 기존 endpoint 유지.
-                    ResourceBundleType.WARP -> api.getSectorBundle(serverVersion, sectorId)
+                    // TJ-620 (2026-10): WARP cloud 전용 신 endpoint — Jupiter 통합 올림푸스 도메인
+                    //   + `/sectors/warp-bundle?sector_ids=...&operating_system=Android`.
+                    //   On-prem 경로는 위 if 블록의 getWarpBundleOnPrem 이 전담하므로 이 라인은
+                    //   cloud 트래픽에만 영향. (레거시 cloud `getSectorBundle` 로 호출하던 코드는
+                    //   TJ-620 이전 자료를 반환하는 서버 쪽 엔드포인트가 더 이상 보장되지 않음.)
+                    ResourceBundleType.WARP -> api.getSectorWarpBundle(serverVersion, listOf(sectorId))
                 }
             }
             fun scheduleRetry(reason: String) {
@@ -1623,12 +1640,12 @@ internal class TJLabsBundleDataManager {
         }
 
         CoroutineScope(Dispatchers.IO).launch {
-            val isV2ZipFlow = bundleType == ResourceBundleType.JUPITER && !useLegacyEndpoint
+            val isV2ZipFlow = isZipBundleFlow(bundleType, useLegacyEndpoint)
             val extractedRoot = if (isV2ZipFlow) {
-                val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+                val root = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
                 val marker = File(root, "sectors/$sectorId/bundle.json")
                 if (marker.exists() && marker.length() > 0) root
-                else extractBundleZipToDisk(application, sectorId, rawFile)
+                else extractBundleZipToDisk(application, bundleType, sectorId, rawFile)
             } else null
             val bundleJson = readBundleJsonFromFile(bundleType, sectorId, rawFile, useLegacyEndpoint, extractedRoot)
             if (bundleJson == null) {
@@ -1782,6 +1799,16 @@ internal class TJLabsBundleDataManager {
             return null
         }
 
+        // 1.1.23 은 on-prem WARP(JSON) 도 bundle_warp_{id}.zip 으로 저장했다. 현재 파일명 규칙과 다르면
+        // miss 처리해 bundle_warp_{id}.json 으로 재다운로드하고, 이전 이름의 파일은 정리한다.
+        if (bundleType == ResourceBundleType.WARP && rawFile.name != buildBundleRawFileName(bundleType, sectorId)) {
+            TJResourceLogger.d(
+                "(TJLabsResource) bundle raw cache name mismatch // type=$bundleType // sectorId=$sectorId // path=$savedPath"
+            )
+            runCatching { rawFile.delete() }
+            return null
+        }
+
         TJResourceLogger.d(
             "(TJLabsResource) bundle raw cache hit // type=$bundleType // sectorId=$sectorId // version=${meta.version_id} // path=${rawFile.absolutePath} // bytes=${rawFile.length()}"
         )
@@ -1794,6 +1821,21 @@ internal class TJLabsBundleDataManager {
      * - JUPITER v1 (useLegacyEndpoint=true, JSON): 파일 전체를 String 으로 읽음.
      * - VENUS/WARP (JSON): 파일 전체를 String 으로 읽음.
      */
+    /**
+     * bundle raw 파일이 zip 스키마인지 판정 (extract · zip entry read 여부 결정).
+     * - JUPITER: v2 (cloud `sectors/bundle`, on-prem `v2/jupiter/sectors/bundle`) 모두 zip. v1 legacy 는 JSON.
+     * - WARP: cloud (TJ-620 `sectors/warp-bundle`) 만 zip. on-prem `v2/warp/sectors/{pk}/bundle` 은 여전히
+     *   flat JSON 이므로 1.1.22 와 동일한 JSON 흐름 유지 — zip 으로 취급하면 bundleZipPath 가 JSON 파일을
+     *   가리켜 path CSV 등 URL 참조가 zip entry read 로 빠지고 HTTP fallback 을 잃는다.
+     * - VENUS: 항상 JSON.
+     */
+    private fun isZipBundleFlow(bundleType: ResourceBundleType, useLegacyEndpoint: Boolean): Boolean =
+        when (bundleType) {
+            ResourceBundleType.JUPITER -> !useLegacyEndpoint
+            ResourceBundleType.WARP -> !OnPremRoutingState.isEnabled
+            ResourceBundleType.VENUS -> false
+        }
+
     private fun readBundleJsonFromFile(
         bundleType: ResourceBundleType,
         sectorId: Int,
@@ -1815,7 +1857,18 @@ internal class TJLabsBundleDataManager {
                     }
                     else -> readZipEntryText(file, "sectors/$sectorId/bundle.json")
                 }
-                ResourceBundleType.VENUS, ResourceBundleType.WARP -> file.readText()
+                // TJ-620: WARP cloud 응답은 Jupiter V2 처럼 zip (단일 entry `sectors/{id}/bundle.json`).
+                //   cloud zip(bundle_warp_{id}.zip) 은 ZipFile 로 열고, on-prem flat JSON(bundle_warp_{id}.json,
+                //   `getWarpBundleOnPrem`) 은 raw text. 1.1.23 에서 on-prem 도 .zip 이름으로 저장된 캐시가 남아
+                //   있을 수 있어 확장자가 아닌 파일 머리 (ZIP 매직 `PK`) 로 판정한다.
+                ResourceBundleType.WARP -> {
+                    if (looksLikeZip(file)) {
+                        readZipEntryText(file, "sectors/$sectorId/bundle.json")
+                    } else {
+                        file.readText()
+                    }
+                }
+                ResourceBundleType.VENUS -> file.readText()
             }
         } catch (e: Exception) {
             TJResourceLogger.d(
@@ -1835,10 +1888,11 @@ internal class TJLabsBundleDataManager {
      */
     private fun extractBundleZipToDisk(
         application: Application,
+        bundleType: ResourceBundleType,
         sectorId: Int,
         zipFile: File
     ): File? {
-        val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted")
+        val extractRoot = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}/extracted_${bundleType.name.lowercase()}")
         // stale 방지 — 이전 version 의 extract 흔적을 완전히 제거.
         runCatching { if (extractRoot.exists()) extractRoot.deleteRecursively() }
         if (!extractRoot.mkdirs()) {
@@ -1912,10 +1966,11 @@ internal class TJLabsBundleDataManager {
         val sectorDir = File(application.cacheDir, "$CSV_DIR/${buildSectorCacheFolderName(sectorId)}")
         val zipName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = false)
         val jsonName = buildBundleRawFileName(ResourceBundleType.JUPITER, sectorId, useLegacyEndpoint = true)
-        val warpName = buildBundleRawFileName(ResourceBundleType.WARP, sectorId)
+        val warpZipName = "bundle_warp_${sectorId}.zip"
+        val warpJsonName = "bundle_warp_${sectorId}.json"
         val venusName = buildBundleRawFileName(ResourceBundleType.VENUS, sectorId)
-        val keepFiles = setOf(zipName, jsonName, warpName, venusName)
-        val keepDirs = setOf("extracted", "simulations")
+        val keepFiles = setOf(zipName, jsonName, warpZipName, warpJsonName, venusName)
+        val keepDirs = setOf("extracted", "extracted_jupiter", "extracted_warp", "extracted_venus", "simulations")
         var fileRemoved = 0
         runCatching {
             sectorDir.listFiles()?.forEach { child ->
@@ -1936,6 +1991,24 @@ internal class TJLabsBundleDataManager {
      * ZipFile 은 random-access 라 전체 zip 을 메모리에 올리지 않고 필요한 entry 만 스트림한다.
      * 압축 해제된 파일이 있으면 우선 그것을 사용하고, 없을 때만 zip 열기로 fallback.
      */
+    /**
+     * ZIP 매직 넘버 (`PK\x03\x04`) 로 파일을 식별. WARP 처럼 cloud(zip) 와 on-prem(json) 응답이
+     * 동일 파일명을 공유하는 경우 확장자가 아닌 실제 바이트로 분기해야 안전.
+     */
+    private fun looksLikeZip(file: File): Boolean {
+        if (!file.isFile || file.length() < 4) return false
+        return try {
+            file.inputStream().use { input ->
+                val b = ByteArray(4)
+                val n = input.read(b)
+                n >= 4 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte()
+                    && (b[2] == 0x03.toByte() || b[2] == 0x05.toByte() || b[2] == 0x07.toByte())
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun readZipEntryText(zipFile: File, entryPath: String): String? {
         if (zipFile.exists().not()) return null
         return try {
@@ -1999,7 +2072,10 @@ internal class TJLabsBundleDataManager {
             // v1 (useLegacyEndpoint=true) 은 JSON 응답이므로 별도 파일명(.json) 으로 저장해 v2 캐시와 격리.
             ResourceBundleType.JUPITER -> if (useLegacyEndpoint) "bundle_v1_${sectorId}.json" else "bundle_${sectorId}.zip"
             ResourceBundleType.VENUS -> "bundle_venus_${sectorId}.json"
-            ResourceBundleType.WARP -> "bundle_warp_${sectorId}.json"
+            // TJ-620 (2026-10-07+): WARP cloud 응답도 zip. ZipFile 로 random-access 하기 위해 .zip 확장자로 저장.
+            //   On-prem 경로(v2/warp/.../bundle)는 1.1.22 이전과 동일한 flat JSON 응답이므로 기존 파일명
+            //   bundle_warp_{id}.json 을 유지한다 (isZipBundleFlow 가 on-prem WARP 를 JSON 흐름으로 고정).
+            ResourceBundleType.WARP -> if (OnPremRoutingState.isEnabled) "bundle_warp_${sectorId}.json" else "bundle_warp_${sectorId}.zip"
         }
     }
 
@@ -2707,7 +2783,7 @@ internal class TJLabsBundleDataManager {
         return result
     }
 
-    private fun parseWarpSector(root: JSONObject): WarpSectorOutput {
+    internal fun parseWarpSector(root: JSONObject): WarpSectorOutput {
         val buildings = mutableListOf<WarpBuildingOutput>()
         val buildingsJson = root.optJSONArray("buildings") ?: JSONArray()
         for (i in 0 until buildingsJson.length()) {

@@ -133,6 +133,7 @@ class TJLabsResourceManager {
      *  JSON) 를 강제 호출해 zip 스키마와 소요·용량 비교 목적으로 사용한다. 프로덕션 코드는 기본값(false) 을 사용.
      *  v1 호출은 in-memory / 디스크 캐시를 우회해 매번 fresh fetch 하고, v2 캐시를 오염시키지도 않는다.
      */
+    @JvmOverloads
     fun loadJupiterResource(
         application: Application,
         provider: String,
@@ -147,6 +148,7 @@ class TJLabsResourceManager {
         loadResourceByType(ResourceBundleType.JUPITER, application, provider, region, sectorId, env, imageLoadPolicy, useLegacyEndpoint, completion)
     }
 
+    @JvmOverloads
     fun loadVenusResource(
         application: Application,
         provider: String,
@@ -160,7 +162,39 @@ class TJLabsResourceManager {
     }
 
     /**
-     * WARP 는 AWS 기반 별도 인프라라 env 스위칭 대상 아님 → env 파라미터 없음.
+     * Warp 섹터 번들을 로드한다.
+     *
+     * ## 라우팅 (2026-10 TJ-620 반영)
+     * - **Cloud 경로** (Hana 데모·K-BOS 등 cloud auth 사용자):
+     *   `{host}/{WARP_SECTOR_BUNDLE_SERVER_VERSION}/sectors/warp-bundle?sector_ids=X&operating_system=Android`
+     *   host 는 `TJLabsResourceNetworkConstants.setServerURL(provider, region, env)` 로 결정되고
+     *   Jupiter 와 동일한 올림푸스 도메인 (`.jupiter.tjlabs(corp.com|.dev)`) 을 공유. env (PROD/DEV)
+     *   스위칭이 적용된다 — 이 함수의 [env] 파라미터가 그 분기를 결정.
+     *
+     * - **On-prem 경로** (하나은행 PMS 등 `OnPremRoutingState.isEnabled == true` 상태):
+     *   `{on-prem baseUrl}/v2/warp/sectors/{pk}/bundle`
+     *   이 함수의 [provider] / [region] / [env] 는 무시되고 (on-prem baseUrl 이 모든 라우팅을 결정)
+     *   `TJHanaEnvironment.setBaseUrl(...)` 호출 시점에 세팅된 서버로 간다. 토큰은 jupiter-sdk 가
+     *   on-prem auth 로 발급한 값을 `TJLabsResourceNetworkConstants.genRetrofit` 가 자동 주입.
+     *
+     * **TJ-620 수정은 cloud 경로만 바꿨고 on-prem 경로는 완전히 분리되어 영향 없음.**
+     * On-prem 소비자는 이 SDK 를 bump 해도 기존 동작을 그대로 유지한다. 신규 [env] 파라미터는
+     * default (`ResourceServerEnv.PROD`) 가 있어 기존 호출부도 재컴파일 없이 호환.
+     *
+     * loadJupiter·loadVenus 와 동일한 시그니처.
+     */
+    /**
+     * Legacy arity — [env] 없는 호출. Hana SDK 1.1.7 등 과거 시그니처로 compile 된 소비자가 이쪽으로 들어온다.
+     *
+     * ⚠️ `@JvmOverloads` 로 자동 생성한 overload 가 아니라 **명시적 overload** 로 두는 이유:
+     * `@JvmOverloads` 는 생성 overload 안에서 default (`env = PROD`) 를 그대로 넘겨
+     * [TJLabsResourceNetworkConstants.setServerURL] 이 PROD 로 **덮어쓴다**.
+     * K-BOS/Hana 데모처럼 cloud auth 전에 `TJJupiterAuth.setServerConfigForDevelopment(DEV)` 로
+     * constants 를 DEV 로 세팅해둔 상태에서 legacy 호출이 들어오면 Warp 호스트가 PROD 로 바뀌어
+     * DEV 토큰 → PROD 호스트 미스매치 → 401 "Token is invalid or expired".
+     *
+     * 그래서 여기선 [TJLabsResourceNetworkConstants.getCurrentEnv] 로 **마지막으로 세팅된 env** 를
+     * 복원해 그대로 넘긴다 — K-BOS 가 사전에 DEV 로 설정했다면 그 상태를 유지.
      */
     fun loadWarpResource(
         application: Application,
@@ -169,10 +203,30 @@ class TJLabsResourceManager {
         sectorId: Int,
         completion: (Boolean, ResourceLoadInfo?) -> Unit
     ) {
-        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId")
-        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, ResourceServerEnv.PROD, completion = completion)
+        val inherited = TJLabsResourceNetworkConstants.getCurrentEnv()
+        TJResourceLogger.d(
+            "(TJLabsResource) loadWarpResource request (legacy arity, inherit env=$inherited) // provider=$provider // region=$region // sectorId=$sectorId"
+        )
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, inherited, completion = completion)
     }
 
+    /**
+     * 명시적 [env] arity — 신규 소비자. (default 를 두면 위 legacy overload 와 ambiguous 호출이 되므로
+     * 여기선 default 없이 필수 파라미터로 둔다.)
+     */
+    fun loadWarpResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        env: ResourceServerEnv,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, env, completion = completion)
+    }
+
+    @JvmOverloads
     fun loadResource(
         application: Application,
         provider: String,

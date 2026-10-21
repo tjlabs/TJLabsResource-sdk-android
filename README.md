@@ -137,3 +137,54 @@ Safety policy:
 - If remote branch `chore/bump-auth-x.y.z` already exists, workflow exits safely (no reset/force push).
 - Ongoing feature/release branches are not modified by this workflow.
 - Live API smoke test is intentionally excluded.
+
+## Deployment modes: cloud vs on-prem (하나 PMS)
+
+The SDK supports two mutually-exclusive routing modes. **TJ-620 (2026-10) changes affect
+cloud only** — on-prem consumers (하나은행 PMS 등) are not impacted by any changes in
+`1.1.23+`.
+
+### Cloud mode (K-BOS, demo apps, TJLabs internal use)
+
+Activated by calling `TJLabsAuthManager.setClientSecret(...)` + `TJLabsResourceNetworkConstants.setServerURL(provider, region, env)` (indirectly through `TJHanaEnvironment.useCloudForTesting` or `TJJupiterAuth.setServerConfig*`).
+
+- Base URL: `https://{regionPrefix}.user.jupiter.{tjlabscorp.com | tjlabs.dev}`
+  (`currentOlympusSuffix` chooses between PROD/DEV).
+- Endpoints:
+  - Jupiter (v2): `GET /{2026-10-12}/sectors/bundle?sector_ids=...`
+  - Venus:        `GET /{2026-04-27}/sectors/{pk}/bundle/lite`
+  - **Warp (TJ-620):** `GET /{2026-10-07}/sectors/warp-bundle?sector_ids=...`
+    — moved from the legacy `.warp.tjlabs.dev` AWS infrastructure to the unified
+    Jupiter olympus domain. Supports env (PROD/DEV) switching via `loadWarpResource(env=...)`.
+- Auth: `TJLabsAuthManager.getAccessToken()` injects a Jupiter cloud bearer.
+
+### On-prem mode (하나 PMS)
+
+Activated by calling `TJHanaEnvironment.setBaseUrl(...)` which enables
+`OnPremRoutingState`. Mutually exclusive with cloud mode — the latest call wins and
+the other side is cleared defensively.
+
+- Base URL: whatever is passed to `setBaseUrl` (default
+  `https://hqsw.hanafn.com:18443/api/v1/sdk-proxy/api`).
+- Endpoints (service-prefixed, **not affected by TJ-620**):
+  - Warp:  `GET {baseUrl}/v2/warp/sectors/{pk}/bundle`
+  - Venus: `GET {baseUrl}/v2/venus/sectors/{pk}/bundle`
+  - Jupiter: not supported on-prem (501 returned if attempted).
+- Auth: on-prem access token owned by jupiter-sdk (`OnPremAuthState`), injected per
+  request by `TJLabsResourceNetworkConstants.genRetrofit`.
+
+### Guarantees for on-prem consumers upgrading past 1.1.22
+
+- `getWarpBundleOnPrem` / `getVenusBundleOnPrem` endpoints are unchanged.
+- `OnPremRoutingState.isEnabled` branch in `TJLabsBundleDataManager.requestBundleMeta`
+  is untouched.
+- Hostname verifier (`onPremScopedHostnameVerifier`) and TLS behaviour unchanged.
+- Response schema (`SectorBundleMetaOutput`) is shared with cloud but was already
+  compatible — no field was added that on-prem servers do not populate.
+- `loadWarpResource` added an optional `env` parameter with default
+  `ResourceServerEnv.PROD`. On-prem call sites that don't pass `env` behave exactly
+  as before (the parameter is irrelevant in on-prem routing anyway — `baseUrl` wins).
+
+Whenever changing the cloud path in `TJLabsBundleDataManager.requestBundleMeta`, keep
+all mutations outside the `if (OnPremRoutingState.isEnabled) { ... }` block to avoid
+regressing the PMS deployment.
