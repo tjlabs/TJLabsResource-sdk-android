@@ -1,0 +1,206 @@
+name: Release On Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip tag/release creation and only validate flow"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: release-on-merge-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Extract version tag (without v prefix)
+        id: version
+        shell: bash
+        run: |
+          MAJOR=$(grep -E '^val versionMajor = ' sdk/build.gradle.kts | awk '{print $4}')
+          MINOR=$(grep -E '^val versionMinor = ' sdk/build.gradle.kts | awk '{print $4}')
+          PATCH=$(grep -E '^val versionPatch = ' sdk/build.gradle.kts | awk '{print $4}')
+
+          if [[ -z "$MAJOR" || -z "$MINOR" || -z "$PATCH" ]]; then
+            echo "Failed to parse version from sdk/build.gradle.kts"
+            exit 1
+          fi
+
+          TAG="${MAJOR}.${MINOR}.${PATCH}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}"
+
+      - name: Ensure tag does not already exist
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${{ steps.version.outputs.tag }}"
+            exit 1
+          fi
+
+      - name: Publish Check To Maven Local
+        run: ./gradlew :sdk:publishToMavenLocal -x test --stacktrace --no-daemon
+
+      - name: Create and push tag
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+
+      - name: Trigger JitPack build
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          URL="https://jitpack.io/com/github/${{ github.repository }}/${{ steps.version.outputs.tag }}/build.log"
+          echo "Trigger URL: ${URL}"
+          curl -fsSL "${URL}" | head -n 80 || true
+
+      - name: Wait for JitPack build to finish
+        id: jitpack
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        run: |
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          TAG="${{ steps.version.outputs.tag }}"
+          API="https://jitpack.io/api/builds/com.github.${REPO_OWNER}/${REPO_NAME}/${TAG}"
+          echo "Polling: ${API}"
+
+          # JitPack build status: "ok" = success, "Error" = failure, null/empty = still building
+          MAX_ATTEMPTS=60   # 60 * 10s = 10 min
+          SLEEP=10
+          STATUS=""
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            RESP=$(curl -fsSL "$API" 2>/dev/null || echo '{}')
+            STATUS=$(echo "$RESP" | jq -r '.status // ""' 2>/dev/null || echo '')
+            echo "attempt ${i}/${MAX_ATTEMPTS}: status='${STATUS}'"
+            case "$STATUS" in
+              ok|OK|Ok)
+                echo "status=ok" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              Error|ERROR|error)
+                echo "status=error" >> "$GITHUB_OUTPUT"
+                echo "::error::JitPack build failed for ${TAG}"
+                exit 1
+                ;;
+            esac
+            sleep $SLEEP
+          done
+          echo "status=timeout" >> "$GITHUB_OUTPUT"
+          echo "::error::JitPack build polling timed out for ${TAG}"
+          exit 1
+
+      - name: Dry-run summary
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "[DRY-RUN] release flow validated."
+          echo "[DRY-RUN] parsed tag=${{ steps.version.outputs.tag }}"
+          echo "[DRY-RUN] skipped tag push, GitHub Release, and JitPack trigger."
+
+      - name: Notify Slack (Dry-run Test)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skip Slack notification."
+            exit 0
+          fi
+          TAG="${{ steps.version.outputs.tag }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(cat <<EOF
+          {
+            "text": "🧪 Resource 배포 Dry-run 알림\n- repo: ${{ github.repository }}\n- parsed tag: ${TAG}\n- run: ${RUN_URL}\n- note: 태그/릴리즈/JitPack 배포는 수행하지 않음"
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
+      - name: Notify Slack (Success)
+        if: ${{ success() && github.event.inputs.dry_run != 'true' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skip Slack notification."
+            exit 0
+          fi
+          TAG="${{ steps.version.outputs.tag }}"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(cat <<EOF
+          {
+            "text": "✅ Resource 배포 완료\n- repo: ${{ github.repository }}\n- tag: ${TAG}\n- release: ${RELEASE_URL}\n- run: ${RUN_URL}"
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
+      - name: Notify Slack (Failure)
+        if: ${{ failure() && github.event.inputs.dry_run != 'true' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [[ -z "${SLACK_WEBHOOK_URL}" ]]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skip Slack notification."
+            exit 0
+          fi
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          payload=$(cat <<EOF
+          {
+            "text": "❌ Resource 배포 실패\n- repo: ${{ github.repository }}\n- run: ${RUN_URL}"
+          }
+          EOF
+          )
+          curl -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
