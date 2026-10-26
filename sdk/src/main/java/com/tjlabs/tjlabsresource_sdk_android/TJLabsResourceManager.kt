@@ -162,6 +162,24 @@ class TJLabsResourceManager {
     }
 
     /**
+     * [imageLoadPolicy] 를 고르는 Venus 로드 (1.1.25+). 층 이미지를 쓰지 않는 소비자(hana-sdk 등)는
+     * [ImageLoadPolicy.NONE] 으로 층 이미지 GET 을 막는다 — 번들 JSON · `map_image` scale/offset 은 그대로 받는다.
+     * 기존 overload 는 그대로 ALL (동작 · ABI 변화 없음). 이미지가 필요해지면 [loadLevelImage] 로 층 하나씩 받는다.
+     */
+    fun loadVenusResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        env: ResourceServerEnv,
+        imageLoadPolicy: ImageLoadPolicy,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit,
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadVenusResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env // imagePolicy=$imageLoadPolicy")
+        loadResourceByType(ResourceBundleType.VENUS, application, provider, region, sectorId, env, imageLoadPolicy, completion = completion)
+    }
+
+    /**
      * Warp 섹터 번들을 로드한다.
      *
      * ## 라우팅 (2026-10 TJ-620 반영)
@@ -224,6 +242,41 @@ class TJLabsResourceManager {
     ) {
         TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env")
         loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, env, completion = completion)
+    }
+
+    /**
+     * [imageLoadPolicy] 를 고르는 Warp 로드 (1.1.25+), env 는 legacy arity 처럼 마지막으로 세팅된 값을 물려받는다.
+     * Warp 감지만 하는 소비자(hana-sdk `TJWarpView`)는 [ImageLoadPolicy.NONE] — 층 이미지 GET 없이
+     * 번들 JSON · `map_image` scale/offset 만 받는다. 기존 overload 는 그대로 ALL.
+     * (env 대신 [ImageLoadPolicy] 를 받아 아래 env overload 와 타입으로 구분돼 모호하지 않다)
+     */
+    fun loadWarpResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        imageLoadPolicy: ImageLoadPolicy,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit
+    ) {
+        val inherited = TJLabsResourceNetworkConstants.getCurrentEnv()
+        TJResourceLogger.d(
+            "(TJLabsResource) loadWarpResource request (inherit env=$inherited) // provider=$provider // region=$region // sectorId=$sectorId // imagePolicy=$imageLoadPolicy"
+        )
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, inherited, imageLoadPolicy, completion = completion)
+    }
+
+    /** [env] · [imageLoadPolicy] 둘 다 고르는 Warp 로드 (1.1.25+) */
+    fun loadWarpResource(
+        application: Application,
+        provider: String,
+        region: String,
+        sectorId: Int,
+        env: ResourceServerEnv,
+        imageLoadPolicy: ImageLoadPolicy,
+        completion: (Boolean, ResourceLoadInfo?) -> Unit
+    ) {
+        TJResourceLogger.d("(TJLabsResource) loadWarpResource request // provider=$provider // region=$region // sectorId=$sectorId // env=$env // imagePolicy=$imageLoadPolicy")
+        loadResourceByType(ResourceBundleType.WARP, application, provider, region, sectorId, env, imageLoadPolicy, completion = completion)
     }
 
     @JvmOverloads
